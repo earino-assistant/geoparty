@@ -67,6 +67,7 @@ export function setConsent(storage, value) {
  *   "string" — short string (room codes, team ids, mode), ≤40 chars
  *   "int"    — finite number, rounded to an integer
  *   "float1" — finite number, rounded to one decimal
+ *   "bool"   — strictly boolean; anything else is stripped, not coerced
  * ================================================================ */
 
 export const EVENT_SCHEMA = Object.freeze({
@@ -79,9 +80,17 @@ export const EVENT_SCHEMA = Object.freeze({
   guess_submitted: {
     room: "string", mode: "string", team_id: "string",
     distance_km: "float1", time_bonus: "int", total_score: "int",
-    time_seconds: "float1",
+    time_seconds: "float1", super_sure: "bool",
   },
   reveal_shown: { room: "string", mode: "string", round_number: "int" },
+  // One event per SUPER SURE bet, fired from the host phone at the reveal
+  // (a burned bet has no guess_submitted — a forfeit is not a guess — and
+  // win/lose is only known at reveal). outcome: "won" | "lost" | "burned";
+  // round_total is the raw round total at stake (0 when burned).
+  super_sure_resolved: {
+    mode: "string", round_number: "int", rounds: "int",
+    outcome: "string", round_total: "int",
+  },
   game_completed: {
     room: "string", mode: "string", rounds: "int", winner_team: "string",
     winning_score: "int", team_count: "int",
@@ -116,6 +125,8 @@ export function sanitizeEvent(event, props) {
       if (typeof v === "string" && v.length > 0 && v.length <= STRING_MAX) {
         clean[key] = v;
       }
+    } else if (type === "bool") {
+      if (typeof v === "boolean") clean[key] = v;
     } else if (typeof v === "number" && Number.isFinite(v)) {
       clean[key] = type === "float1" ? Math.round(v * 10) / 10 : Math.round(v);
     }

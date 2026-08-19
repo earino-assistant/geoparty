@@ -24,6 +24,7 @@ import {
   renderH2HGameOverNote,
   disposeH2H,
 } from "./screen-h2h.js";
+import { adjustedPoints, superSureLabel } from "./supersure.js";
 import { track } from "./consent.js";
 
 const $ = (id) => document.getElementById(id);
@@ -550,6 +551,15 @@ function renderReveal(state) {
   L.circleMarker(guess, {
     radius: 12, color: "#fff", weight: 3, fillColor: "#555", fillOpacity: 1,
   }).addTo(revealMap).bindTooltip("Guess", { permanent: true, direction: "top" });
+  if (round.score.superSure) {
+    // The bet steps out of hiding: verdict halo on the pin (reveal-only).
+    L.circleMarker(guess, {
+      radius: 18, color: "#ffcf3f", weight: 3, fill: false,
+      dashArray: "4 6", interactive: false,
+    }).addTo(revealMap)
+      .bindTooltip(superSureLabel(round.score),
+        { permanent: true, direction: "bottom", className: "ss-tooltip" });
+  }
   const truthMarker = L.circleMarker(truth, {
     radius: 12, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
   });
@@ -580,8 +590,9 @@ function renderReveal(state) {
       truthMarker.addTo(revealMap)
         .bindTooltip("Answer", { permanent: true, direction: "top" });
       placeEl.classList.add("show");
-      countUpPoints(round.score.points);
+      countUpPoints(adjustedPoints(round.score)); // ×2/0 applied for bets
       showSpeedNote(round.score); // speed lands with the score count-up
+      showSuperSureNote(round.score);
     }
   };
   $("tvDistance").textContent = formatDistance(round.score.distanceKm);
@@ -679,6 +690,14 @@ function renderShowdownReveal(state, round) {
     }).addTo(revealMap)
       .bindTooltip(escapeHtml(state.teams[id].name),
         { permanent: true, direction: "top" });
+    if (r.superSure) {
+      L.circleMarker(guess, {
+        radius: 16, color: "#ffcf3f", weight: 3, fill: false,
+        dashArray: "4 6", interactive: false,
+      }).addTo(revealMap)
+        .bindTooltip(superSureLabel(r),
+          { permanent: true, direction: "bottom", className: "ss-tooltip" });
+    }
     const line = L.polyline([guess], { color, weight: 4, dashArray: "8 10" })
       .addTo(revealMap);
     let start = null;
@@ -732,6 +751,23 @@ function showSpeedNote(score) {
       `answered in ${formatSeconds(score.elapsedMs)}` +
       ` (⚡+${(score.timeBonus || 0).toLocaleString()})`;
     note.classList.toggle("zero", !score.timeBonus);
+  } else {
+    note.textContent = "";
+  }
+}
+
+// SUPER SURE verdict under the points tile (injected — HTML untouched).
+function showSuperSureNote(score) {
+  let note = $("tvSuperSureNote");
+  if (!note) {
+    note = document.createElement("div");
+    note.id = "tvSuperSureNote";
+    note.className = "ss-note";
+    $("tvPoints").closest(".reveal-num").appendChild(note);
+  }
+  if (score.superSure) {
+    note.textContent = `🔥 ${superSureLabel(score)}`;
+    note.classList.toggle("lost", score.superSureOutcome !== "won");
   } else {
     note.textContent = "";
   }

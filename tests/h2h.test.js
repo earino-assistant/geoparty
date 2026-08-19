@@ -224,11 +224,28 @@ test("revealPins: real guesses only, farthest first (the reveal draw order)", ()
     },
   };
   assert.deepEqual(revealPins(round), [
-    { id: "t3", lat: 3, lng: 3, distanceKm: 4000 },
-    { id: "t1", lat: 1, lng: 1, distanceKm: 40 },
+    { id: "t3", lat: 3, lng: 3, distanceKm: 4000,
+      superSure: false, superSureOutcome: null },
+    { id: "t1", lat: 1, lng: 1, distanceKm: 40,
+      superSure: false, superSureOutcome: null },
   ]);
   assert.deepEqual(revealPins(null), []);
   assert.deepEqual(revealPins({ results: { t1: { guess: null } } }), []);
+});
+
+test("revealPins: SUPER SURE verdict rides along for the phone reveal map", () => {
+  // Reveal-only surface — the no-screen h2h phones badge the bet here.
+  const round = {
+    results: {
+      t1: { guess: { lat: 1, lng: 1 }, distanceKm: 40,
+            superSure: true, superSureOutcome: "won" },
+      t2: { guess: { lat: 2, lng: 2 }, distanceKm: 900 },
+    },
+  };
+  const pins = revealPins(round);
+  assert.deepEqual(
+    pins.map((p) => [p.id, p.superSure, p.superSureOutcome]),
+    [["t2", false, null], ["t1", true, "won"]]);
 });
 
 /* ---------------- winner & handoff ---------------- */

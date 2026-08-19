@@ -53,6 +53,13 @@ import {
   liveRivalPins,
   revealPins,
 } from "./h2h.js";
+import {
+  superSureAvailable,
+  resolveSuperSure,
+  superSureSettlement,
+  adjustedPoints,
+  superSureLabel,
+} from "./supersure.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -163,6 +170,8 @@ let revealMapShownFor = null; // round number the reveal map was built for
 
 let localStage = "explore"; // "explore" (pano) | "map" — this phone's UI mode
 let lastRoundSeen = null;   // round number the UI has been reset for
+let superSureArmed = false; // SUPER SURE toggled on for THIS pin — local only
+                            // until lock-in, so rivals can't see it coming
 let autoSubmitted = false;  // timeout auto-lock fired for this round
 let sweepDone = false;      // host forfeit sweep fired for this round
 let revealFlipPushed = null; // round number this phone already flipped for
@@ -307,6 +316,7 @@ function enterRoom(code, teamId) {
   revealTracked = null;
   prevSubmitted = 0;
   localStage = "explore";
+  superSureArmed = false;
   switchingRooms = false;
   persistActive();
   let sawState = false;
@@ -418,7 +428,13 @@ function onState(state) {
       allSubmitted(state.teams, state.round) &&
       revealFlipPushed !== state.round.number) {
     revealFlipPushed = state.round.number;
-    push({ phase: "reveal", "round/revealAt": Date.now() + REVEAL_COUNTDOWN_MS });
+    push({
+      phase: "reveal",
+      "round/revealAt": Date.now() + REVEAL_COUNTDOWN_MS,
+      // Settle any SUPER SURE bets in the same atomic patch (see lockIn):
+      // racing closers compute identical values from the complete set.
+      ...superSureSettlement(state.teams, state.round.results).patch,
+    });
   }
 
   // Race-pressure toast: someone else locked in.
@@ -612,6 +628,7 @@ function renderRoundActive() {
     autoSubmitted = false;
     sweepDone = false;
     localStage = "explore";
+    superSureArmed = false; // the bet is armed per-pin, never carried over
     clearTimeout(revealFlipTimer);
     if (guessMarker) { guessMarker.remove(); guessMarker = null; }
     clearRivalPins();
@@ -753,9 +770,38 @@ function openGuessMapScreen() {
   $("pGuessHint").textContent = guessMarker
     ? "Drag to adjust, then lock it in"
     : "Tap the map to drop your pin — rivals can see it move";
+  renderSuperSureToggle();
   setTimeout(() => guessMap.invalidateSize(), 50);
   updateRivalPins();
   scheduleLiveWrite();
+}
+
+/* ---------------- SUPER SURE: arm/disarm the one-per-game bet --------- */
+
+// The toggle lives on this phone's own guess screen only. Arming is purely
+// local state until lock-in commits it — nothing about the bet ever rides
+// on the live feed, so rivals can't learn it before the reveal.
+function toggleSuperSure() {
+  if (!room || myResult() || !superSureAvailable(room.teams, myTeam)) return;
+  superSureArmed = !superSureArmed;
+  renderSuperSureToggle();
+  toast(superSureArmed
+    ? "SUPER SURE armed: closest pin wins ×2 — anyone closer and you get 0"
+    : "SUPER SURE disarmed — bet saved for later");
+}
+
+function renderSuperSureToggle() {
+  const btn = $("btnSuperSure");
+  const available = room && superSureAvailable(room.teams, myTeam);
+  btn.disabled = !available;
+  btn.classList.toggle("armed", !!available && superSureArmed);
+  if (!available) {
+    btn.textContent = "SUPER SURE — spent";
+  } else if (superSureArmed) {
+    btn.textContent = "🔥 SUPER SURE ARMED — ×2 or 0";
+  } else {
+    btn.textContent = "🔥 SUPER SURE · double or nothing · once per game";
+  }
 }
 
 function backToStreet() {
@@ -841,6 +887,11 @@ function lockIn(auto = false) {
     ? timeBonus(distancePoints, elapsedMs, bonusWindowMs(room.settings.roundSeconds))
     : 0;
   const points = distancePoints + speedBonus;
+  // An armed bet commits here — with a pin it rides on the result; with no
+  // pin at the buzzer it rides on the forfeit and burns at settlement.
+  // Either way the one use is spent (superSureUsed on the team row).
+  const betting = superSureArmed && superSureAvailable(room.teams, myTeam);
+  superSureArmed = false;
   const result = {
     guess,
     distanceKm,
@@ -850,6 +901,7 @@ function lockIn(auto = false) {
     elapsedMs: guess ? elapsedMs : null,
     submittedAt,
     forfeited: guess ? null : true,
+    superSure: betting ? true : null,
   };
   cancelLiveWrite();
   const patch = {
@@ -858,19 +910,42 @@ function lockIn(auto = false) {
     [`round/live/${myTeam}/stage`]: "locked",
     [`round/live/${myTeam}/pin`]: null, // final pin stays secret until reveal
   };
+  if (betting) patch[`teams/${myTeam}/superSureUsed`] = room.round.number;
   // Last one in flips the room to reveal and stamps the countdown moment.
   // If two phones race the flip, both write the same phase and revealAt
-  // values milliseconds apart — last-write-wins is harmless here.
+  // values milliseconds apart — last-write-wins is harmless here. SUPER
+  // SURE bets settle in the same atomic patch (raw points were banked at
+  // each lock-in; the settlement writes outcome markers and corrected
+  // absolute totals), so no surface can ever render an unsettled reveal.
   const others = teamIds(room.teams).filter((id) => id !== myTeam);
   const results = (room.round && room.round.results) || {};
   if (others.every((id) => !!results[id])) {
     patch.phase = "reveal";
     patch["round/revealAt"] = Date.now() + REVEAL_COUNTDOWN_MS;
+    const merged = { ...results, [myTeam]: result };
+    const teamsBanked = {
+      ...room.teams,
+      [myTeam]: {
+        ...room.teams[myTeam],
+        total: (room.teams[myTeam].total || 0) + points,
+      },
+    };
+    // Overrides this patch's own teams/<me>/total when I'm a bettor.
+    const settlement = superSureSettlement(teamsBanked, merged);
+    Object.assign(patch, settlement.patch);
+    // My own outcome must ride inside my full result write — a descendant
+    // path next to it would make the multi-path update invalid (RTDB
+    // rejects ancestor+descendant in one patch).
+    if (settlement.outcomes[myTeam]) {
+      result.superSureOutcome = settlement.outcomes[myTeam];
+      delete patch[`round/results/${myTeam}/superSureOutcome`];
+    }
   }
   push(patch);
   if (guess) {
     // Aggregates only — the pin itself never leaves the device. Forfeits
-    // (no pin at the buzzer) aren't guesses, so they aren't tracked here.
+    // (no pin at the buzzer) aren't guesses, so they aren't tracked here;
+    // a burned bet surfaces via super_sure_resolved at the reveal instead.
     track("guess_submitted", {
       room: roomCode,
       mode: "h2h",
@@ -879,10 +954,16 @@ function lockIn(auto = false) {
       time_bonus: speedBonus,
       total_score: points,
       time_seconds: elapsedMs / 1000,
+      super_sure: betting,
     });
   }
-  if (auto && !guess) toast("Time! No pin — no points this round.");
-  else if (auto) toast("Time! Your pin was locked in.");
+  if (auto && !guess) {
+    toast(betting
+      ? "Time! SUPER SURE with no pin — the bet is burned."
+      : "Time! No pin — no points this round.");
+  } else if (auto) {
+    toast("Time! Your pin was locked in.");
+  }
 }
 
 function renderLockedRoster() {
@@ -939,6 +1020,11 @@ function sweepAndReveal(force) {
     };
     patch[`round/live/${id}/stage`] = "locked";
   }
+  // Settle SUPER SURE bets among the submitted results in the same patch.
+  // Swept forfeits never carry a bet (arming is local to the dead phone,
+  // so its use is simply not spent) and no forfeit moves "closest".
+  Object.assign(
+    patch, superSureSettlement(room.teams, room.round.results || {}).patch);
   push(patch);
 }
 
@@ -1017,6 +1103,19 @@ function renderReveal() {
     track("reveal_shown", {
       room: roomCode, mode: "h2h", round_number: round.number,
     });
+    // One super_sure_resolved per bet, host phone only (same cardinality
+    // discipline as reveal_shown). Burned bets appear ONLY here — a
+    // forfeit is not a guess, so it never sent guess_submitted.
+    const outcomes = resolveSuperSure(round.results);
+    for (const id of Object.keys(outcomes)) {
+      track("super_sure_resolved", {
+        mode: "h2h",
+        round_number: round.number,
+        rounds: room.settings.roundCount,
+        outcome: outcomes[id],
+        round_total: (round.results[id] && round.results[id].points) || 0,
+      });
+    }
   }
   const last = round.number >= room.settings.roundCount;
   $("pRevealHeading").textContent =
@@ -1025,10 +1124,27 @@ function renderReveal() {
   const mine = myResult();
   if (mine && mine.guess) {
     $("pRevealDistance").textContent = formatDistance(mine.distanceKm);
-    $("pRevealPoints").textContent = `+${mine.points.toLocaleString()}`;
+    $("pRevealPoints").textContent = `+${adjustedPoints(mine).toLocaleString()}`;
   } else {
     $("pRevealDistance").textContent = "no pin";
-    $("pRevealPoints").textContent = "+0";
+    // A burned bet is not a plain forfeit: "0" (you bet it), not "+0".
+    $("pRevealPoints").textContent = mine && mine.superSure ? "0" : "+0";
+  }
+  // SUPER SURE verdict line under the points card (injected — HTML
+  // untouched). Only the bettor's own card carries it; the round list
+  // below shows everyone's.
+  let ssEl = $("pRevealSuperSure");
+  if (!ssEl) {
+    ssEl = document.createElement("div");
+    ssEl.id = "pRevealSuperSure";
+    ssEl.className = "ss-note";
+    $("pRevealPoints").closest(".stat-card").appendChild(ssEl);
+  }
+  if (mine && mine.superSure) {
+    ssEl.textContent = `🔥 ${superSureLabel(mine)}`;
+    ssEl.classList.toggle("lost", mine.superSureOutcome !== "won");
+  } else {
+    ssEl.textContent = "";
   }
   // Speed line under the points card (injected — HTML untouched).
   let speedEl = $("pRevealSpeed");
@@ -1104,6 +1220,17 @@ function renderRevealMap(round) {
     L.circleMarker(guess, {
       radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1,
     }).addTo(revealMap);
+    // The no-screen h2h payoff surface: a super-sure pin wears its verdict
+    // right on the map (halo + label) — reveal-only, per the hidden rule.
+    if (p.superSure) {
+      L.circleMarker(guess, {
+        radius: 14, color: "#ffcf3f", weight: 3, fill: false,
+        dashArray: "4 6", interactive: false,
+      }).addTo(revealMap)
+        .bindTooltip(
+          p.superSureOutcome === "won" ? "SUPER SURE ×2" : "SUPER SURE — 0",
+          { permanent: true, direction: "bottom", className: "ss-tooltip" });
+    }
   }
   L.circleMarker(truth, {
     radius: 10, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
@@ -1275,6 +1402,7 @@ $("btnPLeave").addEventListener("click", leaveOrAbandon);
 $("btnPStart").addEventListener("click", startRound);
 $("btnOpenMap").addEventListener("click", openGuessMapScreen);
 $("btnBackToStreet").addEventListener("click", backToStreet);
+$("btnSuperSure").addEventListener("click", toggleSuperSure);
 $("btnLockIn").addEventListener("click", () => lockIn(false));
 $("btnCloseRound").addEventListener("click", sweepAndReveal);
 $("btnPNext").addEventListener("click", nextOrFinish);

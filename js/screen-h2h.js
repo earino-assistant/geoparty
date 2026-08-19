@@ -7,6 +7,7 @@
 import { MAPILLARY_TOKEN } from "../config.js";
 import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
+import { superSureLabel } from "./supersure.js";
 
 const $ = (id) => document.getElementById(id);
 const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
@@ -516,6 +517,16 @@ function runRevealAnimation(state, round) {
     }).addTo(revealMap)
       .bindTooltip(escapeHtml(state.teams[r.id].name),
         { permanent: true, direction: "top" });
+    // A super-sure pin steps out of hiding here (and only here): verdict
+    // halo on the map, verdict text in the round board via resultRowText.
+    if (r.superSure) {
+      L.circleMarker(guess, {
+        radius: 16, color: "#ffcf3f", weight: 3, fill: false,
+        dashArray: "4 6", interactive: false,
+      }).addTo(revealMap)
+        .bindTooltip(superSureLabel(r),
+          { permanent: true, direction: "bottom", className: "ss-tooltip" });
+    }
     const line = L.polyline([guess], { color, weight: 4, dashArray: "8 10" })
       .addTo(revealMap);
     let start = null;

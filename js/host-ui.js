@@ -30,6 +30,13 @@ import {
   showdownOrder,
   showdownResults,
 } from "./game.js";
+import {
+  superSureAvailable,
+  resolveSuperSure,
+  superSureSettlement,
+  adjustedPoints,
+  superSureLabel,
+} from "./supersure.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -131,6 +138,7 @@ let connected = true;
 let viewer = null;        // MapillaryJS viewer
 let guessMap = null;      // Leaflet map
 let guessMarker = null;
+let superSureArmed = false; // active team's SUPER SURE toggle, this pin only
 let timerInterval = null;
 let unsubHeartbeat = null;
 let heartbeatSeen = false;
@@ -615,8 +623,38 @@ function openGuessMap() {
   guessMap.setView([25, 10], 2);
   renderPlacedPins();
   updateGuessHint();
+  superSureArmed = false;
+  renderSuperSureToggle();
   // Leaflet needs a size pass after the container becomes visible.
   setTimeout(() => guessMap.invalidateSize(), 50);
+}
+
+/* ---------------- SUPER SURE: the active team's once-per-game bet ------ */
+
+// Couch version of the h2h toggle: it belongs to whichever team holds the
+// phone (the active team), and the TV never mirrors it — the bet stays
+// hidden from the couch until the reveal.
+function toggleSuperSure() {
+  if (!room || !superSureAvailable(room.teams, room.activeTeam)) return;
+  superSureArmed = !superSureArmed;
+  renderSuperSureToggle();
+  toast(superSureArmed
+    ? "SUPER SURE armed: closest pin wins ×2 — anyone closer and you get 0"
+    : "SUPER SURE disarmed — bet saved for later");
+}
+
+function renderSuperSureToggle() {
+  const btn = $("btnSuperSure");
+  const available = room && superSureAvailable(room.teams, room.activeTeam);
+  btn.disabled = !available;
+  btn.classList.toggle("armed", !!available && superSureArmed);
+  if (!available) {
+    btn.textContent = "SUPER SURE — spent";
+  } else if (superSureArmed) {
+    btn.textContent = "🔥 SUPER SURE ARMED — ×2 or 0";
+  } else {
+    btn.textContent = "🔥 SUPER SURE · double or nothing · once per game";
+  }
 }
 
 function confirmGuess() {
@@ -633,6 +671,11 @@ function confirmGuess() {
   const speedBonus =
     timeBonus(distancePoints, elapsedMs, bonusWindowMs(room.settings.roundSeconds));
   const points = distancePoints + speedBonus;
+  // The active team's armed bet commits with this pin. Couch has no
+  // forfeit path (a pin is always confirmed), so bets never burn here.
+  const betting = superSureArmed &&
+    superSureAvailable(room.teams, room.activeTeam);
+  superSureArmed = false;
 
   // One event per confirmed pin, both solo and showdown turns. Only
   // aggregates leave the device — never the pin itself.
@@ -644,12 +687,14 @@ function confirmGuess() {
     time_bonus: speedBonus,
     total_score: points,
     time_seconds: elapsedMs / 1000,
+    super_sure: betting,
   });
 
   if (room.round.showdown) {
     confirmShowdownGuess({
       guess, distanceKm, points, distancePoints,
       timeBonus: speedBonus, elapsedMs, submittedAt,
+      superSure: betting ? true : null,
     });
     return;
   }
@@ -670,13 +715,25 @@ function confirmGuess() {
   room.round.guess = guess;
   room.round.liveGuess = null; // preview served its purpose
   room.round.liveView = null;
-  room.round.score = {
+  const score = {
     points, distancePoints, timeBonus: speedBonus,
     elapsedMs, submittedAt, distanceKm,
+    superSure: betting ? true : null,
+    superSureOutcome: null,
   };
-  room.teams[room.activeTeam].total += points;
+  if (betting) {
+    // Solo rounds have exactly one pin, so the shared rule resolves it as
+    // closest-by-definition — the couch risk lives in the showdown, where
+    // every team pins the same spot (see resolveSuperSure).
+    score.superSureOutcome = resolveSuperSure({
+      [room.activeTeam]: { guess, distanceKm, points, superSure: true },
+    })[room.activeTeam];
+    room.teams[room.activeTeam].superSureUsed = room.round.number;
+  }
+  room.round.score = score;
+  room.teams[room.activeTeam].total += adjustedPoints(score);
 
-  push({
+  const patch = {
     phase: "reveal",
     "round/liveGuess": null,
     "round/liveView": null,
@@ -684,7 +741,11 @@ function confirmGuess() {
     "round/guess": guess,
     "round/score": room.round.score,
     [`teams/${room.activeTeam}/total`]: room.teams[room.activeTeam].total,
-  });
+  };
+  if (betting) {
+    patch[`teams/${room.activeTeam}/superSureUsed`] = room.round.number;
+  }
+  push(patch);
   enterReveal();
 }
 
@@ -697,7 +758,12 @@ function confirmShowdownGuess(result) {
 
   room.round.results = room.round.results || {};
   room.round.results[team] = result;
+  // Raw points bank now; a SUPER SURE bet settles when the last pin lands
+  // and "closest" is knowable — same contract as the h2h reveal flip.
   room.teams[team].total += result.points;
+  if (result.superSure) {
+    room.teams[team].superSureUsed = room.round.number;
+  }
   room.round.liveGuess = null;
   cancelLiveGuessWrite();
 
@@ -707,19 +773,25 @@ function confirmShowdownGuess(result) {
     // The next team's speed clock starts at the phone handoff, not at
     // round start — otherwise going later in the order would cost points.
     room.round.turnStartedAt = Date.now();
-    push({
+    const patch = {
       activeTeam: next,
       "round/liveGuess": null,
       "round/turnStartedAt": room.round.turnStartedAt,
       [`round/results/${team}`]: result,
       [`teams/${team}/total`]: room.teams[team].total,
-    });
+    };
+    if (result.superSure) {
+      patch[`teams/${team}/superSureUsed`] = room.round.number;
+    }
+    push(patch);
     guessMarker.remove();
     guessMarker = null;
     $("btnConfirmGuess").disabled = true;
     guessMap.setView([25, 10], 2);
     renderPlacedPins();
     updateGuessHint();
+    superSureArmed = false; // the next team arms (or not) for itself
+    renderSuperSureToggle();
     toast(`Pass the phone — ${room.teams[next].name} is up!`);
     return;
   }
@@ -733,14 +805,30 @@ function confirmShowdownGuess(result) {
   };
   room.round.truth = truth;
   room.round.liveView = null;
-  push({
+  // Every pin is down: settle the bets and mirror the settlement into the
+  // host's local authority state (outcome markers + corrected totals).
+  const settlement = superSureSettlement(room.teams, room.round.results);
+  for (const [id, outcome] of Object.entries(settlement.outcomes)) {
+    room.round.results[id].superSureOutcome = outcome;
+    room.teams[id].total = settlement.patch[`teams/${id}/total`];
+  }
+  const patch = {
     phase: "reveal",
     "round/liveGuess": null,
     "round/liveView": null,
     "round/truth": truth,
     [`round/results/${team}`]: result,
     [`teams/${team}/total`]: room.teams[team].total,
-  });
+  };
+  if (result.superSure) {
+    patch[`teams/${team}/superSureUsed`] = room.round.number;
+  }
+  Object.assign(patch, settlement.patch);
+  // The last team's outcome already rides inside its full result write
+  // (mirrored above); the descendant path would make the multi-path
+  // update invalid (RTDB rejects ancestor+descendant in one patch).
+  delete patch[`round/results/${team}/superSureOutcome`];
+  push(patch);
   enterReveal();
 }
 
@@ -755,6 +843,22 @@ function enterReveal() {
   if (revealTracked !== `${roomCode}:${number}`) {
     revealTracked = `${roomCode}:${number}`;
     track("reveal_shown", { room: roomCode, mode: "couch", round_number: number });
+    // One super_sure_resolved per bet (host phone at reveal, same
+    // once-per-round cardinality). Solo rounds carry the bet on the score;
+    // showdowns on the per-team results. Couch has no burned bets.
+    const bets = showdown
+      ? Object.values(room.round.results || {}).filter((r) => r.superSure)
+      : (room.round.score && room.round.score.superSure
+          ? [room.round.score] : []);
+    for (const r of bets) {
+      track("super_sure_resolved", {
+        mode: "couch",
+        round_number: number,
+        rounds: room.settings.roundCount,
+        outcome: r.superSureOutcome,
+        round_total: r.points || 0,
+      });
+    }
   }
   $("revealHeading").textContent = showdown
     ? "Final Showdown"
@@ -792,7 +896,7 @@ function enterReveal() {
     if (list) list.classList.add("hidden");
     const score = room.round.score;
     $("revealDistance").textContent = formatDistance(score.distanceKm);
-    $("revealPoints").textContent = score.points.toLocaleString();
+    $("revealPoints").textContent = adjustedPoints(score).toLocaleString();
     // Speed line under the points card (injected — HTML untouched).
     let speedEl = $("hostRevealSpeed");
     if (!speedEl) {
@@ -809,6 +913,20 @@ function enterReveal() {
       speedEl.classList.toggle("zero", !score.timeBonus);
     } else {
       speedEl.textContent = "";
+    }
+    // SUPER SURE verdict line (injected — HTML untouched).
+    let ssEl = $("hostRevealSuperSure");
+    if (!ssEl) {
+      ssEl = document.createElement("div");
+      ssEl.id = "hostRevealSuperSure";
+      ssEl.className = "ss-note";
+      ptsCard.appendChild(ssEl);
+    }
+    if (score.superSure) {
+      ssEl.textContent = `🔥 ${superSureLabel(score)}`;
+      ssEl.classList.toggle("lost", score.superSureOutcome !== "won");
+    } else {
+      ssEl.textContent = "";
     }
   }
   renderTotals($("revealTotals"));
@@ -965,6 +1083,7 @@ async function resumeGame(code, state) {
       $("btnConfirmGuess").disabled = true;
       renderPlacedPins(); // mid-showdown resume: restore locked-in pins
       updateGuessHint();
+      renderSuperSureToggle(); // armed state is local; a refresh disarms
       setTimeout(() => guessMap.invalidateSize(), 50);
       break;
     case "reveal":
@@ -998,6 +1117,7 @@ $("btnNewGame").addEventListener("click", newGame);
 $("btnStartRound").addEventListener("click", startRound);
 $("btnAbandon").addEventListener("click", abandonGame);
 $("btnMakeGuess").addEventListener("click", openGuessMap);
+$("btnSuperSure").addEventListener("click", toggleSuperSure);
 $("btnConfirmGuess").addEventListener("click", confirmGuess);
 $("btnNextRound").addEventListener("click", nextOrFinish);
 $("btnSaveLeaderboard").addEventListener("click", saveToLeaderboard);

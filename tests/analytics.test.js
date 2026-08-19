@@ -144,6 +144,38 @@ test("sanitizeEvent: invite_shared keeps mode/method, strips everything else", (
   });
 });
 
+test("sanitizeEvent: guess_submitted.super_sure is strictly boolean", () => {
+  const base = { room: "KWPFRT", mode: "h2h", total_score: 3100 };
+  assert.equal(
+    sanitizeEvent("guess_submitted", { ...base, super_sure: true }).props.super_sure,
+    true);
+  assert.equal(
+    sanitizeEvent("guess_submitted", { ...base, super_sure: false }).props.super_sure,
+    false);
+  // Truthy-but-not-boolean is stripped, never coerced.
+  for (const bad of [1, 0, "true", "yes", null, {}]) {
+    const out = sanitizeEvent("guess_submitted", { ...base, super_sure: bad });
+    assert.ok(!("super_sure" in out.props), `coerced ${JSON.stringify(bad)}`);
+  }
+});
+
+test("sanitizeEvent: super_sure_resolved keeps its aggregates, strips the rest", () => {
+  const out = sanitizeEvent("super_sure_resolved", {
+    mode: "h2h", round_number: 3, rounds: 5,
+    outcome: "won", round_total: 4180.4,
+    // None of these may ever leave the device:
+    room_code: "KWPFRT", team_name: "The Atlas Cats", team_id: "t2",
+    lat: 48.85, lng: 2.35, guess: { lat: 1, lng: 2 }, deviceId: "d-1",
+  });
+  assert.deepEqual(out, {
+    event: "super_sure_resolved",
+    props: {
+      mode: "h2h", round_number: 3, rounds: 5,
+      outcome: "won", round_total: 4180,
+    },
+  });
+});
+
 test("sanitizeEvent: wrong-typed props are stripped, not coerced", () => {
   const out = sanitizeEvent("game_created", {
     mode: 5, num_teams: "two", num_rounds: 5, round_seconds: 120,

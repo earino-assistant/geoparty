@@ -37,8 +37,9 @@ the user-entered team name.
 | `team_joined` | `mode, team_count` | joining phone | h2h only: a phone claims a team slot (creator counts as team 1). Couch teams are configured on one phone — see `game_created.num_teams` |
 | `screen_joined` | `room, mode` | TV | The screen page attaches to a room |
 | `round_started` | `room, mode, round_number` | host phone | Round pushed live (once per round per game) |
-| `guess_submitted` | `room, mode, team_id, distance_km, time_bonus, total_score, time_seconds` | guessing phone | A pin is confirmed/locked in. One event per team per round. Forfeits (h2h timeout with no pin) are **not** guesses and are not sent |
+| `guess_submitted` | `room, mode, team_id, distance_km, time_bonus, total_score, time_seconds, super_sure` | guessing phone | A pin is confirmed/locked in. One event per team per round. `super_sure` is true when the pin carries the once-per-game SUPER SURE bet (`total_score` stays the **raw** round total — the ×2/0 lands in `super_sure_resolved`). Forfeits (h2h timeout with no pin) are **not** guesses and are not sent |
 | `reveal_shown` | `room, mode, round_number` | host phone | Reveal reached (once per round, host-only, so cardinality matches `round_started`) |
+| `super_sure_resolved` | `mode, round_number, rounds, outcome, round_total` | host phone | One event per SUPER SURE bet, at the reveal (same once-per-round discipline as `reveal_shown`). `outcome` is `won` \| `lost` \| `burned`; `round_total` is the raw round total at stake (0 when burned). Exists because a burned bet has no `guess_submitted` (a forfeit is not a guess) and win/lose is only known at reveal |
 | `game_completed` | `room, mode, rounds, winner_team, winning_score, team_count` | host phone | Final round finished (incl. pool-exhaustion end) |
 | `game_abandoned` | `room, mode, rounds_played` | host phone | Host explicitly abandons the room |
 | `invite_shared` | `mode, method` | lobby phone | h2h lobby "Send invite link" used; `method` is `share` (Web Share sheet opened without error) or `copy` (clipboard fallback). The remote-play (no shared TV) recruitment path |
@@ -63,6 +64,9 @@ Plus PostHog defaults: `$pageview` and (button/link-only) autocapture.
 | **Return sessions** | PostHog Retention insight on any event (e.g. `game_created`), keyed on the anonymous device id — same-device return play, no accounts | any |
 | **Consent rate** | `consent_given` count vs. total unique visitors is *not* measurable (declined visitors send nothing — that's the point). `consent_denied` counts revocations only | `consent_given`, `consent_denied` |
 | **Remote-play adoption** | `invite_shared` count (and `method` split) shows the no-screen recruitment path being used; the share of h2h `game_completed` rooms with no matching `screen_joined` (join on `room`) is the fraction of games played with no TV at all | `invite_shared`, `team_joined`, `screen_joined`, `game_completed` |
+| **SUPER SURE deployment** (M6) | Share of completed games where a bet was spent: `guess_submitted` with `super_sure` + `super_sure_resolved` counts vs `game_completed`. Judges whether the stakes mechanic gets used at all | `guess_submitted`, `super_sure_resolved`, `game_completed` |
+| **SUPER SURE win rate & EV** (M6) | `super_sure_resolved.outcome` mix (`won` share ≈ does it reward knowledge or just gambling?); mean signed swing = `round_total` for `won`, −`round_total` for `lost`, 0 for `burned` | `super_sure_resolved` |
+| **SUPER SURE timing** (M6) | Distribution of `round_number ÷ rounds` — early confidence plays vs late hail-marys | `super_sure_resolved` |
 
 ## Adding a new event
 

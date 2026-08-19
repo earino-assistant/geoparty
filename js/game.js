@@ -1,6 +1,8 @@
 // game.js — shared game logic: state machine, scoring, round math.
 // Used by both host-ui.js and screen-ui.js. No DOM, no Firebase in here.
 
+import { adjustedPoints } from "./supersure.js";
+
 export const PHASES = ["lobby", "roundActive", "guessing", "reveal", "gameOver"];
 
 // Legal transitions, driven exclusively by host writes (spec §7).
@@ -89,14 +91,22 @@ export function formatSeconds(ms) {
 
 // One per-team reveal row: distance · speed · total. Results written
 // before the time bonus existed (no elapsedMs) fall back to the old form.
+// SUPER SURE bets show their fate here: a burned bet reads differently
+// from a plain forfeit, a loss shows the zero, a win shows the ×2.
 export function resultRowText(r) {
-  if (!r.guess) return "no pin · +0";
-  const total = `+${r.points.toLocaleString()}`;
-  if (typeof r.elapsedMs === "number" && typeof r.timeBonus === "number") {
-    return `${formatDistance(r.distanceKm)} · ⚡${formatSeconds(r.elapsedMs)}` +
-      ` +${r.timeBonus.toLocaleString()} · ${total}`;
+  if (!r.guess) return r.superSure ? "SUPER SURE — no pin · 0" : "no pin · +0";
+  const dist = formatDistance(r.distanceKm);
+  if (r.superSure && r.superSureOutcome === "lost") {
+    return `${dist} · SUPER SURE — 0`;
   }
-  return `${formatDistance(r.distanceKm)} · ${total}`;
+  const won = r.superSure && r.superSureOutcome === "won";
+  const total = `+${adjustedPoints(r).toLocaleString()}`;
+  const tail = won ? `SUPER SURE ×2 · ${total}` : total;
+  if (typeof r.elapsedMs === "number" && typeof r.timeBonus === "number") {
+    return `${dist} · ⚡${formatSeconds(r.elapsedMs)}` +
+      ` +${r.timeBonus.toLocaleString()} · ${tail}`;
+  }
+  return `${dist} · ${tail}`;
 }
 
 // One decimal under 100km, integer km above (spec §8).

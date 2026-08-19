@@ -213,6 +213,29 @@ test("resultRowText: forfeit, legacy, and speed-bonus row forms", () => {
   assert.ok(modern.includes("12.3 km"));
 });
 
+test("resultRowText: SUPER SURE rows show the verdict at reveal", () => {
+  // Won: ×2 badge and the doubled total.
+  const won = resultRowText({
+    guess: {}, distanceKm: 12.3, points: 5600,
+    elapsedMs: 23_000, timeBonus: 800,
+    superSure: true, superSureOutcome: "won",
+  });
+  assert.ok(won.includes("SUPER SURE ×2"), won);
+  assert.ok(won.includes("+11,200") || won.includes("+11200"), won);
+  // Lost: the distance stays (they did pin), the points are gone.
+  const lost = resultRowText({
+    guess: {}, distanceKm: 250, points: 4200,
+    superSure: true, superSureOutcome: "lost",
+  });
+  assert.equal(lost, "250 km · SUPER SURE — 0");
+  // Burned (bet, no pin) must read differently from a plain forfeit.
+  const burned = resultRowText({ guess: null, superSure: true, superSureOutcome: "burned" });
+  const forfeit = resultRowText({ guess: null });
+  assert.equal(burned, "SUPER SURE — no pin · 0");
+  assert.equal(forfeit, "no pin · +0");
+  assert.notEqual(burned, forfeit);
+});
+
 /* ---------------- teams, turn schedule, standings ---------------- */
 
 const teams3 = {

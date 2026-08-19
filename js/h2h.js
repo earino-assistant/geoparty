@@ -129,12 +129,16 @@ export function liveRivalPins(round, myTeam) {
 
 // Real guesses for a reveal map, farthest first (the TV's draw order), so
 // the phone reveal builds toward the winner too. Forfeits carry no pin.
+// SUPER SURE status rides along: this is a REVEAL-ONLY surface (the bet is
+// hidden on every in-play one), and the no-screen h2h phone map must show
+// the bet's fate.
 export function revealPins(round) {
   return revealOrder(round)
     .filter((r) => r.guess &&
       typeof r.guess.lat === "number" && typeof r.guess.lng === "number")
     .map((r) => ({
       id: r.id, lat: r.guess.lat, lng: r.guess.lng, distanceKm: r.distanceKm,
+      superSure: !!r.superSure, superSureOutcome: r.superSureOutcome || null,
     }));
 }
 

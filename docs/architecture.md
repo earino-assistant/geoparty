@@ -11,6 +11,7 @@ with no server code.
 config.js          Public client credentials (Firebase, Mapillary)
 js/game.js         Pure couch-mode logic: scoring, phases, turn schedule   ← tested
 js/h2h.js          Pure head-to-head logic: slots, submissions, winner     ← tested
+js/supersure.js    Pure SUPER SURE bet logic: resolution + settlement      ← tested
 js/pool.js         Location pool: seeded shuffle + cursor sampler          ← tested
 js/qr.js           Self-contained QR encoder (join/screen URLs)            ← tested
 js/firebase.js     Firebase init + thin typed helpers (the only SDK import)
@@ -63,9 +64,24 @@ round
                    scores itself; devtools-peeking is not a threat we carry)
   live/tN          { stage, imageId, pose, view, pin }  ≤4/s per team
   results/tN       { guess, distanceKm, points, distancePoints, timeBonus,
-                     elapsedMs, submittedAt, forfeited }
+                     elapsedMs, submittedAt, forfeited,
+                     superSure, superSureOutcome }
   revealAt         countdown target stamped by whoever closes the round
 ```
+
+### SUPER SURE (both modes)
+
+The once-per-game double-or-nothing bet (design review §1.6, `supersure.js`).
+Arming is **local phone state** until lock-in — nothing rides on the live
+feed, so rivals can't see it coming (the DB row is technically readable
+pre-reveal, same accepted posture as the embedded truth). Spending writes
+`teams/tN/superSureUsed = round number` (survives refresh; `carryTeams`
+resets it for the next game). `points` in a result row is always the RAW
+round total; the ×2/0 is applied at *settlement*: the same atomic patch
+that flips `phase: reveal` also writes `superSureOutcome` markers and
+corrected absolute `teams/tN/total` values, so no subscriber ever renders
+an unsettled reveal. Couch solo rounds carry the bet on `round/score`
+(same fields); the host settles at confirm.
 
 ## Write ownership — the one rule that matters
 
@@ -89,6 +105,14 @@ harmless:
   `phase: reveal` + `revealAt` write; values differ by milliseconds.
 - **Forfeit sweep**: the host's sweep and the any-phone fallback sweep
   (`FORFEIT_GRACE_MS`, ×3 for the fallback) write the same forfeit rows.
+
+The SUPER SURE settlement (h2h) extends the reveal-flip exception: every
+flip writer computes the settlement from the complete result set its
+atomic snapshot carries, so racing writers produce identical outcome
+markers and identical *absolute* totals. (A lock-in delayed past the
+forfeit grace window could in principle race a sweep's settlement with a
+different "closest" — the same >6 s dying-phone corner the forfeit sweep
+already accepts.)
 
 ### The lock-in deadlock (fixed — keep the guard)
 
