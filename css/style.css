@@ -305,6 +305,7 @@ button:disabled { opacity: 0.4; cursor: default; }
   font-weight: 800;
 }
 .stat-card .label { color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.stat-card .big.place { font-size: 1.6rem; color: var(--accent); }
 .totals-list { list-style: none; padding: 0; margin: 0; }
 .totals-list li {
   display: flex;
@@ -406,6 +407,21 @@ button:disabled { opacity: 0.4; cursor: default; }
   flex-direction: column;
 }
 .reveal-map { flex: 1 1 55%; min-height: 0; }
+/* Place name banner — the shout-it-out moment. Hidden until the truth
+   marker lands, then pops in. */
+.reveal-place {
+  flex: 0 0 auto;
+  text-align: center;
+  font-size: 7.5vh;
+  font-weight: 800;
+  line-height: 1.1;
+  padding: 1.2vh 3vw 0;
+  color: var(--accent);
+  opacity: 0;
+  transform: translateY(2vh) scale(0.92);
+  transition: opacity 0.45s ease-out, transform 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.reveal-place.show { opacity: 1; transform: none; }
 .reveal-stats {
   flex: 0 0 auto;
   display: flex;

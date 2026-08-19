@@ -113,6 +113,19 @@ The generator queries the Mapillary Graph API for recent (2018+) panoramic
 imagery, dedupes on ~10 km grid cells, and in `weighted` mode favors regions
 with dense coverage.
 
+Each pool entry also carries a human-readable `name` ("Yakutsk, Russia") that
+the reveal shows on screen and host. Names are reverse-geocoded **once, at
+pool-build time** via Nominatim (never at reveal time — gameplay makes no
+geocoding calls). After regenerating or hand-editing the pool, fill in names
+for the new entries with:
+
+```sh
+python3 tools/name_location_pool.py   # from the repo root; ~1 req/sec, idempotent
+```
+
+`tools/topup_location_pool.py` runs this step automatically. Entries without a
+`name` still work — the reveal simply shows no place name (host shows "—").
+
 ## Persistent leaderboard
 
 The all-time top 10 lives in `localStorage` on the **host device** (key

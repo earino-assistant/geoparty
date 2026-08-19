@@ -235,6 +235,12 @@ function renderReveal(state) {
   if (revealShownForRound === round.number) return; // animate once per round
   revealShownForRound = round.number;
 
+  // Place name pops in when the truth marker lands (see the animation below):
+  // that's the "Yakutsk!!!" moment. Prepared hidden here.
+  const placeEl = $("tvPlace");
+  placeEl.textContent = round.truth.name || "";
+  placeEl.classList.remove("show");
+
   if (revealMap) { revealMap.remove(); revealMap = null; }
   revealMap = L.map("revealMap", {
     zoomControl: false,
@@ -285,6 +291,7 @@ function renderReveal(state) {
     } else {
       truthMarker.addTo(revealMap)
         .bindTooltip("Answer", { permanent: true, direction: "top" });
+      placeEl.classList.add("show");
       countUpPoints(round.score.points);
     }
   };

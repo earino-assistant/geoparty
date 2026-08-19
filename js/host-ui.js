@@ -633,7 +633,14 @@ function confirmGuess() {
   if (!guessMarker || !currentTruth) return;
   if (!setPhase("reveal")) return;
   const g = guessMarker.getLatLng();
-  const truth = { lat: currentTruth.lat, lng: currentTruth.lng };
+  // `name` rides along so the screen (a pure subscriber) can show the place
+  // name at reveal without loading the pool itself. Older pool entries may
+  // lack it; RTDB rejects `undefined`, hence the null fallback.
+  const truth = {
+    lat: currentTruth.lat,
+    lng: currentTruth.lng,
+    name: currentTruth.name || null,
+  };
   const guess = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
   const distanceKm = haversineKm(truth.lat, truth.lng, guess.lat, guess.lng);
   const points = scoreForDistance(distanceKm);
@@ -662,6 +669,8 @@ function enterReveal() {
   const { number } = room.round;
   const { points, distanceKm } = room.round.score;
   $("revealHeading").textContent = `Round ${number} of ${room.settings.roundCount}`;
+  $("revealPlace").textContent =
+    (room.round.truth && room.round.truth.name) || "—";
   $("revealDistance").textContent = formatDistance(distanceKm);
   $("revealPoints").textContent = points.toLocaleString();
   renderTotals($("revealTotals"));

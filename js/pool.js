@@ -1,4 +1,7 @@
 // pool.js — location pool loading + sampling without replacement (spec §9).
+// Entries are passed through verbatim: {image_id, lng, lat, viewer_url,
+// thumb, name}, where `name` is the pre-geocoded human-readable place name
+// the reveal UI displays (tools/name_location_pool.py).
 // The shuffle is seeded from the room code so a resumed host (or anyone
 // replaying the same room) deterministically sees the same order.
 

@@ -148,6 +148,11 @@ def main():
         json.dump(pool, f, indent=2)
     print(f"\nDone: {len(pool)} verified pano locations in {out_path}")
 
+    # The reveal UI shows each entry's pre-geocoded `name`; fill it in for
+    # any new entries (skips ones that already have it).
+    from name_location_pool import fill_names
+    fill_names(out_path)
+
 
 if __name__ == "__main__":
     main()
