@@ -13,6 +13,9 @@ import os
 import sys
 
 SCHEMA_KEYS = ["image_id", "lng", "lat", "viewer_url", "thumb", "name"]
+# Additive S3 field (tools/score_location_pool.py); optional so pools from
+# before the scorer ran — or mid-re-score — still validate.
+OPTIONAL_KEYS = {"difficulty": (1, 2, 3)}
 
 
 def main():
@@ -33,11 +36,19 @@ def main():
         errors.append(f"only {len(pool)} entries, expected >= {args.min_count}")
 
     ids = set()
+    tier_counts = {}
     for i, e in enumerate(pool):
         where = f"entry {i} ({e.get('image_id', '?')})"
-        if sorted(e.keys()) != sorted(SCHEMA_KEYS):
+        base_keys = [k for k in e.keys() if k not in OPTIONAL_KEYS]
+        if sorted(base_keys) != sorted(SCHEMA_KEYS):
             errors.append(f"{where}: keys {sorted(e.keys())} != {sorted(SCHEMA_KEYS)}")
             continue
+        for key, allowed in OPTIONAL_KEYS.items():
+            if key in e:
+                if e[key] not in allowed:
+                    errors.append(f"{where}: bad {key} {e[key]!r}")
+                elif key == "difficulty":
+                    tier_counts[e[key]] = tier_counts.get(e[key], 0) + 1
         if not isinstance(e["image_id"], str) or not e["image_id"].isdigit():
             errors.append(f"{where}: bad image_id")
         if e["image_id"] in ids:
@@ -67,6 +78,10 @@ def main():
         print(f"...and {len(errors) - 40} more errors", file=sys.stderr)
     print(f"{len(pool)} entries, {len(ids)} unique ids, "
           f"{len(countries)} countries represented.")
+    if tier_counts:
+        scored = sum(tier_counts.values())
+        print(f"Difficulty tiers on {scored}/{len(pool)} entries: "
+              + ", ".join(f"tier {t}: {n}" for t, n in sorted(tier_counts.items())))
     if countries:
         top = sorted(countries.items(), key=lambda kv: -kv[1])[:10]
         print("Top countries:", ", ".join(f"{c} ({n})" for c, n in top))

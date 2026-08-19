@@ -76,8 +76,13 @@ export const EVENT_SCHEMA = Object.freeze({
   // path ("h2h" | "couch") — both fired from the landing page.
   party_choice: { choice: "string" },
   front_door_join: { mode: "string" },
+  // difficulty (S3) is the host's pool setting: "casual" | "world" |
+  // "expert". room is the join key that lets the tier KPI break
+  // guess_submitted.distance_km down by the room's difficulty (h2h guesses
+  // fire on other phones, so a device/person join can't do it).
   game_created: {
-    mode: "string", num_teams: "int", num_rounds: "int", round_seconds: "int",
+    room: "string", mode: "string", num_teams: "int", num_rounds: "int",
+    round_seconds: "int", difficulty: "string",
   },
   team_joined: { mode: "string", team_count: "int" },
   // via: how this screen got attached — "qr" (scanned, usually then cast to

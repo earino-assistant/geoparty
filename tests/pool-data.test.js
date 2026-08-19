@@ -43,3 +43,15 @@ test("pool: names, when present, are non-empty strings", () => {
     }
   }
 });
+
+test("pool: difficulty tiers, when present, are 1 | 2 | 3", () => {
+  // S3: the offline scorer persists an additive per-entry tier. Absent is
+  // fine (a pool from before the scorer ran); anything else would silently
+  // distort difficulty sampling.
+  for (const e of pool) {
+    if ("difficulty" in e) {
+      assert.ok([1, 2, 3].includes(e.difficulty),
+        `bad difficulty ${e.difficulty} on ${e.image_id}`);
+    }
+  }
+});

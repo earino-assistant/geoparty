@@ -20,7 +20,8 @@ js/daily.js        Pure Daily Challenge logic: date seed, run fold, lock   ← t
 js/share.js        Pure share-artifact logic: UTM links, card text, grid   ← tested
 js/fx.js           Pure S4 sound+motion: sound pref, tick scheduling,
                    synth specs as data, reduced-motion easing math         ← tested
-js/pool.js         Location pool: seeded shuffle + cursor sampler          ← tested
+js/pool.js         Location pool: seeded shuffle, S3 difficulty tiers
+                   (easy-first-round guard), cursor sampler                ← tested
 js/qr.js           Self-contained QR encoder (join/screen URLs)            ← tested
 js/firebase.js     Firebase init + thin typed helpers (the only SDK import)
 js/landing-ui.js   The one front door: hero pano, chooser, code routing
@@ -49,7 +50,9 @@ Everything lives under `rooms/{CODE}` (6 letters, no I/O). Couch mode:
 rooms/KWPF
   createdAt        ms epoch (rules validate ≤ server now + 5 min skew)
   phase            lobby | roundActive | guessing | reveal | gameOver
-  settings         { roundCount, roundSeconds (0 = no limit), moveAllowed }
+  settings         { roundCount, roundSeconds (0 = no limit), moveAllowed,
+                     difficulty ("casual"|"world"|"expert"; absent on
+                     pre-S3 rooms, which keep the legacy sampling order) }
   teams/t1..t4     { name, total }
   activeTeam       whose turn (couch multi-team)
   poolCursor       sampler position, for host resume

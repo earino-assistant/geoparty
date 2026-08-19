@@ -59,7 +59,7 @@ import {
 } from "./autoadvance.js";
 import { countdownTick } from "./fx.js";
 import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
-import { loadPool, PoolSampler } from "./pool.js";
+import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
 
@@ -227,6 +227,7 @@ function collectSettings() {
     roundCount: parseInt($("segRounds").dataset.value, 10),
     roundSeconds: parseInt($("segSeconds").dataset.value, 10), // 0 = no limit
     moveAllowed: $("segMove").dataset.value === "1",
+    difficulty: normalizeDifficulty($("segDifficulty").dataset.value),
   };
 }
 
@@ -263,7 +264,7 @@ async function newGame() {
     }
     roomCode = code;
     room = initialRoomState(collectSettings(), collectTeams(), roomCode);
-    sampler = new PoolSampler(pool, roomCode, 0);
+    sampler = new PoolSampler(pool, roomCode, 0, room.settings.difficulty);
     currentTruth = null;
     gameBest = null;
     writeRoom(roomCode, room).catch((e) =>
@@ -282,10 +283,12 @@ async function newGame() {
     mine.push({ code: roomCode, createdAt: room.createdAt });
     lsSet(LS_MY_ROOMS, mine);
     track("game_created", {
+      room: roomCode,
       mode: "couch",
       num_teams: teamIds(room.teams).length,
       num_rounds: room.settings.roundCount,
       round_seconds: room.settings.roundSeconds,
+      difficulty: room.settings.difficulty,
     });
     enterLobby();
   } catch (e) {
@@ -1263,7 +1266,10 @@ async function resumeGame(code, state) {
   room = state;
   room.teams = room.teams || defaultTeams();
   const pool = await loadPool();
-  sampler = new PoolSampler(pool, roomCode, room.poolCursor || 0);
+  // Legacy rooms (created before the difficulty setting) carry none and get
+  // the legacy order back; passing undefined through keeps them intact.
+  sampler = new PoolSampler(pool, roomCode, room.poolCursor || 0,
+    room.settings.difficulty || null);
   // The cursor was advanced past the active round's entry at round start, so
   // the entry backing the in-flight round is order[cursor - 1]. (Looking up
   // round.imageId doesn't work: after movement it's a neighbor image.)
@@ -1323,6 +1329,7 @@ async function resumeGame(code, state) {
 wireSeg("segRounds");
 wireSeg("segSeconds");
 wireSeg("segMove");
+wireSeg("segDifficulty");
 wireSeg("segTeams", (v) => renderTeamNameInputs(parseInt(v, 10)));
 
 $("btnNewGame").addEventListener("click", newGame);

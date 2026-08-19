@@ -83,7 +83,7 @@ import { shareResult, shareTvLink } from "./share-ui.js";
 import { screenLink, tvBrowserLine, phoneJoinLine } from "./tvlink.js";
 import { countdownTick } from "./fx.js";
 import { initSound, playSound, buzz } from "./fx-ui.js";
-import { loadPool, PoolSampler } from "./pool.js";
+import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
 
@@ -234,6 +234,7 @@ function collectSettings(prefix) {
     roundCount: parseInt($(`${prefix}SegRounds`).dataset.value, 10),
     roundSeconds: parseInt($(`${prefix}SegSeconds`).dataset.value, 10),
     moveAllowed: $(`${prefix}SegMove`).dataset.value === "1",
+    difficulty: normalizeDifficulty($(`${prefix}SegDifficulty`).dataset.value),
   };
 }
 
@@ -268,10 +269,12 @@ async function createRoom() {
     mine.push({ code, createdAt: state.createdAt });
     lsSet(LS_MY_ROOMS, mine);
     track("game_created", {
+      room: code,
       mode: "h2h",
       num_teams: 1, // teams join the lobby after creation
       num_rounds: state.settings.roundCount,
       round_seconds: state.settings.roundSeconds,
+      difficulty: state.settings.difficulty,
     });
     track("team_joined", { mode: "h2h", team_count: 1 });
     enterRoom(code, "t1");
@@ -594,7 +597,11 @@ async function shareInvite() {
 
 async function ensureSampler() {
   if (!pool) pool = await loadPool();
-  if (!sampler) sampler = new PoolSampler(pool, roomCode, room.poolCursor || 0);
+  // Legacy rooms carry no difficulty and must rebuild their legacy order.
+  if (!sampler) {
+    sampler = new PoolSampler(pool, roomCode, room.poolCursor || 0,
+      (room.settings && room.settings.difficulty) || null);
+  }
 }
 
 async function startRound(advance) {
@@ -1528,6 +1535,7 @@ function openNextGameSetup() {
     ["nSegRounds", String(room.settings.roundCount)],
     ["nSegSeconds", String(room.settings.roundSeconds)],
     ["nSegMove", room.settings.moveAllowed ? "1" : "0"],
+    ["nSegDifficulty", normalizeDifficulty(room.settings.difficulty)],
   ]) {
     const el = $(seg);
     el.dataset.value = val;
@@ -1558,10 +1566,12 @@ async function createNextGame() {
     lsSet(LS_MY_ROOMS, mine);
     track("next_game", { mode: "h2h" });
     track("game_created", {
+      room: code,
       mode: "h2h",
       num_teams: teamIds(teams).length, // carried over from the last game
       num_rounds: state.settings.roundCount,
       round_seconds: state.settings.roundSeconds,
+      difficulty: state.settings.difficulty,
     });
     enterRoom(code, myTeam);
   } catch (e) {
@@ -1615,9 +1625,11 @@ async function renderResumeBanner() {
 wireSeg("pSegRounds");
 wireSeg("pSegSeconds");
 wireSeg("pSegMove");
+wireSeg("pSegDifficulty");
 wireSeg("nSegRounds");
 wireSeg("nSegSeconds");
 wireSeg("nSegMove");
+wireSeg("nSegDifficulty");
 
 $("btnCreateRoom").addEventListener("click", createRoom);
 $("btnJoin").addEventListener("click", joinRoom);

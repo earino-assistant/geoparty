@@ -309,6 +309,23 @@ test("sanitizeEvent: front_door_join keeps only the routed mode", () => {
   assert.deepEqual(out, { event: "front_door_join", props: { mode: "couch" } });
 });
 
+test("sanitizeEvent: game_created carries the difficulty pick, nothing extra", () => {
+  // S3: difficulty is the host's pool setting (a fixed enum string) and
+  // room is the join key for the tier KPI. Team names and coordinates must
+  // never ride along.
+  const out = sanitizeEvent("game_created", {
+    room: "KWPFRT", mode: "couch", num_teams: 2, num_rounds: 5,
+    round_seconds: 120, difficulty: "expert",
+    team_name: "The Atlas Cats", lat: 48.85, lng: 2.35,
+  });
+  assert.deepEqual(out.props, {
+    room: "KWPFRT", mode: "couch", num_teams: 2, num_rounds: 5,
+    round_seconds: 120, difficulty: "expert",
+  });
+  // A non-string difficulty is stripped, not coerced.
+  assert.deepEqual(sanitizeEvent("game_created", { difficulty: 3 }).props, {});
+});
+
 test("sanitizeEvent: wrong-typed props are stripped, not coerced", () => {
   const out = sanitizeEvent("game_created", {
     mode: 5, num_teams: "two", num_rounds: 5, round_seconds: 120,
