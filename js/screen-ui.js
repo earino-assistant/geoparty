@@ -78,6 +78,10 @@ let placedKey = null;    // results fingerprint, so we redraw only on change
 let followedCodes = new Set();
 
 function joinRoom(code) {
+  // A prior subscription can still be live here (e.g. the user re-typed a
+  // code while the first room's "not found" was in flight) — drop it, or
+  // its callbacks keep firing against the new roomCode.
+  if (unsubRoom) { unsubRoom(); unsubRoom = null; }
   roomCode = code;
   followedCodes.add(code);
   $("entryErr").textContent = "";

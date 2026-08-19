@@ -66,7 +66,8 @@ function qrFormatBits(ecLevel, mask) {
 }
 
 // Returns a size×size matrix of 0/1, or null if text is too long.
-function qrEncode(text) {
+// Exported for the test suite; pages only use drawQr.
+export function qrEncode(text) {
   const bytes = new TextEncoder().encode(text);
   const spec = QR_VERSIONS.find(([, , dc]) => bytes.length <= dc - 2);
   if (!spec) return null;

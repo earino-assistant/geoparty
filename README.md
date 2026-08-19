@@ -66,7 +66,31 @@ python3 -m http.server 8000
 ```
 
 There is no build step. Libraries (MapillaryJS 4.1.2, Leaflet 1.9.4, Firebase
-JS SDK 10.12.2) load from pinned CDN URLs.
+JS SDK 10.12.2) load from pinned CDN URLs; the Leaflet and MapillaryJS tags
+carry SRI integrity hashes, so bumping a version means updating the hash in
+all three HTML pages (`openssl dgst -sha384 -binary | openssl base64 -A`
+over the new file).
+
+## Tests & CI
+
+The pure logic layer (`js/game.js`, `js/h2h.js`, `js/pool.js`, `js/qr.js`)
+is covered by a dependency-free test suite using Node's built-in runner —
+scoring, the time bonus, phase machines, turn rotation, reveal ordering,
+winner tie-breaks, the seeded shuffle/resume contract, QR encoding, and an
+integrity check over `data/location_pool.json`:
+
+```sh
+npm test        # node --test tests/*.test.js — no install needed
+npm run check   # node --check every module (catches syntax errors in the UI files)
+```
+
+Both run in CI on every push and pull request
+(`.github/workflows/ci.yml`). There is still no build step and no runtime
+dependency — `package.json` exists only to name the test scripts and mark
+the repo as ESM for Node.
+
+For a map of the data model, write-ownership rules, and concurrency
+invariants, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Deployment (GitHub Pages)
 
@@ -90,7 +114,7 @@ publish:
         ".read": true,
         ".write": "!data.exists() || data.child('createdAt').val() > (now - 86400000) || newData.val() == null",
         ".validate": "$roomCode.matches(/^[A-HJ-NP-Z]{4}$/)",
-        "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now" }
+        "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" }
       }
     }
   }
@@ -104,6 +128,13 @@ client credentials, and the threat model is drive-by vandalism, not
 adversaries. Anyone who knows (or guesses) a room code can read or overwrite
 that room while it is under 24 hours old. We accept that residual risk — worst
 case, someone griefs a party game round.
+
+The `+ 300000` on `createdAt` allows 5 minutes of client clock skew:
+clients stamp `createdAt` with `Date.now()`, and without the tolerance a
+phone whose clock runs ahead of Firebase's would have every room-creation
+write silently rejected (the write is fire-and-forget, so the host would
+play on locally while nobody could ever join). If you published the
+earlier, stricter rule, paste this version over it and publish again.
 
 The Firebase and Mapillary credentials committed in `config.js` are
 client-side identifiers designed to be embedded and public.

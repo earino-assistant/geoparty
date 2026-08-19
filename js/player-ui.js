@@ -41,6 +41,7 @@ import {
   FORFEIT_GRACE_MS,
   freeTeamSlot,
   teamForDevice,
+  allSubmitted,
   submittedCount,
   pendingTeams,
   submitRank,
@@ -157,6 +158,7 @@ let localStage = "explore"; // "explore" (pano) | "map" — this phone's UI mode
 let lastRoundSeen = null;   // round number the UI has been reset for
 let autoSubmitted = false;  // timeout auto-lock fired for this round
 let sweepDone = false;      // host forfeit sweep fired for this round
+let revealFlipPushed = null; // round number this phone already flipped for
 let prevSubmitted = 0;      // for "Team X locked in!" toasts
 let tickInterval = null;
 let revealFlipTimer = null; // phone-side hold during the TV countdown
@@ -279,6 +281,7 @@ function enterRoom(code, teamId) {
   lastRoundSeen = null;
   autoSubmitted = false;
   sweepDone = false;
+  revealFlipPushed = null;
   prevSubmitted = 0;
   localStage = "explore";
   switchingRooms = false;
@@ -372,6 +375,20 @@ function onState(state) {
        state.teams[myTeam].deviceId !== deviceId)) {
     leaveToHome("You're no longer in this room.");
     return;
+  }
+
+  // Deadlock guard: when the last two phones lock in near-simultaneously
+  // (the timeout auto-submit makes this the COMMON case), each computes the
+  // "am I last?" check in lockIn from a snapshot that predates the other's
+  // result, so neither flips the room to reveal — and the sweep won't
+  // either, since nothing is pending. Any phone that later SEES the
+  // complete result set while the phase is still roundActive closes the
+  // round. Racing closers write the same shape, so duplicates are harmless.
+  if (state.phase === "roundActive" && state.round &&
+      allSubmitted(state.teams, state.round) &&
+      revealFlipPushed !== state.round.number) {
+    revealFlipPushed = state.round.number;
+    push({ phase: "reveal", "round/revealAt": Date.now() + REVEAL_COUNTDOWN_MS });
   }
 
   // Race-pressure toast: someone else locked in.
