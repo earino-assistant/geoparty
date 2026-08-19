@@ -417,7 +417,7 @@ button:disabled { opacity: 0.4; cursor: default; }
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
-.guess-hint {
+.tv-guess-hint {
   position: absolute;
   left: 0;
   right: 0;
