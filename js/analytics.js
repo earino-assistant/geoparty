@@ -93,8 +93,12 @@ export const EVENT_SCHEMA = Object.freeze({
   // advance: how this round was reached from the previous reveal — "auto"
   // (the S6 soft auto-advance fired) | "manual" (host tapped Next Round).
   // Absent on round 1, which no reveal precedes.
+  // screen_attached (S7): was a TV heartbeat live when the round started?
+  // Couch only — it splits the game_created → round_started funnel by TV
+  // presence, the KPI behind removing the couch screen gate.
   round_started: {
     room: "string", mode: "string", round_number: "int", advance: "string",
+    screen_attached: "bool",
   },
   // moved: the pano was navigated off the round's anchor image before this
   // pin (street movement got used) — an image-id comparison, never a place.

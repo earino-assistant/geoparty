@@ -107,11 +107,12 @@
         AirPlay it to the TV.</p>
       <div class="share-row"><button id="btnTvLink">📤 Send the TV link</button></div>
       <p id="tvType" class="tv-add-alt"></p>
-      <div id="waitingNote" class="waiting-screen-note">Waiting for a screen to join…</div>
+      <!-- S7: a screen is optional — the note names the mode, never a gate. -->
+      <div id="waitingNote" class="waiting-screen-note">No TV? No problem — the reveal shows right here. Add a TV anytime.</div>
     </div>
     <div class="action-bar">
       <button id="btnAbandon">Abandon</button>
-      <button id="btnStartRound" class="btn-primary" disabled>Start Round</button>
+      <button id="btnStartRound" class="btn-primary">Start Round</button>
     </div>
   </section>
 
@@ -145,6 +146,9 @@
   <section id="h-reveal" class="phase-screen hidden">
     <div class="host-wrap">
       <h1 id="revealHeading">Round 1</h1>
+      <!-- S7 couch without a TV: with no live screen, the host phone shows
+           the big reveal itself — all pins, distances, the answer. -->
+      <div id="hostRevealMap" class="p-reveal-map hidden"></div>
       <div class="stat-card">
         <div class="label">Location</div>
         <div class="big place" id="revealPlace">—</div>
@@ -171,6 +175,8 @@
   <section id="h-gameover" class="phase-screen hidden">
     <div class="host-wrap">
       <h1>Final standings</h1>
+      <!-- S7: the crown, when this phone is the shared screen. -->
+      <div id="hostCrown" class="host-crown hidden"></div>
       <ul id="finalTotals" class="totals-list"></ul>
     </div>
     <div class="action-bar">

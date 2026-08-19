@@ -66,6 +66,15 @@ export const HINT_CARDS = Object.freeze({
       "Pass the phone when it's your turn.",
     ]),
   },
+  // S7 couch-without-a-TV: the first reveal that lands on the host phone
+  // instead of a TV teaches the hold-it-up move, once per device.
+  phonescreen: {
+    title: "This phone is the big screen",
+    lines: Object.freeze([
+      "No TV attached — the reveal lands right here.",
+      "Hold the phone up so the couch can see.",
+    ]),
+  },
 });
 
 // First guess map (id "guessmap"): the scoring one-liner always; the

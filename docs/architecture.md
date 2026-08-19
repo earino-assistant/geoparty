@@ -16,6 +16,8 @@ js/frontdoor.js    Pure front-door logic: join routing, chooser targets    ← t
 js/tvlink.js       Pure "Add a TV" logic: screen links, typeable address   ← tested
 js/hints.js        Pure education logic: one-shot flags, lock-now estimate ← tested
 js/autoadvance.js  Pure S6 soft auto-advance: countdown, hold, firing      ← tested
+js/couchscreen.js  Pure S7 couch-without-a-TV: screen-liveness fold,
+                   ungated lobby, phone-as-screen reveal pins, crown        ← tested
 js/daily.js        Pure Daily Challenge logic: date seed, run fold, lock   ← tested
 js/share.js        Pure share-artifact logic: UTM links, card text, grid   ← tested
 js/fx.js           Pure S4 sound+motion: sound pref, tick scheduling,
@@ -69,6 +71,14 @@ rooms/KWPF
   screenHeartbeat  ms epoch, TV presence (the only thing the TV writes)
   nextRoom         pointer written into a FINISHED room → subscribers follow
 ```
+
+The TV is optional in couch too (S7): the host phone never waits for a
+heartbeat to start a round, and while no heartbeat is live the phone
+renders the screen's payoff itself — reveal map, standings, showdown pins,
+crown (`couchscreen.js` decides; `host-ui.js` renders). Liveness is stamped
+on the host's own clock at heartbeat receipt (skew-proof), with beats
+ancient on the writer's clock ignored so a resumed subscription can't
+resurrect a dead TV.
 
 Head-to-head differs: `mode: "h2h"`, `hostTeam` (rotates to the winner),
 `teams/tN` gains `{ deviceId, joinedAt }`, and the round is below. The TV

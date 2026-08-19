@@ -123,6 +123,22 @@ test("sanitizeEvent: round_started carries the S6 advance mode, optionally", () 
   });
 });
 
+test("sanitizeEvent: round_started.screen_attached is strictly boolean (S7)", () => {
+  // The couch-without-a-TV KPI: false is a real, meaningful value (a game
+  // being played with no screen), so it must pass — and nothing truthy-ish
+  // may coerce into it.
+  const noTv = sanitizeEvent("round_started", {
+    room: "KWPFRT", mode: "couch", round_number: 1, screen_attached: false,
+  });
+  assert.deepEqual(noTv.props, {
+    room: "KWPFRT", mode: "couch", round_number: 1, screen_attached: false,
+  });
+  const junk = sanitizeEvent("round_started", {
+    room: "KWPFRT", mode: "couch", round_number: 1, screen_attached: "yes",
+  });
+  assert.ok(!("screen_attached" in junk.props));
+});
+
 test("sanitizeEvent: auto_advance_hold keeps aggregates, strips the rest", () => {
   const out = sanitizeEvent("auto_advance_hold", {
     room: "KWPFRT", mode: "couch", round_number: 3, seconds_left: 8.9,

@@ -410,8 +410,8 @@ button:disabled { opacity: 0.4; cursor: default; }
   margin: 4px 0 14px;
 }
 
-/* Head-to-head reveal map on the phone — the all-pins beat when no TV is
- * attached (and a recap when one is). */
+/* Phone-sized reveal map — h2h phones always, and the couch host phone
+ * when it IS the screen (S7): the all-pins beat with no TV attached. */
 .p-reveal-map {
   height: 36vh;
   min-height: 200px;
@@ -419,6 +419,15 @@ button:disabled { opacity: 0.4; cursor: default; }
   overflow: hidden;
   margin-bottom: 12px;
   background: #0b0b0f;
+}
+
+/* S7: the game-over crown on the host phone when no TV podium exists. */
+.host-crown {
+  text-align: center;
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin: 4px 0 14px;
+  animation: rise-in 0.35s ease-out both;
 }
 
 /* Host round: full-bleed viewer + overlay HUD. */
@@ -1287,7 +1296,7 @@ body:has(.action-bar) .consent-settings {
 
 /* Phone-side reveal: the map, cards, and result rows land in a quick
    cascade — the phone's version of the TV's reveal drama. */
-#p-reveal .p-reveal-map,
+#p-reveal .p-reveal-map, #h-reveal .p-reveal-map,
 #p-reveal .stat-card, #h-reveal .stat-card, #d-reveal .stat-card,
 #p-reveal .totals-list li, #h-reveal .totals-list li,
 #d-reveal .p-reveal-map, #d-reveal .totals-list li {

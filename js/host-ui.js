@@ -49,6 +49,14 @@ import { withUtm, partyShareText, foldBestMoment } from "./share.js";
 import { shareResult, shareTvLink } from "./share-ui.js";
 import { screenLink, tvBrowserLine } from "./tvlink.js";
 import {
+  foldHeartbeat,
+  screenLive,
+  phoneIsScreen,
+  lobbyReadiness,
+  couchRevealPins,
+  crownLine,
+} from "./couchscreen.js";
+import {
   AUTO_ADVANCE_MS,
   autoAdvanceStatus,
   shouldAutoAdvance,
@@ -165,7 +173,7 @@ let guessMarker = null;
 let superSureArmed = false; // active team's SUPER SURE toggle, this pin only
 let timerInterval = null;
 let unsubHeartbeat = null;
-let heartbeatSeen = false;
+let screenBeat = null;    // S7 screen liveness (couchscreen.foldHeartbeat)
 let prevRoomCode = null;  // finished room to leave a nextRoom pointer in,
                           // so a still-subscribed screen follows us over
 
@@ -311,31 +319,45 @@ function enterLobby() {
   // URL. The line hides itself on file://, where nothing is typeable.
   drawQr($("qrCanvas"), screenLink(location.href, roomCode, "qr"));
   $("tvType").textContent = tvBrowserLine(location.href) || "";
-  heartbeatSeen = false;
+  screenBeat = null;
   updateLobbyReadiness();
+  startLobbyTicker();
   if (unsubHeartbeat) unsubHeartbeat();
-  unsubHeartbeat = subscribeHeartbeat(roomCode, (ts) => {
-    if (ts) heartbeatSeen = true;
-    updateLobbyReadiness();
-  });
+  unsubHeartbeat = subscribeHeartbeat(roomCode, onHeartbeat);
+}
+
+/* S7: every heartbeat callback folds into the liveness state (skew-proof —
+ * see couchscreen.js), then refreshes whichever surface the answer drives:
+ * the lobby note, the reveal's phone-as-screen map, the game-over crown. */
+function onHeartbeat(ts) {
+  screenBeat = foldHeartbeat(screenBeat, ts, Date.now());
+  if (room && room.phase === "lobby") updateLobbyReadiness();
+  updateRevealSurface();
+  updateCrown();
 }
 
 function updateLobbyReadiness() {
   const note = $("waitingNote");
-  if (heartbeatSeen) {
-    note.textContent = "TV connected — ready when you are.";
-    note.classList.add("ok");
-    $("btnStartRound").disabled = false;
-  } else if (!connected) {
-    // Degraded single-screen mode (spec §12): the party survives offline.
-    note.textContent = "Offline — you can play on this phone alone.";
-    note.classList.remove("ok");
-    $("btnStartRound").disabled = false;
-  } else {
-    note.textContent = "The game starts the moment a screen joins…";
-    note.classList.remove("ok");
-    $("btnStartRound").disabled = true;
-  }
+  // S7: Start Round is NEVER gated on a screen — with no TV, this phone
+  // shows the reveal itself. The note just says which mode the couch is in.
+  const r = lobbyReadiness(screenLive(screenBeat, Date.now()), connected);
+  note.textContent = r.note;
+  note.classList.toggle("ok", r.ok);
+  $("btnStartRound").disabled = !r.canStart;
+}
+
+// Liveness can only decay silently (a dead TV sends no callback), so the
+// lobby note re-checks itself on a slow tick while the lobby is up.
+let lobbyTicker = null;
+function startLobbyTicker() {
+  stopLobbyTicker();
+  lobbyTicker = setInterval(() => {
+    if (room && room.phase === "lobby") updateLobbyReadiness();
+    else stopLobbyTicker();
+  }, 5000);
+}
+function stopLobbyTicker() {
+  if (lobbyTicker) { clearInterval(lobbyTicker); lobbyTicker = null; }
 }
 
 async function abandonGame() {
@@ -347,6 +369,9 @@ async function abandonGame() {
   stopTimer();
   stopLockNowTicker();
   stopAdvanceTicker();
+  stopLobbyTicker();
+  destroyHostRevealMap();
+  screenBeat = null;
   if (unsubHeartbeat) { unsubHeartbeat(); unsubHeartbeat = null; }
   try { await deleteRoom(roomCode); } catch (e) { console.warn(e); }
   localStorage.removeItem(LS_ACTIVE);
@@ -420,6 +445,8 @@ function schedulePoseWrite() {
 async function startRound(advance) {
   if (!setPhase("roundActive")) return;
   stopAdvanceTicker();
+  stopLobbyTicker();
+  destroyHostRevealMap();
   // "auto" only from the S6 ticker; a click event lands here otherwise.
   const via = advance === "auto" ? "auto"
     : room.round ? "manual" : null; // round 1 follows no reveal
@@ -483,6 +510,9 @@ async function startRound(advance) {
   });
   track("round_started", {
     room: roomCode, mode: "couch", round_number: number,
+    // S7: splits couch game_created → round_started conversion by TV
+    // presence — the KPI behind removing the screen gate.
+    screen_attached: screenLive(screenBeat, Date.now()),
     ...(via ? { advance: via } : {}),
   });
 
@@ -974,6 +1004,7 @@ function renderAdvanceState() {
     stopAdvanceTicker();
     return;
   }
+  updateRevealSurface(); // S7: a TV going stale mid-reveal hands over here
   const now = Date.now();
   const status = autoAdvanceStatus(room.round.autoAdvanceAt, now);
   const target = advanceTarget(room.round.number, room.settings.roundCount);
@@ -1008,13 +1039,92 @@ function holdAdvance() {
   toast("Holding — advance whenever you're ready");
 }
 
+/* S7 couch without a TV: with no live screen the host phone IS the shared
+ * display — the reveal grows the all-pins map the TV would have shown
+ * (guess→truth lines, team colors, SUPER SURE halos, the answer marker).
+ * Re-checked on every heartbeat callback and advance tick, so a TV that
+ * attaches mid-reveal takes the beat back (its renderer runs off the same
+ * state) and one that went stale hands it to the phone. */
+let hostRevealMap = null;
+let hostRevealMapFor = null; // "<room>:<round>" the map was built for
+
+function destroyHostRevealMap() {
+  if (hostRevealMap) {
+    try { hostRevealMap.remove(); } catch { /* already gone */ }
+    hostRevealMap = null;
+  }
+  hostRevealMapFor = null;
+  $("hostRevealMap").classList.add("hidden");
+}
+
+function updateRevealSurface() {
+  if (!room || room.phase !== "reveal" || !room.round) return;
+  if (phoneIsScreen(screenBeat, Date.now())) renderHostRevealMap();
+  else destroyHostRevealMap();
+}
+
+function renderHostRevealMap() {
+  const round = room.round;
+  if (!round.truth) return;
+  const key = `${roomCode}:${round.number}`;
+  if (hostRevealMapFor === key) return; // built already this reveal
+  destroyHostRevealMap();
+  hostRevealMapFor = key;
+  $("hostRevealMap").classList.remove("hidden");
+  hostRevealMap = L.map("hostRevealMap", {
+    zoomControl: false, dragging: false, scrollWheelZoom: false,
+    doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false,
+  });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(hostRevealMap);
+  const truth = L.latLng(round.truth.lat, round.truth.lng);
+  const pins = couchRevealPins(round, room.activeTeam);
+  hostRevealMap.fitBounds(
+    L.latLngBounds([truth, ...pins.map((p) => L.latLng(p.lat, p.lng))])
+      .pad(0.25),
+    { maxZoom: 10 }
+  );
+  for (const p of pins) {
+    const guess = L.latLng(p.lat, p.lng);
+    const color = teamHex(room.teams, p.id);
+    L.polyline([guess, truth], { color, weight: 3, dashArray: "6 8" })
+      .addTo(hostRevealMap);
+    L.circleMarker(guess, {
+      radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1,
+    }).addTo(hostRevealMap)
+      .bindTooltip(escapeHtml(room.teams[p.id].name), { direction: "top" });
+    if (p.superSure) {
+      // The bet steps out of hiding: verdict halo on the pin (reveal-only).
+      L.circleMarker(guess, {
+        radius: 14, color: "#ffcf3f", weight: 3, fill: false,
+        dashArray: "4 6", interactive: false,
+      }).addTo(hostRevealMap)
+        .bindTooltip(
+          p.superSureOutcome === "won" ? "SUPER SURE ×2" : "SUPER SURE — 0",
+          { permanent: true, direction: "bottom", className: "ss-tooltip" });
+    }
+  }
+  L.circleMarker(truth, {
+    radius: 10, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
+  }).addTo(hostRevealMap)
+    .bindTooltip("Answer", { permanent: true, direction: "top" });
+  setTimeout(
+    () => hostRevealMap && hostRevealMap.invalidateSize({ pan: false }), 60);
+}
+
 let revealTracked = null; // "<room>:<round>" — resume re-enters the reveal
 function enterReveal() {
   stopLockNowTicker();
   showScreen("h-reveal");
-  // First reveal ever: label the breakdown once (M5); the injected speed
-  // line below carries the numbers themselves every round.
-  oneShotHint("reveal", HINT_CARDS.reveal);
+  updateRevealSurface(); // S7: the map grows when this phone is the screen
+  // One hint per moment: the first phone-as-screen reveal teaches the
+  // hold-it-up move; otherwise the first reveal ever labels the breakdown
+  // once (M5) — the injected speed line below carries the numbers.
+  if (!hostRevealMap || !oneShotHint("phonescreen", HINT_CARDS.phonescreen)) {
+    oneShotHint("reveal", HINT_CARDS.reveal);
+  }
   const { number, showdown } = room.round;
   // S1: fold this reveal into the game's closest-guess moment — the share
   // card's brag line. Solo rounds carry one pin on round.guess/score;
@@ -1149,6 +1259,19 @@ function nextOrFinish(advance) {
   }
 }
 
+// S7: with no TV podium, the host phone crowns the winner itself. A screen
+// attaching at game over (its confetti podium renders) hides it again via
+// onHeartbeat. Single-team co-op games have no rivalry to crown (null).
+function updateCrown() {
+  if (!room || room.phase !== "gameOver") return;
+  const line = phoneIsScreen(screenBeat, Date.now())
+    ? crownLine(room.teams)
+    : null;
+  const el = $("hostCrown");
+  el.textContent = line || "";
+  el.classList.toggle("hidden", !line);
+}
+
 function finishGame(advance) {
   if (!setPhase("gameOver")) return;
   stopTimer();
@@ -1166,8 +1289,10 @@ function finishGame(advance) {
     ...(advance === "auto" || advance === "manual" ? { advance } : {}),
   });
   destroyViewer();
+  destroyHostRevealMap();
   showScreen("h-gameover");
   playSound("fanfare"); // S4
+  updateCrown(); // S7: no TV podium — this phone crowns the winner
   renderTotals($("finalTotals"));
   $("btnSaveLeaderboard").disabled = false;
   $("btnSaveLeaderboard").textContent = "Save to leaderboard";
@@ -1309,6 +1434,7 @@ async function resumeGame(code, state) {
       break;
     case "gameOver":
       showScreen("h-gameover");
+      updateCrown(); // S7 — re-checked when the first heartbeat lands
       renderTotals($("finalTotals"));
       break;
     default:
@@ -1316,9 +1442,8 @@ async function resumeGame(code, state) {
   }
   if (room.phase !== "lobby") {
     if (unsubHeartbeat) unsubHeartbeat();
-    unsubHeartbeat = subscribeHeartbeat(roomCode, (ts) => {
-      if (ts) heartbeatSeen = true;
-    });
+    screenBeat = null;
+    unsubHeartbeat = subscribeHeartbeat(roomCode, onHeartbeat);
   }
 }
 

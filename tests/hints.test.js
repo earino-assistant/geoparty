@@ -84,6 +84,15 @@ test("showdown card sells the shared spot, never a comeback (§1.6)", () => {
   assert.ok(text.includes("leader goes first"));
 });
 
+test("phonescreen card (S7): teaches the hold-it-up move for no-TV couch", () => {
+  const text = [HINT_CARDS.phonescreen.title, ...HINT_CARDS.phonescreen.lines]
+    .join(" ");
+  assert.ok(/big screen/i.test(text));
+  assert.ok(/hold/i.test(text));
+  // A bottom sheet, not an interstitial — it must not cover the reveal map.
+  assert.notEqual(HINT_CARDS.phonescreen.center, true);
+});
+
 test("guessMapHintLines: scoring line always; rivals line only in h2h", () => {
   const couch = guessMapHintLines("couch", false);
   const h2h = guessMapHintLines("h2h", false);
