@@ -398,6 +398,17 @@ button:disabled { opacity: 0.4; cursor: default; }
   left: 3vw;
   font-size: 5vh;
 }
+/* Final Showdown banner on the round screen: same pulse as "Guessing…". */
+.tv-active-team.showdown {
+  animation: guess-pulse 1.6s ease-in-out infinite;
+}
+
+/* Whose-turn label on the TV guess map (bottom-left corner, injected). */
+.tv-guess-team {
+  bottom: 2vh;
+  left: 3vw;
+  font-size: 5vh;
+}
 
 /* Screen guessing: full-bleed world map, live preview of the host's pin.
    Labels sit above Leaflet's panes (tiles 200 … tooltips 700). */
@@ -434,6 +445,13 @@ button:disabled { opacity: 0.4; cursor: default; }
    the guess point; Leaflet positions it, CSS animates the children. The pin
    drops in with a bounce when first placed; the ring pulses when it moves. */
 .tv-live-pin-wrap { pointer-events: none; }
+/* Zero-size inner wrap so JS can set --pin-color (the active team's color)
+   on one element; children keep their pin-point anchoring. */
+.pin-parts {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
 .tv-live-pin {
   position: absolute;
   left: -14px;
@@ -441,7 +459,7 @@ button:disabled { opacity: 0.4; cursor: default; }
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #ffcf3f;
+  background: var(--pin-color, #ffcf3f);
   border: 3px solid #fff;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
   animation: pin-drop 0.6s ease-out both;
@@ -462,7 +480,7 @@ button:disabled { opacity: 0.4; cursor: default; }
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  border: 3px solid #ffcf3f;
+  border: 3px solid var(--pin-color, #ffcf3f);
   opacity: 0;
 }
 .pin-ripple.go {
@@ -533,6 +551,24 @@ button:disabled { opacity: 0.4; cursor: default; }
   padding: 0.8vh 1.5vw;
 }
 .reveal-board .row .pts { font-variant-numeric: tabular-nums; }
+
+/* Showdown reveal: two boards side by side (this round + totals), each with
+   a small caption pulled from data-caption. The closest team gets crowned. */
+.tv-showdown::before,
+.reveal-board.captioned::before {
+  content: attr(data-caption);
+  font-size: 2.2vh;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.tv-showdown .row.closest {
+  outline: 0.4vh solid var(--accent);
+}
+
+/* Host showdown reveal: closest-first results list. */
+.showdown-results li.closest { outline: 2px solid var(--accent); }
 
 /* Podium */
 .podium {

@@ -14,11 +14,24 @@ import {
   formatCountdown,
   teamIds,
   standings,
+  showdownResults,
 } from "./game.js";
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = ["s-entry", "s-lobby", "s-round", "s-guess", "s-reveal", "s-gameover"];
 const TEAM_COLORS = ["var(--team-1)", "var(--team-2)", "var(--team-3)", "var(--team-4)"];
+// Same palette as concrete hex: Leaflet paints SVG markers with these, and
+// CSS var() strings don't resolve inside SVG presentation attributes.
+const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
+
+const teamHex = (teams, id) => {
+  const i = teamIds(teams).indexOf(id);
+  return i >= 0 ? TEAM_HEX[i % TEAM_HEX.length] : TEAM_HEX[0];
+};
+
+// Leaflet tooltip content is HTML; team names are user input.
+const escapeHtml = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function showScreen(id) {
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
@@ -41,6 +54,9 @@ let liveMap = null;      // guessing-phase world map (kept across rounds)
 let liveMarker = null;   // the host's in-progress pin, mirrored live
 let liveViewKey = null;  // last host view applied, so we only animate on change
 let livePinPulseAt = 0;  // last ripple time — pulses are rationed, not per-write
+let livePinColor = null; // active team's color on the live pin
+let placedLayer = null;  // showdown: pins already locked in, team-colored
+let placedKey = null;    // results fingerprint, so we redraw only on change
 
 /* ================================================================
  * Room entry
@@ -152,7 +168,11 @@ function render(state) {
     liveMarker.remove();
     liveMarker = null;
   }
-  if (state.phase !== "guessing") liveViewKey = null;
+  if (state.phase !== "guessing") {
+    liveViewKey = null;
+    if (placedLayer) placedLayer.clearLayers();
+    placedKey = null;
+  }
 }
 
 function renderLobby(state) {
@@ -231,11 +251,17 @@ function renderRound(state) {
   const ids = teamIds(state.teams);
   const activeIdx = ids.indexOf(state.activeTeam);
   const teamEl = $("tvActiveTeam");
-  if (ids.length > 1 && activeIdx >= 0) {
+  if (round.showdown && ids.length > 1) {
+    teamEl.textContent = "FINAL SHOWDOWN — every team plays!";
+    teamEl.style.color = "var(--accent)";
+    teamEl.classList.add("showdown");
+  } else if (ids.length > 1 && activeIdx >= 0) {
     teamEl.textContent = state.teams[state.activeTeam].name;
     teamEl.style.color = TEAM_COLORS[activeIdx % TEAM_COLORS.length];
+    teamEl.classList.remove("showdown");
   } else {
     teamEl.textContent = "";
+    teamEl.classList.remove("showdown");
   }
   startCountdown(round.endsAt);
 }
@@ -286,13 +312,51 @@ function ensureLiveMap() {
 
 // The pin is a divIcon so CSS can animate it: it drops in with a bounce the
 // first time the host places it, and fires a ripple pulse when it moves.
-// Anchored at its center to match the circleMarker it replaced.
-function livePinIcon() {
+// Anchored at its center to match the circleMarker it replaced. The pin
+// wears the active team's color via a CSS custom property.
+function livePinIcon(color) {
   return L.divIcon({
     className: "tv-live-pin-wrap",
-    html: '<div class="pin-ripple"></div><div class="tv-live-pin"></div>',
+    html: `<div class="pin-parts" style="--pin-color:${color}">` +
+      '<div class="pin-ripple"></div><div class="tv-live-pin"></div></div>',
     iconSize: [0, 0],
   });
+}
+
+// Whose-turn corner label on the guess map (injected — HTML untouched).
+let guessTeamEl = null;
+function ensureGuessTeamEl() {
+  if (!guessTeamEl) {
+    guessTeamEl = document.createElement("div");
+    guessTeamEl.className = "tv-hud-corner tv-guess-team";
+    $("s-guess").appendChild(guessTeamEl);
+  }
+  return guessTeamEl;
+}
+
+// Showdown pins already locked in, in team colors with name tags — the
+// couch watches the board fill up as the phone goes around.
+function renderPlacedPins(state, round) {
+  const results = (round.showdown && round.results) || {};
+  const key = Object.keys(results).sort().join(",");
+  if (key === placedKey) return;
+  placedKey = key;
+  if (!placedLayer) placedLayer = L.layerGroup().addTo(liveMap);
+  placedLayer.clearLayers();
+  for (const id of Object.keys(results)) {
+    const r = results[id];
+    L.circleMarker([r.guess.lat, r.guess.lng], {
+      radius: 10,
+      color: "#fff",
+      weight: 3,
+      fillColor: teamHex(state.teams, id),
+      fillOpacity: 1,
+      interactive: false,
+    })
+      .addTo(placedLayer)
+      .bindTooltip(escapeHtml(state.teams[id].name),
+        { permanent: true, direction: "top" });
+  }
 }
 
 // Ripple on move — but rationed: liveGuess streams at ≤4/s and a ring per
@@ -318,9 +382,30 @@ function renderGuessing(state) {
   }
 
   const round = state.round || {};
-  $("tvGuessRound").textContent =
-    `Round ${round.number || 1}` +
-    (state.settings ? ` / ${state.settings.roundCount}` : "");
+  const ids = teamIds(state.teams);
+  $("tvGuessRound").textContent = round.showdown
+    ? "FINAL SHOWDOWN"
+    : `Round ${round.number || 1}` +
+      (state.settings ? ` / ${state.settings.roundCount}` : "");
+
+  // Whose turn is it? Solo rounds name the team; showdown turns count down
+  // the pass-around ("Blue is guessing · 2/3").
+  const teamEl = ensureGuessTeamEl();
+  const activeIdx = ids.indexOf(state.activeTeam);
+  if (ids.length > 1 && activeIdx >= 0) {
+    const name = state.teams[state.activeTeam].name;
+    if (round.showdown && Array.isArray(round.order)) {
+      const turn = round.order.indexOf(state.activeTeam) + 1;
+      teamEl.textContent = `${name} is guessing · ${turn}/${round.order.length}`;
+    } else {
+      teamEl.textContent = `${name} is guessing`;
+    }
+    teamEl.style.color = TEAM_COLORS[activeIdx % TEAM_COLORS.length];
+  } else {
+    teamEl.textContent = "";
+  }
+
+  renderPlacedPins(state, round);
 
   // Follow the host's framing: round/liveView mirrors their guess map's
   // center + zoom. Applied only when it actually changes, with a short
@@ -336,10 +421,19 @@ function renderGuessing(state) {
   }
 
   const lg = round.liveGuess;
+  const pinColor = ids.length > 1 && activeIdx >= 0
+    ? TEAM_HEX[activeIdx % TEAM_HEX.length]
+    : TEAM_HEX[0];
   if (lg && typeof lg.lat === "number" && typeof lg.lng === "number") {
     $("tvGuessHint").classList.add("hidden");
     const pos = L.latLng(lg.lat, lg.lng);
     if (liveMarker) {
+      if (pinColor !== livePinColor) {
+        // New team took over mid-showdown: recolor (replays the drop bounce,
+        // which reads as the new team's pin arriving).
+        livePinColor = pinColor;
+        liveMarker.setIcon(livePinIcon(pinColor));
+      }
       const moved = liveMarker.getLatLng().distanceTo(pos) > 1; // metres
       liveMarker.setLatLng(pos);
       if (moved && Date.now() - livePinPulseAt >= PIN_PULSE_MIN_MS) {
@@ -347,8 +441,9 @@ function renderGuessing(state) {
         pulseLivePin();
       }
     } else {
+      livePinColor = pinColor;
       liveMarker = L.marker(pos, {
-        icon: livePinIcon(),
+        icon: livePinIcon(pinColor),
         interactive: false,
         keyboard: false,
       }).addTo(liveMap);
@@ -375,6 +470,17 @@ function renderReveal(state) {
   showScreen("s-reveal");
   const round = state.round || {};
   renderBoard(state);
+  if (round.showdown) {
+    renderShowdownReveal(state, round);
+    return;
+  }
+  // Solo reveal: make sure the stat tiles are back if the previous reveal
+  // this screen showed was a showdown (e.g. a new game just started).
+  document.querySelectorAll("#s-reveal .reveal-num")
+    .forEach((el) => el.classList.remove("hidden"));
+  const sd = $("tvShowdown");
+  if (sd) sd.remove();
+  $("tvBoard").classList.remove("captioned");
   if (!round.truth || !round.guess || !round.score) return;
   if (revealShownForRound === round.number) return; // animate once per round
   revealShownForRound = round.number;
@@ -442,6 +548,129 @@ function renderReveal(state) {
   $("tvDistance").textContent = formatDistance(round.score.distanceKm);
   $("tvPoints").textContent = "0";
   requestAnimationFrame(step);
+}
+
+/* Showdown reveal: every team's pin on one map. Lines draw one after
+ * another in guess order — the leader's first, the underdog's last — then
+ * the answer lands, the place name pops, and the closest team is crowned. */
+
+function ensureShowdownBoard() {
+  let el = $("tvShowdown");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "tvShowdown";
+    el.className = "reveal-board tv-showdown";
+    el.dataset.caption = "This round";
+    $("tvBoard").before(el);
+  }
+  el.innerHTML = "";
+  return el;
+}
+
+function renderShowdownReveal(state, round) {
+  const results = round.results || {};
+  const order = (Array.isArray(round.order) ? round.order : Object.keys(results))
+    .filter((id) => results[id]);
+  if (!round.truth || order.length === 0) return;
+  if (revealShownForRound === round.number) return; // animate once per round
+  revealShownForRound = round.number;
+
+  // The two big stat tiles make way for the per-team result board.
+  document.querySelectorAll("#s-reveal .reveal-num")
+    .forEach((el) => el.classList.add("hidden"));
+  const boardEl = ensureShowdownBoard();
+  $("tvBoard").dataset.caption = "Totals";
+  $("tvBoard").classList.add("captioned");
+
+  const placeEl = $("tvPlace");
+  placeEl.textContent = round.truth.name || "";
+  placeEl.classList.remove("show");
+
+  if (revealMap) { revealMap.remove(); revealMap = null; }
+  revealMap = L.map("revealMap", {
+    zoomControl: false,
+    attributionControl: true,
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    boxZoom: false,
+    keyboard: false,
+    touchZoom: false,
+  });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(revealMap);
+
+  const truth = L.latLng(round.truth.lat, round.truth.lng);
+  const guessPts = order.map(
+    (id) => L.latLng(results[id].guess.lat, results[id].guess.lng)
+  );
+  revealMap.fitBounds(
+    L.latLngBounds([truth, ...guessPts]).pad(0.25), { maxZoom: 10 }
+  );
+  setTimeout(() => revealMap.invalidateSize({ pan: false }), 60);
+
+  const closestId = showdownResults(round)[0].id;
+  const rows = {};
+
+  const finish = () => {
+    L.circleMarker(truth, {
+      radius: 12, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
+    }).addTo(revealMap)
+      .bindTooltip("Answer", { permanent: true, direction: "top" });
+    placeEl.classList.add("show");
+    const row = rows[closestId];
+    if (row) {
+      row.classList.add("closest");
+      row.firstChild.textContent = `👑 ${state.teams[closestId].name}`;
+    }
+  };
+
+  const DRAW_MS = 800;
+  const drawNext = (i) => {
+    if (i >= order.length) { finish(); return; }
+    const id = order[i];
+    const r = results[id];
+    const guess = L.latLng(r.guess.lat, r.guess.lng);
+    const color = teamHex(state.teams, id);
+    L.circleMarker(guess, {
+      radius: 10, color: "#fff", weight: 3, fillColor: color, fillOpacity: 1,
+    }).addTo(revealMap)
+      .bindTooltip(escapeHtml(state.teams[id].name),
+        { permanent: true, direction: "top" });
+    const line = L.polyline([guess], { color, weight: 4, dashArray: "8 10" })
+      .addTo(revealMap);
+    let start = null;
+    const step = (t) => {
+      if (start === null) start = t;
+      const f = Math.min(1, (t - start) / DRAW_MS);
+      const eased = 1 - Math.pow(1 - f, 3);
+      line.setLatLngs([
+        guess,
+        L.latLng(
+          guess.lat + (truth.lat - guess.lat) * eased,
+          guess.lng + (truth.lng - guess.lng) * eased
+        ),
+      ]);
+      if (f < 1) { requestAnimationFrame(step); return; }
+      const row = document.createElement("div");
+      row.className = "row";
+      const name = document.createElement("span");
+      name.textContent = state.teams[id].name;
+      name.style.color = color;
+      const val = document.createElement("span");
+      val.className = "pts";
+      val.textContent =
+        `${formatDistance(r.distanceKm)} · +${r.points.toLocaleString()}`;
+      row.append(name, val);
+      rows[id] = row;
+      boardEl.appendChild(row);
+      setTimeout(() => drawNext(i + 1), 300);
+    };
+    requestAnimationFrame(step);
+  };
+  drawNext(0);
 }
 
 function countUpPoints(points) {

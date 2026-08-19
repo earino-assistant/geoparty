@@ -22,6 +22,9 @@ import {
   defaultTeams,
   initialRoomState,
   standings,
+  isShowdownRound,
+  showdownOrder,
+  showdownResults,
 } from "./game.js";
 import { loadPool, PoolSampler } from "./pool.js";
 
@@ -212,6 +215,16 @@ function drawQr(canvas, text) {
 const $ = (id) => document.getElementById(id);
 const SCREENS = ["h-setup", "h-lobby", "h-round", "h-guess", "h-reveal", "h-gameover"];
 
+// Concrete hex values of --team-1..4: Leaflet paints SVG markers with these,
+// and CSS var() strings don't resolve there.
+const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
+const teamHex = (teams, id) =>
+  TEAM_HEX[teamIds(teams).indexOf(id) % TEAM_HEX.length];
+
+// Leaflet tooltip content is HTML; team names are user input.
+const escapeHtml = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 function showScreen(id) {
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
 }
@@ -391,7 +404,7 @@ async function newGame() {
       code = makeRoomCode();
     }
     roomCode = code;
-    room = initialRoomState(collectSettings(), collectTeams());
+    room = initialRoomState(collectSettings(), collectTeams(), roomCode);
     sampler = new PoolSampler(pool, roomCode, 0);
     currentTruth = null;
     writeRoom(roomCode, room).catch((e) =>
@@ -556,6 +569,7 @@ async function startRound() {
 
   const now = Date.now();
   const secs = room.settings.roundSeconds;
+  const showdown = isShowdownRound(room.teams, room.settings, number);
   room.round = {
     number,
     imageId: entry.image_id,
@@ -567,8 +581,15 @@ async function startRound() {
     liveView: null,
     guess: null,
     score: null,
+    // Final Showdown: every team pins the same location, leader first;
+    // per-team guesses accumulate in results until the all-at-once reveal.
+    showdown,
+    order: showdown ? showdownOrder(room.teams) : null,
+    results: null,
   };
-  room.activeTeam = teamForRound(room.teams, number);
+  room.activeTeam = showdown
+    ? room.round.order[0]
+    : teamForRound(room.teams, number, roomCode);
   room.poolCursor = sampler.cursor;
   push({
     phase: "roundActive",
@@ -578,9 +599,15 @@ async function startRound() {
   });
 
   $("hudRound").textContent = `Round ${number}/${room.settings.roundCount}`;
-  $("hudTeam").textContent =
-    teamIds(room.teams).length > 1 ? room.teams[room.activeTeam].name : "";
+  $("hudTeam").textContent = roundTeamLabel();
   startTimer();
+}
+
+// HUD label for the round screen: the active team, or the showdown banner.
+function roundTeamLabel() {
+  if (teamIds(room.teams).length <= 1) return "";
+  if (room.round && room.round.showdown) return "FINAL SHOWDOWN";
+  return room.teams[room.activeTeam].name;
 }
 
 function startTimer() {
@@ -692,6 +719,44 @@ function ensureGuessMap() {
   });
 }
 
+// The static "drop your pin" hint doubles as the whose-turn banner: solo
+// rounds name the active team; showdown turns count down the pass-around.
+function updateGuessHint() {
+  const el = document.querySelector("#h-guess .guess-hint");
+  if (!room || teamIds(room.teams).length <= 1) {
+    el.textContent = "Tap the map to drop your pin";
+    return;
+  }
+  const name = room.teams[room.activeTeam].name;
+  if (room.round && room.round.showdown) {
+    const order = room.round.order || [];
+    const idx = order.indexOf(room.activeTeam);
+    el.textContent = `${name} — drop your pin (${idx + 1}/${order.length})`;
+  } else {
+    el.textContent = `${name} — tap the map to drop your pin`;
+  }
+}
+
+// Showdown pins already locked in, drawn in team colors so the team holding
+// the phone sees the state of play without squinting at the TV.
+let placedPinsLayer = null;
+function renderPlacedPins() {
+  if (!placedPinsLayer) placedPinsLayer = L.layerGroup().addTo(guessMap);
+  placedPinsLayer.clearLayers();
+  const results = (room.round && room.round.results) || {};
+  for (const id of Object.keys(results)) {
+    L.circleMarker([results[id].guess.lat, results[id].guess.lng], {
+      radius: 9,
+      color: "#fff",
+      weight: 2,
+      fillColor: teamHex(room.teams, id),
+      fillOpacity: 1,
+    })
+      .addTo(placedPinsLayer)
+      .bindTooltip(escapeHtml(room.teams[id].name), { direction: "top" });
+  }
+}
+
 function openGuessMap() {
   if (!setPhase("guessing")) return;
   stopTimer();
@@ -707,16 +772,27 @@ function openGuessMap() {
   if (guessMarker) { guessMarker.remove(); guessMarker = null; }
   $("btnConfirmGuess").disabled = true;
   guessMap.setView([25, 10], 2);
+  renderPlacedPins();
+  updateGuessHint();
   // Leaflet needs a size pass after the container becomes visible.
   setTimeout(() => guessMap.invalidateSize(), 50);
 }
 
 function confirmGuess() {
   if (!guessMarker || !currentTruth) return;
+  const g = guessMarker.getLatLng();
+  const guess = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
+  const distanceKm = haversineKm(currentTruth.lat, currentTruth.lng, guess.lat, guess.lng);
+  const points = scoreForDistance(distanceKm);
+
+  if (room.round.showdown) {
+    confirmShowdownGuess(guess, distanceKm, points);
+    return;
+  }
+
   if (!setPhase("reveal")) return;
   cancelLiveGuessWrite(); // no trailing preview write after the phase flips
   cancelLiveViewWrite();
-  const g = guessMarker.getLatLng();
   // `name` rides along so the screen (a pure subscriber) can show the place
   // name at reveal without loading the pool itself. Older pool entries may
   // lack it; RTDB rejects `undefined`, hence the null fallback.
@@ -725,9 +801,6 @@ function confirmGuess() {
     lng: currentTruth.lng,
     name: currentTruth.name || null,
   };
-  const guess = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
-  const distanceKm = haversineKm(truth.lat, truth.lng, guess.lat, guess.lng);
-  const points = scoreForDistance(distanceKm);
 
   room.round.truth = truth;
   room.round.guess = guess;
@@ -748,19 +821,105 @@ function confirmGuess() {
   enterReveal();
 }
 
+// One showdown turn locked in. Middle teams: bank the result, pass the
+// phone, stay in the guessing phase. Last team: flip to reveal with the
+// truth so every pin lands on the TV at once.
+function confirmShowdownGuess(guess, distanceKm, points) {
+  const team = room.activeTeam;
+  const order = room.round.order || [];
+  const result = { guess, distanceKm, points };
+
+  room.round.results = room.round.results || {};
+  room.round.results[team] = result;
+  room.teams[team].total += points;
+  room.round.liveGuess = null;
+  cancelLiveGuessWrite();
+
+  const next = order[order.indexOf(team) + 1];
+  if (next) {
+    room.activeTeam = next;
+    push({
+      activeTeam: next,
+      "round/liveGuess": null,
+      [`round/results/${team}`]: result,
+      [`teams/${team}/total`]: room.teams[team].total,
+    });
+    guessMarker.remove();
+    guessMarker = null;
+    $("btnConfirmGuess").disabled = true;
+    guessMap.setView([25, 10], 2);
+    renderPlacedPins();
+    updateGuessHint();
+    toast(`Pass the phone — ${room.teams[next].name} is up!`);
+    return;
+  }
+
+  if (!setPhase("reveal")) return;
+  cancelLiveViewWrite();
+  const truth = {
+    lat: currentTruth.lat,
+    lng: currentTruth.lng,
+    name: currentTruth.name || null,
+  };
+  room.round.truth = truth;
+  room.round.liveView = null;
+  push({
+    phase: "reveal",
+    "round/liveGuess": null,
+    "round/liveView": null,
+    "round/truth": truth,
+    [`round/results/${team}`]: result,
+    [`teams/${team}/total`]: room.teams[team].total,
+  });
+  enterReveal();
+}
+
 /* ================================================================
  * Reveal & game over
  * ================================================================ */
 
 function enterReveal() {
   showScreen("h-reveal");
-  const { number } = room.round;
-  const { points, distanceKm } = room.round.score;
-  $("revealHeading").textContent = `Round ${number} of ${room.settings.roundCount}`;
+  const { number, showdown } = room.round;
+  $("revealHeading").textContent = showdown
+    ? "Final Showdown"
+    : `Round ${number} of ${room.settings.roundCount}`;
   $("revealPlace").textContent =
     (room.round.truth && room.round.truth.name) || "—";
-  $("revealDistance").textContent = formatDistance(distanceKm);
-  $("revealPoints").textContent = points.toLocaleString();
+
+  // Solo rounds keep the Distance/Points cards; the showdown swaps them for
+  // a closest-first list of every team's result (injected — HTML untouched).
+  const distCard = $("revealDistance").closest(".stat-card");
+  const ptsCard = $("revealPoints").closest(".stat-card");
+  let list = $("hostShowdownResults");
+  distCard.classList.toggle("hidden", !!showdown);
+  ptsCard.classList.toggle("hidden", !!showdown);
+  if (showdown) {
+    if (!list) {
+      list = document.createElement("ul");
+      list.id = "hostShowdownResults";
+      list.className = "totals-list showdown-results";
+      ptsCard.after(list);
+    }
+    list.classList.remove("hidden");
+    list.innerHTML = "";
+    showdownResults(room.round).forEach((r, i) => {
+      const li = document.createElement("li");
+      if (i === 0) li.classList.add("closest");
+      const name = document.createElement("span");
+      name.textContent = (i === 0 ? "👑 " : "") + room.teams[r.id].name;
+      const val = document.createElement("span");
+      val.textContent =
+        `${formatDistance(r.distanceKm)} · +${r.points.toLocaleString()}`;
+      li.append(name, val);
+      list.appendChild(li);
+    });
+  } else {
+    if (list) list.classList.add("hidden");
+    const { points, distanceKm } = room.round.score;
+    $("revealDistance").textContent = formatDistance(distanceKm);
+    $("revealPoints").textContent = points.toLocaleString();
+  }
   renderTotals($("revealTotals"));
   $("btnNextRound").textContent =
     number >= room.settings.roundCount ? "Finish" : "Next Round";
@@ -768,9 +927,11 @@ function enterReveal() {
 
 function renderTotals(listEl) {
   listEl.innerHTML = "";
+  // No "active team" highlight after a showdown — everyone just played.
+  const showdown = room.round && room.round.showdown;
   for (const t of standings(room.teams)) {
     const li = document.createElement("li");
-    if (t.id === room.activeTeam) li.classList.add("active");
+    if (t.id === room.activeTeam && !showdown) li.classList.add("active");
     const name = document.createElement("span");
     name.textContent = t.name;
     const pts = document.createElement("span");
@@ -892,8 +1053,7 @@ async function resumeGame(code, state) {
       catch (e) { console.warn("resume: image failed to load", e); }
       $("hudRound").textContent =
         `Round ${room.round.number}/${room.settings.roundCount}`;
-      $("hudTeam").textContent =
-        teamIds(room.teams).length > 1 ? room.teams[room.activeTeam].name : "";
+      $("hudTeam").textContent = roundTeamLabel();
       startTimer();
       break;
     }
@@ -902,6 +1062,8 @@ async function resumeGame(code, state) {
       ensureGuessMap();
       if (guessMarker) { guessMarker.remove(); guessMarker = null; }
       $("btnConfirmGuess").disabled = true;
+      renderPlacedPins(); // mid-showdown resume: restore locked-in pins
+      updateGuessHint();
       setTimeout(() => guessMap.invalidateSize(), 50);
       break;
     case "reveal":

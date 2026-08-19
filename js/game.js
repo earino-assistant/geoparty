@@ -66,25 +66,64 @@ export function teamIds(teams) {
   return Object.keys(teams || {}).sort();
 }
 
-// Rotate activeTeam each round when more than one team (spec §4).
-export function teamForRound(teams, roundNumber) {
+/* Turn schedule.
+ * Rounds 1..R-1 are solo rounds rotating from a per-game starter derived
+ * from the (random) room code, so who opens the game — and who lands any
+ * extra solo guess when rounds don't divide evenly — varies game to game.
+ * Round R is the Final Showdown: every team guesses the same location,
+ * current leader first, so trailing teams get the last word. Solo rotation
+ * keeps guess counts within one of even; the shared final adds one guess
+ * to everyone, so the whole game stays within one of even too. */
+
+export function starterIndex(roomCode, numTeams) {
+  if (!numTeams) return 0;
+  let h = 0;
+  const code = roomCode || "";
+  for (let i = 0; i < code.length; i++) {
+    h = (h * 31 + code.charCodeAt(i)) >>> 0;
+  }
+  return h % numTeams;
+}
+
+// The last round of a multi-team game is the shared all-play round.
+export function isShowdownRound(teams, settings, roundNumber) {
+  return teamIds(teams).length > 1 &&
+    !!settings && roundNumber >= settings.roundCount;
+}
+
+// Active team for a solo round: rotation offset by the seeded starter.
+export function teamForRound(teams, roundNumber, roomCode) {
   const ids = teamIds(teams);
   if (ids.length === 0) return null;
-  return ids[(roundNumber - 1) % ids.length];
+  const start = starterIndex(roomCode, ids.length);
+  return ids[(start + roundNumber - 1) % ids.length];
+}
+
+// Showdown guess order: leader guesses blind, the underdog reacts last.
+export function showdownOrder(teams) {
+  return standings(teams).map((t) => t.id);
+}
+
+// Showdown results sorted closest-first for the reveal.
+export function showdownResults(round) {
+  const results = (round && round.results) || {};
+  return Object.keys(results)
+    .map((id) => ({ id, ...results[id] }))
+    .sort((a, b) => a.distanceKm - b.distanceKm);
 }
 
 export function defaultTeams() {
   return { t1: { name: "Everyone", total: 0 } };
 }
 
-export function initialRoomState(settings, teams) {
+export function initialRoomState(settings, teams, roomCode) {
   return {
     createdAt: Date.now(),
     phase: "lobby",
     settings,
     round: null,
     teams,
-    activeTeam: teamIds(teams)[0],
+    activeTeam: teamForRound(teams, 1, roomCode),
     poolCursor: 0,
     screenHeartbeat: null,
   };
