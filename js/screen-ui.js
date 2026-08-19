@@ -16,9 +16,18 @@ import {
   standings,
   showdownResults,
 } from "./game.js";
+import {
+  H2H_SCREEN_IDS,
+  renderH2H,
+  renderH2HGameOverNote,
+  disposeH2H,
+} from "./screen-h2h.js";
 
 const $ = (id) => document.getElementById(id);
-const SCREENS = ["s-entry", "s-lobby", "s-round", "s-guess", "s-reveal", "s-gameover"];
+const SCREENS = [
+  "s-entry", "s-lobby", "s-round", "s-guess", "s-reveal", "s-gameover",
+  ...H2H_SCREEN_IDS,
+];
 const TEAM_COLORS = ["var(--team-1)", "var(--team-2)", "var(--team-3)", "var(--team-4)"];
 // Same palette as concrete hex: Leaflet paints SVG markers with these, and
 // CSS var() strings don't resolve inside SVG presentation attributes.
@@ -105,6 +114,7 @@ function followRoom(code) {
   if (unsubRoom) { unsubRoom(); unsubRoom = null; }
   stopHeartbeat();
   stopCountdown();
+  disposeH2H();
   latestState = null;
   revealShownForRound = null;
   confettiDone = false;
@@ -116,6 +126,7 @@ function leaveRoom(message) {
   if (unsubRoom) { unsubRoom(); unsubRoom = null; }
   stopHeartbeat();
   stopCountdown();
+  disposeH2H();
   destroyViewer();
   roomCode = null;
   latestState = null;
@@ -152,6 +163,22 @@ function stopHeartbeat() {
  * ================================================================ */
 
 function render(state) {
+  // Head-to-head rooms carry mode: "h2h" and render through their own
+  // module — except game over, which reuses the couch podium + confetti
+  // with the crown-handoff note added. Couch rooms are untouched by this
+  // branch (their states have no mode field).
+  if (state.mode === "h2h") {
+    if (state.phase === "gameOver") {
+      renderGameOver(state);
+      renderH2HGameOverNote(state);
+    } else {
+      confettiDone = false;
+      renderH2H(state, showScreen);
+    }
+    return;
+  }
+  disposeH2H(); // a couch state after an h2h room (nextRoom can cross modes)
+
   switch (state.phase) {
     case "lobby": renderLobby(state); break;
     case "roundActive": renderRound(state); break;

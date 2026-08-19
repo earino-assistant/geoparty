@@ -66,12 +66,48 @@
     </div>
   </section>
 
+  <!-- Head-to-head lobby: room code + roster while phones join -->
+  <section id="s-h2h-lobby" class="phase-screen hidden">
+    <div class="tv-center">
+      <h1 class="tv-title"><span class="geo">Geo</span>Party <span class="h2h-tag">head-to-head</span></h1>
+      <div id="h2hLobbyCode" class="h2h-lobby-code">····</div>
+      <p id="h2hLobbyUrl" class="tv-sub"></p>
+      <div id="h2hLobbyTeams" class="tv-teams"></div>
+      <p id="h2hLobbyNote" class="tv-sub"></p>
+    </div>
+  </section>
+
+  <!-- Head-to-head round: split into one live panel per team -->
+  <section id="s-h2h-live" class="phase-screen hidden">
+    <div id="h2hGrid" class="h2h-grid"></div>
+    <div id="h2hRoundNo" class="tv-hud-corner tv-round-no h2h-hud">Round 1</div>
+    <div id="h2hCountdown" class="tv-hud-corner h2h-countdown"></div>
+    <div id="h2hProgress" class="h2h-progress"></div>
+  </section>
+
+  <!-- Head-to-head reveal: countdown, then every pin on one map -->
+  <section id="s-h2h-reveal" class="phase-screen hidden">
+    <div class="reveal-split">
+      <div id="h2hRevealMap" class="reveal-map"></div>
+      <div id="h2hPlace" class="reveal-place"></div>
+      <div class="reveal-stats">
+        <div id="h2hRoundBoard" class="reveal-board tv-showdown" data-caption="This round"></div>
+        <div id="h2hTotals" class="reveal-board captioned" data-caption="Leaderboard"></div>
+      </div>
+    </div>
+    <div id="h2hCountOverlay" class="h2h-count-overlay hidden">
+      <div class="h2h-count-title">ALL TEAMS LOCKED IN</div>
+      <div id="h2hCountNum" class="h2h-count-num">3</div>
+    </div>
+  </section>
+
   <!-- Game over: podium + confetti -->
   <section id="s-gameover" class="phase-screen hidden">
     <div id="confetti" class="confetti"></div>
     <div class="tv-center">
       <h1 class="tv-title">Game over!</h1>
       <div id="podium" class="podium"></div>
+      <div id="tvNextHost" class="tv-next-host hidden"></div>
       <button id="btnNewEntry" class="btn-primary tv-newgame">New game — enter a room code</button>
       <p class="tv-newgame-hint">or start a new game on the host's phone and the screen will follow</p>
     </div>

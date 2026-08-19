@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>GeoParty — Head-to-Head</title>
+  <link rel="stylesheet" href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="connPill" class="conn-pill hidden">reconnecting…</div>
+  <div id="toast" class="toast"></div>
+
+  <!-- 1. Home: join a room, or start a new head-to-head game -->
+  <section id="p-home" class="phase-screen">
+    <div class="host-wrap">
+      <h1><span style="color: var(--accent)">Geo</span>Party <span class="h2h-tag">head-to-head</span></h1>
+
+      <div id="pResumeBanner" class="resume-banner hidden">
+        <div>
+          <strong>Game in progress</strong>
+          <div style="color: var(--muted); font-size: 0.9rem">
+            Room <span id="pResumeCode"></span> — rejoin your team?
+          </div>
+        </div>
+        <button id="btnPResume" class="btn-primary">Rejoin</button>
+      </div>
+
+      <div class="settings-group">
+        <div class="label">Your team name</div>
+        <div class="team-names">
+          <input id="myTeamName" maxlength="24" placeholder="e.g. The Atlas Cats" autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="label">Join a game</div>
+        <div class="join-row">
+          <input id="joinCode" maxlength="4" placeholder="CODE" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" class="code-input" />
+          <button id="btnJoin" class="btn-primary">Join</button>
+        </div>
+        <div id="joinErr" class="join-err"></div>
+      </div>
+
+      <div class="home-divider">or start a new game</div>
+
+      <div class="settings-group">
+        <div class="label">Rounds</div>
+        <div class="seg" id="pSegRounds" data-value="5">
+          <button data-v="3">3</button>
+          <button data-v="5" class="sel">5</button>
+          <button data-v="10">10</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="label">Seconds per round</div>
+        <div class="seg" id="pSegSeconds" data-value="120">
+          <button data-v="60">60</button>
+          <button data-v="120" class="sel">120</button>
+          <button data-v="180">180</button>
+          <button data-v="0">No limit</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="label">Movement</div>
+        <div class="seg" id="pSegMove" data-value="1">
+          <button data-v="1" class="sel">Allowed</button>
+          <button data-v="0">No moving</button>
+        </div>
+      </div>
+    </div>
+    <div class="action-bar">
+      <button id="btnCreateRoom" class="btn-primary">Start a New Game</button>
+    </div>
+  </section>
+
+  <!-- 2. Lobby: room code + QR for the other phones, team roster -->
+  <section id="p-lobby" class="phase-screen hidden">
+    <div class="host-wrap">
+      <h1>Room</h1>
+      <div id="pRoomCodeHuge" class="room-code-huge">····</div>
+      <div class="qr-box"><canvas id="pQrCanvas"></canvas></div>
+      <div id="pJoinUrl" class="screen-url"></div>
+      <div id="pScreenNote" class="waiting-screen-note"></div>
+      <h2>Teams</h2>
+      <ul id="pLobbyTeams" class="totals-list lobby-teams"></ul>
+      <div id="pLobbyNote" class="waiting-screen-note"></div>
+    </div>
+    <div class="action-bar">
+      <button id="btnPLeave">Leave</button>
+      <button id="btnPStart" class="btn-primary hidden">Start Game</button>
+    </div>
+  </section>
+
+  <!-- 3. Round: full-bleed pano, roam freely -->
+  <section id="p-round" class="phase-screen hidden">
+    <div id="playerViewer" class="viewer-full"></div>
+    <div class="hud">
+      <div class="hud-item" id="pHudRound">Round 1/5</div>
+      <div class="hud-item" id="pHudLocked"></div>
+      <div class="hud-item" id="pHudTimer">2:00</div>
+    </div>
+    <div class="action-bar">
+      <button id="btnOpenMap" class="btn-primary">Make Guess</button>
+    </div>
+  </section>
+
+  <!-- 4. Guess map: drop the pin, lock it in — or duck back to the street -->
+  <section id="p-guess" class="phase-screen hidden">
+    <div id="playerGuessMap" class="map-full"></div>
+    <div class="guess-hint" id="pGuessHint">Tap the map to drop your pin</div>
+    <div class="hud"><div></div><div class="hud-item" id="pGuessTimer"></div></div>
+    <div class="action-bar">
+      <button id="btnBackToStreet">Back to Street</button>
+      <button id="btnLockIn" class="btn-primary" disabled>Lock It In</button>
+    </div>
+  </section>
+
+  <!-- 5. Locked in: watch the TV, sweat out the stragglers -->
+  <section id="p-locked" class="phase-screen hidden">
+    <div class="host-wrap locked-wrap">
+      <div class="locked-stamp">LOCKED IN</div>
+      <div id="pLockedRank" class="locked-rank"></div>
+      <p class="locked-sub">Eyes on the TV 📺</p>
+      <h2>Who's in</h2>
+      <ul id="pLockedList" class="totals-list"></ul>
+    </div>
+    <div class="action-bar">
+      <button id="btnCloseRound" class="hidden">Close Round (forfeit stragglers)</button>
+    </div>
+  </section>
+
+  <!-- 6. Reveal: your result + standings -->
+  <section id="p-reveal" class="phase-screen hidden">
+    <div class="host-wrap">
+      <h1 id="pRevealHeading">Round 1</h1>
+      <div class="stat-card">
+        <div class="label">Location</div>
+        <div class="big place" id="pRevealPlace">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Your distance</div>
+        <div class="big" id="pRevealDistance">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Your points</div>
+        <div class="big" id="pRevealPoints" style="color: var(--accent)">—</div>
+      </div>
+      <h2>This round</h2>
+      <ul id="pRoundResults" class="totals-list"></ul>
+      <h2>Totals</h2>
+      <ul id="pRevealTotals" class="totals-list"></ul>
+      <div id="pRevealNote" class="waiting-screen-note"></div>
+    </div>
+    <div class="action-bar">
+      <button id="btnPNext" class="btn-primary hidden">Next Round</button>
+    </div>
+  </section>
+
+  <!-- 7. Game over: winner takes the crown — and the host seat -->
+  <section id="p-gameover" class="phase-screen hidden">
+    <div class="host-wrap">
+      <h1 id="pGameOverTitle">Game over!</h1>
+      <ul id="pFinalTotals" class="totals-list"></ul>
+      <div id="pHandoffNote" class="handoff-note"></div>
+    </div>
+    <div class="action-bar">
+      <button id="btnPHome">Leave</button>
+      <button id="btnPNextGame" class="btn-primary hidden">Set Up the Next Game</button>
+    </div>
+  </section>
+
+  <!-- 8. Next-game setup (winner only): settings carry over, teams carry over -->
+  <section id="p-next" class="phase-screen hidden">
+    <div class="host-wrap">
+      <h1>👑 Your game now</h1>
+      <p style="color: var(--muted)">Same teams, fresh scores. Everyone's phone
+        and the TV will follow automatically.</p>
+      <div class="settings-group">
+        <div class="label">Rounds</div>
+        <div class="seg" id="nSegRounds" data-value="5">
+          <button data-v="3">3</button>
+          <button data-v="5" class="sel">5</button>
+          <button data-v="10">10</button>
+        </div>
+      </div>
+      <div class="settings-group">
+        <div class="label">Seconds per round</div>
+        <div class="seg" id="nSegSeconds" data-value="120">
+          <button data-v="60">60</button>
+          <button data-v="120" class="sel">120</button>
+          <button data-v="180">180</button>
+          <button data-v="0">No limit</button>
+        </div>
+      </div>
+      <div class="settings-group">
+        <div class="label">Movement</div>
+        <div class="seg" id="nSegMove" data-value="1">
+          <button data-v="1" class="sel">Allowed</button>
+          <button data-v="0">No moving</button>
+        </div>
+      </div>
+    </div>
+    <div class="action-bar">
+      <button id="btnNextCreate" class="btn-primary">Open the Room</button>
+    </div>
+  </section>
+
+  <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="js/player-ui.js"></script>
+</body>
+</html>

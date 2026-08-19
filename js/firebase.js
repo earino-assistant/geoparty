@@ -10,6 +10,7 @@ import {
   update,
   remove,
   onValue,
+  runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "../config.js";
 
@@ -44,6 +45,17 @@ export function subscribeRoom(code, callback) {
   return onValue(roomRef(code), (snap) => {
     callback(snap.exists() ? snap.val() : null);
   });
+}
+
+// Head-to-head: atomically claim a free team slot. The transaction only
+// commits if the slot is still empty, so two phones racing for t2 can't
+// both land on it — the loser retries on the next free slot.
+export async function claimTeamSlot(code, teamId, team) {
+  const res = await runTransaction(roomRef(code, `teams/${teamId}`), (cur) => {
+    if (cur !== null) return undefined; // taken — abort
+    return team;
+  });
+  return res.committed;
 }
 
 // Screen presence: the ONLY thing the screen ever writes (spec §1, §14.10).

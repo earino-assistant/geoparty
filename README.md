@@ -9,8 +9,24 @@ awarded by distance.
 The entire system is static JavaScript synced through Firebase Realtime
 Database. No server code, no build step, no cost.
 
+There are two modes. **Couch mode** (the original): one operator phone
+drives, the couch watches the TV. **Head-to-head**: every team plays on its
+own phone — the same location drops for everyone at once, each team roams
+and guesses at its own pace, the TV splits into one live panel per team,
+and when the last team locks in, a countdown fires and every pin lands on
+one full-screen reveal map. The winning team's phone inherits host duties
+for the next game.
+
 ## How it works
 
+- **`player.html`** — the head-to-head team phone. The first phone creates
+  the room (its team is the host); up to three more join via QR/room code
+  and claim team slots. Each phone writes only its own team's paths
+  (`round/live/<team>`, `round/results/<team>`, `teams/<team>`), scores
+  itself from the truth embedded in the round, and whichever phone submits
+  last flips the room to reveal. When a game ends, host authority rotates
+  to the winner (`hostTeam`), whose phone spawns the next room; everyone
+  else — and the TV — follows the `nextRoom` pointer automatically.
 - **`host.html`** — the operator's phone controller. Creates a room, drives
   the MapillaryJS street imagery, places the guess pin on a Leaflet map,
   computes the score, and writes all game state to
