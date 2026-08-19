@@ -24,6 +24,11 @@ import {
   renderH2HGameOverNote,
   disposeH2H,
 } from "./screen-h2h.js";
+import {
+  autoAdvanceStatus,
+  advanceTarget,
+  countdownText,
+} from "./autoadvance.js";
 import { adjustedPoints, superSureLabel } from "./supersure.js";
 import { TV_VIAS, screenJoinVia } from "./tvlink.js";
 import { track } from "./consent.js";
@@ -212,7 +217,7 @@ function render(state) {
     case "gameOver": renderGameOver(state); break;
     default: break;
   }
-  if (state.phase !== "reveal") revealShownForRound = null;
+  if (state.phase !== "reveal") { revealShownForRound = null; stopAdvanceNote(); }
   if (state.phase !== "gameOver") confettiDone = false;
   if (state.phase !== "roundActive") stopCountdown();
   if (state.phase !== "guessing" && liveMarker) {
@@ -518,10 +523,44 @@ function renderGuessing(state) {
 
 /* ---------------- Reveal: the emotional peak ---------------- */
 
+/* S6: the shared soft-auto-advance countdown on the couch TV. Pure
+ * rendering of `autoAdvanceAt − Date.now()` — the host phone owns the
+ * decision; a held or lapsed deadline blanks the note. */
+let advanceInterval = null;
+let advanceState = null;
+
+function updateAdvanceNote() {
+  const state = advanceState;
+  const el = $("tvAdvanceNote");
+  if (!el) return;
+  if (!state || state.phase !== "reveal" || !state.round) {
+    el.textContent = "";
+    return;
+  }
+  const status = autoAdvanceStatus(state.round.autoAdvanceAt, Date.now());
+  const target = advanceTarget(
+    state.round.number, state.settings ? state.settings.roundCount : 0);
+  el.textContent = countdownText(status, target) || "";
+}
+
+function renderAdvanceNote(state) {
+  advanceState = state;
+  if (!advanceInterval) advanceInterval = setInterval(updateAdvanceNote, 250);
+  updateAdvanceNote();
+}
+
+function stopAdvanceNote() {
+  if (advanceInterval) { clearInterval(advanceInterval); advanceInterval = null; }
+  advanceState = null;
+  const el = $("tvAdvanceNote");
+  if (el) el.textContent = "";
+}
+
 function renderReveal(state) {
   showScreen("s-reveal");
   const round = state.round || {};
   renderBoard(state);
+  renderAdvanceNote(state); // S6: every call, so holds blank it live
   if (round.showdown) {
     renderShowdownReveal(state, round);
     return;

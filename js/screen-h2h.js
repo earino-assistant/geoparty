@@ -7,6 +7,11 @@
 import { MAPILLARY_TOKEN } from "../config.js";
 import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
+import {
+  autoAdvanceStatus,
+  advanceTarget,
+  countdownText,
+} from "./autoadvance.js";
 import { superSureLabel } from "./supersure.js";
 import { phoneJoinLine } from "./tvlink.js";
 
@@ -68,6 +73,7 @@ export function disposeH2H() {
   disposePanels();
   stopTimer();
   stopCount();
+  stopAdvanceNote();
   if (revealMap) { try { revealMap.remove(); } catch { /* gone */ } revealMap = null; }
   revealShownFor = null;
   const note = $("tvNextHost");
@@ -86,7 +92,44 @@ export function renderH2H(state, showScreen) {
     default: break;
   }
   if (state.phase !== "roundActive") stopTimer();
-  if (state.phase !== "reveal") { stopCount(); revealShownFor = null; }
+  if (state.phase !== "reveal") {
+    stopCount();
+    stopAdvanceNote();
+    revealShownFor = null;
+  }
+}
+
+/* S6: the shared soft-auto-advance countdown, rendered TV-side. The TV
+ * writes nothing — it just ticks `autoAdvanceAt − Date.now()` like every
+ * other deadline. A held (nulled) or lapsed deadline blanks the note. */
+let advanceInterval = null;
+let advanceState = null;
+
+function updateAdvanceNote() {
+  const state = advanceState;
+  const el = $("h2hAdvanceNote");
+  if (!el) return;
+  if (!state || state.phase !== "reveal" || !state.round) {
+    el.textContent = "";
+    return;
+  }
+  const status = autoAdvanceStatus(state.round.autoAdvanceAt, Date.now());
+  const target = advanceTarget(
+    state.round.number, state.settings ? state.settings.roundCount : 0);
+  el.textContent = countdownText(status, target) || "";
+}
+
+function renderAdvanceNote(state) {
+  advanceState = state;
+  if (!advanceInterval) advanceInterval = setInterval(updateAdvanceNote, 250);
+  updateAdvanceNote();
+}
+
+function stopAdvanceNote() {
+  if (advanceInterval) { clearInterval(advanceInterval); advanceInterval = null; }
+  advanceState = null;
+  const el = $("h2hAdvanceNote");
+  if (el) el.textContent = "";
 }
 
 // Game-over hook: screen-ui reuses the couch podium; this adds the
@@ -442,6 +485,7 @@ function renderReveal(state, showScreen) {
 
   stopCount();
   overlay.classList.add("hidden");
+  renderAdvanceNote(state); // S6: runs every call so holds blank it live
   if (revealShownFor === key) return; // animate once per round
   if (!round.truth || !round.results) return;
   revealShownFor = key;

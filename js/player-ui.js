@@ -67,6 +67,15 @@ import {
   lockNowLabel,
 } from "./hints.js";
 import { oneShotHint, dismissHintCard } from "./hints-ui.js";
+import {
+  autoAdvancePatch,
+  autoAdvanceStatus,
+  shouldAutoAdvance,
+  advanceTarget,
+  advanceSecondsLeft,
+  countdownText,
+  holdAdvancePatch,
+} from "./autoadvance.js";
 import { withUtm, partyShareText, foldBestMoment } from "./share.js";
 import { shareResult, shareTvLink } from "./share-ui.js";
 import { screenLink, tvBrowserLine, phoneJoinLine } from "./tvlink.js";
@@ -188,6 +197,7 @@ let autoSubmitted = false;  // timeout auto-lock fired for this round
 let sweepDone = false;      // host forfeit sweep fired for this round
 let revealFlipPushed = null; // round number this phone already flipped for
 let revealTracked = null;   // round number reveal_shown was captured for (host)
+let autoAdvanceFired = null; // round number the S6 auto-advance fired for
 let prevSubmitted = 0;      // for "Team X locked in!" toasts
 let tickInterval = null;
 let revealFlipTimer = null; // phone-side hold during the TV countdown
@@ -327,6 +337,7 @@ function enterRoom(code, teamId) {
   sweepDone = false;
   revealFlipPushed = null;
   revealTracked = null;
+  autoAdvanceFired = null;
   prevSubmitted = 0;
   localStage = "explore";
   superSureArmed = false;
@@ -369,6 +380,7 @@ async function followNextRoom(code) {
 function leaveToHome(message) {
   if (unsubRoom) { unsubRoom(); unsubRoom = null; }
   stopTick();
+  stopAdvanceTicker();
   clearTimeout(revealFlipTimer);
   destroyViewer();
   clearRivalPins();
@@ -441,9 +453,14 @@ function onState(state) {
       allSubmitted(state.teams, state.round) &&
       revealFlipPushed !== state.round.number) {
     revealFlipPushed = state.round.number;
+    const revealAt = Date.now() + REVEAL_COUNTDOWN_MS;
     push({
       phase: "reveal",
-      "round/revealAt": Date.now() + REVEAL_COUNTDOWN_MS,
+      "round/revealAt": revealAt,
+      // S6: the soft auto-advance deadline rides every reveal flip, anchored
+      // where the reveal becomes visible (after the 3-2-1). Racing closers
+      // differ by milliseconds — the accepted revealAt collision.
+      ...autoAdvancePatch(revealAt),
       // Settle any SUPER SURE bets in the same atomic patch (see lockIn):
       // racing closers compute identical values from the complete set.
       ...superSureSettlement(state.teams, state.round.results).patch,
@@ -472,6 +489,7 @@ function onState(state) {
     default: break;
   }
   if (state.phase !== "roundActive" && state.phase !== "reveal") stopTick();
+  if (state.phase !== "reveal") stopAdvanceTicker();
 }
 
 /* ---------------- Lobby ---------------- */
@@ -568,8 +586,11 @@ async function ensureSampler() {
   if (!sampler) sampler = new PoolSampler(pool, roomCode, room.poolCursor || 0);
 }
 
-async function startRound() {
+async function startRound(advance) {
   if (!isHost() || !h2hCanTransition(room.phase, "roundActive")) return;
+  // "auto"/"manual" from nextOrFinish; the lobby's round 1 (a click event
+  // lands here) follows no reveal and carries no advance property.
+  const via = advance === "auto" || advance === "manual" ? advance : null;
   $("btnPStart").disabled = true;
   $("btnPNext").disabled = true;
   try {
@@ -626,7 +647,10 @@ async function startRound() {
       revealAt: null,
     };
     push({ phase: "roundActive", round, poolCursor: sampler.cursor });
-    track("round_started", { room: roomCode, mode: "h2h", round_number: number });
+    track("round_started", {
+      room: roomCode, mode: "h2h", round_number: number,
+      ...(via ? { advance: via } : {}),
+    });
   } catch (e) {
     console.error(e);
     toast("Could not start the round");
@@ -977,6 +1001,7 @@ function lockIn(auto = false) {
   if (others.every((id) => !!results[id])) {
     patch.phase = "reveal";
     patch["round/revealAt"] = Date.now() + REVEAL_COUNTDOWN_MS;
+    Object.assign(patch, autoAdvancePatch(patch["round/revealAt"])); // S6
     const merged = { ...results, [myTeam]: result };
     const teamsBanked = {
       ...room.teams,
@@ -1063,9 +1088,11 @@ function sweepAndReveal(force) {
   const pending = pendingTeams(room.teams, room.round);
   if (pending.length === 0) return;
   sweepDone = true;
+  const revealAt = Date.now() + REVEAL_COUNTDOWN_MS;
   const patch = {
     phase: "reveal",
-    "round/revealAt": Date.now() + REVEAL_COUNTDOWN_MS,
+    "round/revealAt": revealAt,
+    ...autoAdvancePatch(revealAt), // S6
   };
   for (const id of pending) {
     patch[`round/results/${id}`] = {
@@ -1247,9 +1274,75 @@ function renderReveal() {
   const host = isHost();
   $("btnPNext").classList.toggle("hidden", !host);
   $("btnPNext").textContent = last ? "Finish Game" : "Next Round";
-  $("pRevealNote").textContent = host
-    ? ""
-    : `${room.teams[room.hostTeam] ? room.teams[room.hostTeam].name : "The host"} starts the next round…`;
+  startAdvanceTicker();
+}
+
+/* S6 soft auto-advance (h2h). Every phone ticks the shared countdown from
+ * round.autoAdvanceAt (stamped by whichever phone flipped the reveal), but
+ * only the hostTeam's phone — the one that owns manual advance — fires it.
+ * The host can hold (null the deadline for everyone) or advance early as
+ * before. If the host phone is dead the countdown shows the "starting…"
+ * beat briefly, then lapses back to the classic waiting copy — the same
+ * dead-host stall as before S6, just honestly rendered. */
+let advanceTicker = null;
+
+function stopAdvanceTicker() {
+  if (advanceTicker) { clearInterval(advanceTicker); advanceTicker = null; }
+}
+
+function startAdvanceTicker() {
+  stopAdvanceTicker();
+  advanceTicker = setInterval(renderAdvanceState, 250);
+  renderAdvanceState();
+}
+
+function renderAdvanceState() {
+  if (!room || room.phase !== "reveal" || !room.round) {
+    stopAdvanceTicker();
+    return;
+  }
+  const round = room.round;
+  const now = Date.now();
+  if ((round.revealAt || 0) - now > 150) return; // still in the 3-2-1
+  const host = isHost();
+  const status = autoAdvanceStatus(round.autoAdvanceAt, now);
+  const target = advanceTarget(round.number, room.settings.roundCount);
+  $("btnPHold").classList.toggle(
+    "hidden", !(host && status.state === "counting"));
+  const counting = countdownText(status, target);
+  const hostName =
+    room.teams[room.hostTeam] ? room.teams[room.hostTeam].name : "The host";
+  $("pRevealNote").textContent = counting !== null
+    ? counting
+    : host
+      ? ""
+      : target === "gameOver"
+        ? `${hostName} wraps up the game…`
+        : `${hostName} starts the next round…`;
+  // Once per round: startRound / the gameOver push are async, and a state
+  // echo arriving mid-flight would restart this ticker while the local
+  // phase still reads "reveal" — without the latch the advance fires twice.
+  if (autoAdvanceFired !== round.number && shouldAutoAdvance({
+    phase: room.phase, autoAdvanceAt: round.autoAdvanceAt, isHost: host, now,
+  })) {
+    autoAdvanceFired = round.number;
+    stopAdvanceTicker();
+    nextOrFinish("auto");
+  }
+}
+
+function holdAdvance() {
+  if (!isHost() || !room || room.phase !== "reveal" || !room.round) return;
+  const status = autoAdvanceStatus(room.round.autoAdvanceAt, Date.now());
+  if (status.state !== "counting") return;
+  room.round.autoAdvanceAt = null; // render now; the echo confirms
+  push(holdAdvancePatch());
+  track("auto_advance_hold", {
+    room: roomCode, mode: "h2h", round_number: room.round.number,
+    seconds_left: advanceSecondsLeft(status.msLeft),
+  });
+  renderAdvanceState();
+  toast("Holding — advance whenever you're ready");
 }
 
 // The all-pins reveal, phone-sized: every guess, a line to the truth, the
@@ -1323,8 +1416,10 @@ function renderTotalsList(listEl) {
   }
 }
 
-function nextOrFinish() {
+function nextOrFinish(advance) {
   if (!isHost() || !room || room.phase !== "reveal") return;
+  stopAdvanceTicker();
+  const via = advance === "auto" ? "auto" : "manual";
   if (room.round.number >= room.settings.roundCount) {
     // Game over — and the crown moves: host authority is written to the
     // winning team in the same patch, so from this moment only the
@@ -1339,9 +1434,10 @@ function nextOrFinish() {
       winner_team: winner,
       winning_score: room.teams[winner] ? room.teams[winner].total : 0,
       team_count: teamIds(room.teams).length,
+      advance: via,
     });
   } else {
-    startRound();
+    startRound(via);
   }
 }
 
@@ -1489,6 +1585,7 @@ $("btnSuperSure").addEventListener("click", toggleSuperSure);
 $("btnLockIn").addEventListener("click", () => lockIn(false));
 $("btnCloseRound").addEventListener("click", sweepAndReveal);
 $("btnPNext").addEventListener("click", nextOrFinish);
+$("btnPHold").addEventListener("click", holdAdvance);
 $("btnPHome").addEventListener("click", () => leaveToHome());
 $("btnPShareResult").addEventListener("click", shareMyResult);
 $("btnPNextGame").addEventListener("click", openNextGameSetup);

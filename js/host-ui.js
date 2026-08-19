@@ -47,6 +47,15 @@ import { oneShotHint, dismissHintCard } from "./hints-ui.js";
 import { withUtm, partyShareText, foldBestMoment } from "./share.js";
 import { shareResult, shareTvLink } from "./share-ui.js";
 import { screenLink, tvBrowserLine } from "./tvlink.js";
+import {
+  AUTO_ADVANCE_MS,
+  autoAdvanceStatus,
+  shouldAutoAdvance,
+  advanceTarget,
+  advanceSecondsLeft,
+  countdownText,
+  holdAdvancePatch,
+} from "./autoadvance.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -331,6 +340,7 @@ async function abandonGame() {
   });
   stopTimer();
   stopLockNowTicker();
+  stopAdvanceTicker();
   if (unsubHeartbeat) { unsubHeartbeat(); unsubHeartbeat = null; }
   try { await deleteRoom(roomCode); } catch (e) { console.warn(e); }
   localStorage.removeItem(LS_ACTIVE);
@@ -401,8 +411,12 @@ function schedulePoseWrite() {
   }, 250);
 }
 
-async function startRound() {
+async function startRound(advance) {
   if (!setPhase("roundActive")) return;
+  stopAdvanceTicker();
+  // "auto" only from the S6 ticker; a click event lands here otherwise.
+  const via = advance === "auto" ? "auto"
+    : room.round ? "manual" : null; // round 1 follows no reveal
   const number = (room.round ? room.round.number : 0) + 1;
   showScreen("h-round");
   if (!viewer) makeViewer();
@@ -461,7 +475,10 @@ async function startRound() {
     activeTeam: room.activeTeam,
     poolCursor: room.poolCursor,
   });
-  track("round_started", { room: roomCode, mode: "couch", round_number: number });
+  track("round_started", {
+    room: roomCode, mode: "couch", round_number: number,
+    ...(via ? { advance: via } : {}),
+  });
 
   $("hudRound").textContent = `Round ${number}/${room.settings.roundCount}`;
   $("hudTeam").textContent = roundTeamLabel();
@@ -802,6 +819,9 @@ function confirmGuess() {
   room.round.score = score;
   room.teams[room.activeTeam].total += adjustedPoints(score);
 
+  // S6: the reveal is visible the moment this patch lands — stamp the soft
+  // auto-advance deadline with it so every surface counts the same clock.
+  room.round.autoAdvanceAt = Date.now() + AUTO_ADVANCE_MS;
   const patch = {
     phase: "reveal",
     "round/liveGuess": null,
@@ -809,6 +829,7 @@ function confirmGuess() {
     "round/truth": truth,
     "round/guess": guess,
     "round/score": room.round.score,
+    "round/autoAdvanceAt": room.round.autoAdvanceAt,
     [`teams/${room.activeTeam}/total`]: room.teams[room.activeTeam].total,
   };
   if (betting) {
@@ -881,11 +902,14 @@ function confirmShowdownGuess(result) {
     room.round.results[id].superSureOutcome = outcome;
     room.teams[id].total = settlement.patch[`teams/${id}/total`];
   }
+  // S6 deadline rides the showdown's reveal flip too (see the solo patch).
+  room.round.autoAdvanceAt = Date.now() + AUTO_ADVANCE_MS;
   const patch = {
     phase: "reveal",
     "round/liveGuess": null,
     "round/liveView": null,
     "round/truth": truth,
+    "round/autoAdvanceAt": room.round.autoAdvanceAt,
     [`round/results/${team}`]: result,
     [`teams/${team}/total`]: room.teams[team].total,
   };
@@ -904,6 +928,57 @@ function confirmShowdownGuess(result) {
 /* ================================================================
  * Reveal & game over
  * ================================================================ */
+
+/* S6 soft auto-advance. The host phone owns manual advance, so it owns the
+ * countdown decision too: every 250 ms render the shared deadline
+ * (round.autoAdvanceAt, stamped by the reveal patch) and, when it lands,
+ * advance exactly as a Next Round tap would. Hold nulls the deadline for
+ * everyone. A lapsed deadline (resume into an old reveal) renders nothing
+ * and never fires — the host taps like before S6. */
+let advanceTicker = null;
+
+function stopAdvanceTicker() {
+  if (advanceTicker) { clearInterval(advanceTicker); advanceTicker = null; }
+}
+
+function renderAdvanceState() {
+  if (!room || room.phase !== "reveal" || !room.round) {
+    stopAdvanceTicker();
+    return;
+  }
+  const now = Date.now();
+  const status = autoAdvanceStatus(room.round.autoAdvanceAt, now);
+  const target = advanceTarget(room.round.number, room.settings.roundCount);
+  $("hostAdvanceNote").textContent = countdownText(status, target) || "";
+  $("btnHoldAdvance").classList.toggle("hidden", status.state !== "counting");
+  if (shouldAutoAdvance({
+    phase: room.phase, autoAdvanceAt: room.round.autoAdvanceAt,
+    isHost: true, now,
+  })) {
+    stopAdvanceTicker();
+    nextOrFinish("auto");
+  }
+}
+
+function startAdvanceTicker() {
+  stopAdvanceTicker();
+  advanceTicker = setInterval(renderAdvanceState, 250);
+  renderAdvanceState();
+}
+
+function holdAdvance() {
+  if (!room || room.phase !== "reveal" || !room.round) return;
+  const status = autoAdvanceStatus(room.round.autoAdvanceAt, Date.now());
+  if (status.state !== "counting") return;
+  room.round.autoAdvanceAt = null;
+  push(holdAdvancePatch());
+  track("auto_advance_hold", {
+    room: roomCode, mode: "couch", round_number: room.round.number,
+    seconds_left: advanceSecondsLeft(status.msLeft),
+  });
+  renderAdvanceState();
+  toast("Holding — advance whenever you're ready");
+}
 
 let revealTracked = null; // "<room>:<round>" — resume re-enters the reveal
 function enterReveal() {
@@ -1017,6 +1092,7 @@ function enterReveal() {
   renderTotals($("revealTotals"));
   $("btnNextRound").textContent =
     number >= room.settings.roundCount ? "Finish" : "Next Round";
+  startAdvanceTicker();
 }
 
 function renderTotals(listEl) {
@@ -1035,17 +1111,19 @@ function renderTotals(listEl) {
   }
 }
 
-function nextOrFinish() {
+function nextOrFinish(advance) {
+  stopAdvanceTicker();
   if (room.round.number >= room.settings.roundCount) {
-    finishGame();
+    finishGame(advance === "auto" ? "auto" : "manual");
   } else {
-    startRound();
+    startRound(advance); // startRound sorts "auto" from a click event
   }
 }
 
-function finishGame() {
+function finishGame(advance) {
   if (!setPhase("gameOver")) return;
   stopTimer();
+  stopAdvanceTicker();
   push({ phase: "gameOver" });
   const winner = standings(room.teams)[0];
   track("game_completed", {
@@ -1055,6 +1133,8 @@ function finishGame() {
     winner_team: winner.id,
     winning_score: winner.total,
     team_count: teamIds(room.teams).length,
+    // Absent on the pool-exhaustion end, which skips the final reveal.
+    ...(advance === "auto" || advance === "manual" ? { advance } : {}),
   });
   destroyViewer();
   showScreen("h-gameover");
@@ -1229,6 +1309,7 @@ $("btnMakeGuess").addEventListener("click", openGuessMap);
 $("btnSuperSure").addEventListener("click", toggleSuperSure);
 $("btnConfirmGuess").addEventListener("click", confirmGuess);
 $("btnNextRound").addEventListener("click", nextOrFinish);
+$("btnHoldAdvance").addEventListener("click", holdAdvance);
 $("btnShareResult").addEventListener("click", shareGameResult);
 $("btnSaveLeaderboard").addEventListener("click", saveToLeaderboard);
 $("btnNewGameOver").addEventListener("click", newGameFromOver);

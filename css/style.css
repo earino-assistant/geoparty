@@ -366,6 +366,10 @@ button:disabled { opacity: 0.4; cursor: default; }
   margin-bottom: 8px;
 }
 .waiting-screen-note.ok { color: var(--good); font-weight: 700; }
+/* S6: the phone-side auto-advance countdown line (steady digits, no
+   layout jitter as the number ticks). Hidden entirely when blank. */
+.advance-note { font-variant-numeric: tabular-nums; font-weight: 600; }
+.advance-note:empty { display: none; }
 
 /* Head-to-head lobby: invite link for remote rivals (no shared TV needed). */
 .share-row {
@@ -815,6 +819,17 @@ button:disabled { opacity: 0.4; cursor: default; }
   transition: opacity 0.45s ease-out, transform 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
 }
 .reveal-place.show { opacity: 1; transform: none; }
+/* S6: the TV's between-round soft auto-advance countdown line. */
+.tv-advance-note {
+  flex: 0 0 auto;
+  text-align: center;
+  padding: 0.6vh 0 1.2vh;
+  font-size: 2.6vh;
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tv-advance-note:empty { display: none; }
 .reveal-stats {
   flex: 0 0 auto;
   display: flex;

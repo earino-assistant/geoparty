@@ -85,7 +85,12 @@ export const EVENT_SCHEMA = Object.freeze({
   // hand) | "follow" (auto-rejoined the host's next game). Feeds the
   // which-path-attaches-TVs question behind the Add a TV affordance.
   screen_joined: { room: "string", mode: "string", via: "string" },
-  round_started: { room: "string", mode: "string", round_number: "int" },
+  // advance: how this round was reached from the previous reveal — "auto"
+  // (the S6 soft auto-advance fired) | "manual" (host tapped Next Round).
+  // Absent on round 1, which no reveal precedes.
+  round_started: {
+    room: "string", mode: "string", round_number: "int", advance: "string",
+  },
   guess_submitted: {
     room: "string", mode: "string", team_id: "string",
     distance_km: "float1", time_bonus: "int", total_score: "int",
@@ -100,9 +105,17 @@ export const EVENT_SCHEMA = Object.freeze({
     mode: "string", round_number: "int", rounds: "int",
     outcome: "string", round_total: "int",
   },
+  // S6: the host held the auto-advance countdown open (wanted more time on
+  // the reveal). seconds_left is what remained of the countdown when held —
+  // consistently small values mean the default countdown is too short.
+  auto_advance_hold: {
+    room: "string", mode: "string", round_number: "int", seconds_left: "int",
+  },
+  // advance mirrors round_started: how the final reveal resolved to the
+  // scoreboard ("auto" | "manual"; absent on pool-exhaustion ends).
   game_completed: {
     room: "string", mode: "string", rounds: "int", winner_team: "string",
-    winning_score: "int", team_count: "int",
+    winning_score: "int", team_count: "int", advance: "string",
   },
   game_abandoned: { room: "string", mode: "string", rounds_played: "int" },
   // method: "share" (Web Share sheet) | "copy" (clipboard fallback).

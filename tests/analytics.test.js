@@ -106,6 +106,34 @@ test("sanitizeEvent: allowlisted, well-typed props pass through", () => {
   });
 });
 
+test("sanitizeEvent: round_started carries the S6 advance mode, optionally", () => {
+  // "auto" | "manual" enriches the between-round-tempo KPI; round 1 has no
+  // preceding reveal, so the key is simply absent there — never null/"".
+  const auto = sanitizeEvent("round_started", {
+    room: "KWPFRT", mode: "h2h", round_number: 2, advance: "auto",
+  });
+  assert.deepEqual(auto.props, {
+    room: "KWPFRT", mode: "h2h", round_number: 2, advance: "auto",
+  });
+  const first = sanitizeEvent("round_started", {
+    room: "KWPFRT", mode: "h2h", round_number: 1,
+  });
+  assert.deepEqual(first.props, {
+    room: "KWPFRT", mode: "h2h", round_number: 1,
+  });
+});
+
+test("sanitizeEvent: auto_advance_hold keeps aggregates, strips the rest", () => {
+  const out = sanitizeEvent("auto_advance_hold", {
+    room: "KWPFRT", mode: "couch", round_number: 3, seconds_left: 8.9,
+    team_name: "The Atlas Cats", lat: 1, lng: 2, deadline: "soon",
+  });
+  assert.deepEqual(out, {
+    event: "auto_advance_hold",
+    props: { room: "KWPFRT", mode: "couch", round_number: 3, seconds_left: 9 },
+  });
+});
+
 test("sanitizeEvent: coordinates and identity-ish keys never pass", () => {
   const out = sanitizeEvent("guess_submitted", {
     room: "KWPFRT", mode: "h2h", team_id: "t2",

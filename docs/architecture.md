@@ -15,6 +15,7 @@ js/supersure.js    Pure SUPER SURE bet logic: resolution + settlement      ← t
 js/frontdoor.js    Pure front-door logic: join routing, chooser targets    ← tested
 js/tvlink.js       Pure "Add a TV" logic: screen links, typeable address   ← tested
 js/hints.js        Pure education logic: one-shot flags, lock-now estimate ← tested
+js/autoadvance.js  Pure S6 soft auto-advance: countdown, hold, firing      ← tested
 js/daily.js        Pure Daily Challenge logic: date seed, run fold, lock   ← tested
 js/share.js        Pure share-artifact logic: UTM links, card text, grid   ← tested
 js/pool.js         Location pool: seeded shuffle + cursor sampler          ← tested
@@ -55,6 +56,8 @@ rooms/KWPF
     liveView       { lat, lng, zoom }          ≤4/s guess-map framing
     truth          { lat, lng, name }          written ONLY at reveal
     guess, score   written ONLY at confirm
+    autoAdvanceAt  S6 soft auto-advance deadline, stamped with the reveal
+                   patch; null = the host held it
     showdown, order, results/tN                final-round all-play
   screenHeartbeat  ms epoch, TV presence (the only thing the TV writes)
   nextRoom         pointer written into a FINISHED room → subscribers follow
@@ -76,6 +79,8 @@ round
                      elapsedMs, submittedAt, forfeited,
                      superSure, superSureOutcome }
   revealAt         countdown target stamped by whoever closes the round
+  autoAdvanceAt    S6 soft auto-advance deadline (revealAt + 15 s), stamped
+                   in the same flip patch; null = the host held it
 ```
 
 ### SUPER SURE (both modes)
@@ -101,7 +106,8 @@ Writers never contend on the same path:
 | everything under the room | host phone (sole authority) | — |
 | `teams/tN`, `round/live/tN`, `round/results/tN` | — | team tN's phone only |
 | `phase`, `round` (start/advance) | host phone | current `hostTeam`'s phone |
-| `phase: reveal` + `revealAt` | host phone | **any** phone that sees the set complete |
+| `phase: reveal` + `revealAt` + `autoAdvanceAt` | host phone | **any** phone that sees the set complete |
+| `autoAdvanceAt: null` (the S6 hold) | host phone | current `hostTeam`'s phone |
 | `screenHeartbeat` | TV | TV |
 | `teams/tN` slot claim | — | transaction (`claimTeamSlot`) — the only transactional write |
 
