@@ -91,10 +91,12 @@ export const EVENT_SCHEMA = Object.freeze({
   round_started: {
     room: "string", mode: "string", round_number: "int", advance: "string",
   },
+  // moved: the pano was navigated off the round's anchor image before this
+  // pin (street movement got used) — an image-id comparison, never a place.
   guess_submitted: {
     room: "string", mode: "string", team_id: "string",
     distance_km: "float1", time_bonus: "int", total_score: "int",
-    time_seconds: "float1", super_sure: "bool",
+    time_seconds: "float1", super_sure: "bool", moved: "bool",
   },
   reveal_shown: { room: "string", mode: "string", round_number: "int" },
   // One event per SUPER SURE bet, fired from the host phone at the reveal

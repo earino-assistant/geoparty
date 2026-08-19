@@ -23,6 +23,8 @@ import {
   screenAttached,
   liveRivalPins,
   revealPins,
+  shouldReanchorViewer,
+  panoMoved,
 } from "../js/h2h.js";
 
 const teams = {
@@ -293,4 +295,40 @@ test("initialH2hRoomState: lobby, h2h mode, host recorded", () => {
   assert.equal(state.hostTeam, "t1");
   assert.equal(state.poolCursor, 0);
   assert.equal(state.round, null);
+});
+
+/* ---------------- viewer anchoring (movement bounce) ---------------- */
+
+test("shouldReanchorViewer: anchors a fresh viewer to the round image", () => {
+  assert.equal(shouldReanchorViewer(null, null, "img-anchor"), true);
+});
+
+test("shouldReanchorViewer: steady state stays put", () => {
+  assert.equal(shouldReanchorViewer("img-anchor", "img-anchor", "img-anchor"), false);
+});
+
+test("shouldReanchorViewer: player movement NEVER snaps back (the bounce)", () => {
+  // The regression: the player walked to a neighbor image, then a state
+  // echo (own or a rival's ≤4/s live write) re-rendered the round. Where
+  // the player currently is must be irrelevant — only the anchor counts.
+  assert.equal(shouldReanchorViewer("img-anchor", "img-neighbor", "img-anchor"), false);
+  assert.equal(shouldReanchorViewer("img-anchor", "img-far-away", "img-anchor"), false);
+});
+
+test("shouldReanchorViewer: a new round's anchor re-anchors", () => {
+  assert.equal(shouldReanchorViewer("img-r1", "img-r1-neighbor", "img-r2"), true);
+});
+
+test("shouldReanchorViewer: no round image means no move", () => {
+  assert.equal(shouldReanchorViewer(null, null, null), false);
+  assert.equal(shouldReanchorViewer("img-a", "img-a", undefined), false);
+});
+
+test("panoMoved: true only when the pin's pano left the anchor", () => {
+  assert.equal(panoMoved("img-anchor", "img-neighbor"), true);
+  assert.equal(panoMoved("img-anchor", "img-anchor"), false);
+  // Unknown state (no viewer yet, forfeit paths) is never "moved".
+  assert.equal(panoMoved(null, "img-x"), false);
+  assert.equal(panoMoved("img-x", null), false);
+  assert.equal(panoMoved(null, null), false);
 });

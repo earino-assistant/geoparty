@@ -255,6 +255,25 @@ test("sanitizeEvent: guess_submitted.super_sure is strictly boolean", () => {
   }
 });
 
+test("sanitizeEvent: guess_submitted.moved is strictly boolean, ids never ride", () => {
+  const base = { room: "KWPFRT", mode: "h2h", total_score: 3100 };
+  assert.equal(
+    sanitizeEvent("guess_submitted", { ...base, moved: true }).props.moved, true);
+  assert.equal(
+    sanitizeEvent("guess_submitted", { ...base, moved: false }).props.moved, false);
+  // Not a boolean → stripped, never coerced.
+  for (const bad of [1, "img-123", null]) {
+    const out = sanitizeEvent("guess_submitted", { ...base, moved: bad });
+    assert.ok(!("moved" in out.props), `coerced ${JSON.stringify(bad)}`);
+  }
+  // The image ids the flag is computed from must never be sendable.
+  const out = sanitizeEvent("guess_submitted", {
+    ...base, moved: true, image_id: "abc", anchored_image_id: "def",
+  });
+  assert.ok(!("image_id" in out.props));
+  assert.ok(!("anchored_image_id" in out.props));
+});
+
 test("sanitizeEvent: super_sure_resolved keeps its aggregates, strips the rest", () => {
   const out = sanitizeEvent("super_sure_resolved", {
     mode: "h2h", round_number: 3, rounds: 5,

@@ -52,6 +52,8 @@ import {
   screenAttached,
   liveRivalPins,
   revealPins,
+  shouldReanchorViewer,
+  panoMoved,
 } from "./h2h.js";
 import {
   superSureAvailable,
@@ -183,7 +185,8 @@ let sampler = null;        // host-only pool sampler (lazy)
 let pool = null;
 
 let viewer = null;         // MapillaryJS viewer (this phone's own eyes)
-let currentImageId = null;
+let currentImageId = null; // where the player IS (movement lands on neighbors)
+let anchoredImageId = null; // the round anchor the viewer was last sent to
 let guessMap = null;
 let guessMarker = null;
 let rivalMarkers = {};     // tid -> live rival pin on MY guess map
@@ -636,6 +639,7 @@ async function startRound(advance) {
       return;
     }
     currentImageId = entry.image_id;
+    anchoredImageId = entry.image_id;
     sampler.advance();
 
     const now = Date.now();
@@ -712,8 +716,12 @@ function renderRoundActive() {
       if (viewer) viewer.resize();
     }
     if (!viewer) makeViewer();
-    if (currentImageId !== round.imageId && viewer) {
+    // Re-anchor ONLY when the round's anchor changes (new round / rejoin /
+    // fresh viewer). Comparing currentImageId here snapped every forward
+    // move back to the anchor on the next state echo (movement bounce).
+    if (viewer && shouldReanchorViewer(anchoredImageId, currentImageId, round.imageId)) {
       const target = round.imageId;
+      anchoredImageId = target;
       currentImageId = target;
       viewer.moveTo(target).catch((e) => {
         console.warn("player: image load failed", e);
@@ -763,6 +771,7 @@ function destroyViewer() {
     try { viewer.remove(); } catch { /* already gone */ }
     viewer = null;
     currentImageId = null;
+    anchoredImageId = null;
   }
 }
 
@@ -1046,6 +1055,7 @@ function lockIn(auto = false) {
       total_score: points,
       time_seconds: elapsedMs / 1000,
       super_sure: betting,
+      moved: panoMoved(anchoredImageId, currentImageId),
     });
   }
   if (auto && !guess) {

@@ -142,6 +142,24 @@ export function revealPins(round) {
     }));
 }
 
+/* Movement-bounce regression guard: the pano viewer re-anchors ONLY when
+ * the round's anchor image changes (new round, mid-round rejoin, fresh
+ * viewer) — never because the player navigated. currentImageId tracks
+ * where the player IS (movement lands on neighbor images); comparing it
+ * against round.imageId snapped every forward step back to the anchor on
+ * the next state echo (which arrives ≤4×/s from live writes). */
+export function shouldReanchorViewer(anchoredImageId, currentImageId, roundImageId) {
+  if (!roundImageId) return false;
+  return anchoredImageId !== roundImageId;
+}
+
+// Did this pin's pano get navigated away from the round's anchor image?
+// Feeds guess_submitted.moved — image ids only, never a location.
+export function panoMoved(anchoredImageId, currentImageId) {
+  return !!(anchoredImageId && currentImageId &&
+    currentImageId !== anchoredImageId);
+}
+
 // Small deterministic string hash (fnv-ish) for the tie-break coin flip.
 function hashStr(str) {
   let h = 2166136261;

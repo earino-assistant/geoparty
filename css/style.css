@@ -1263,6 +1263,17 @@ body:has(.action-bar) .consent-settings {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }
 }
+/* Viewer-bearing screens: an ancestor transform over the Mapillary WebGL
+   canvas — even a transient animated one — changes compositing / creates a
+   containing block and can desync the viewer. These screens keep the S4
+   entrance as a pure fade (same duration/easing), never a translate. */
+#p-round, #h-round, #d-round, #s-round, #s-h2h-live {
+  animation-name: screen-in-fade;
+}
+@keyframes screen-in-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 
 /* Countdown urgency: the phone HUD timers pulse (and go red) over the
    final seconds — same count-beat the TV's 3-2-1 uses. JS adds .low. */

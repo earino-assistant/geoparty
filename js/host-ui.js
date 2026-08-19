@@ -30,6 +30,7 @@ import {
   showdownOrder,
   showdownResults,
 } from "./game.js";
+import { panoMoved } from "./h2h.js";
 import {
   superSureAvailable,
   resolveSuperSure,
@@ -792,6 +793,9 @@ function confirmGuess() {
     total_score: points,
     time_seconds: elapsedMs / 1000,
     super_sure: betting,
+    // Couch: round/imageId follows the host's movement, so drifting off
+    // the pool entry's anchor image means the pano was navigated.
+    moved: panoMoved(currentTruth.image_id, room.round.imageId),
   });
 
   if (room.round.showdown) {
