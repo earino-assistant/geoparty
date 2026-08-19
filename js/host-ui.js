@@ -564,6 +564,7 @@ async function startRound() {
     pose: { bearing: 0 },
     truth: null,
     liveGuess: null,
+    liveView: null,
     guess: null,
     score: null,
   };
@@ -636,6 +637,35 @@ function cancelLiveGuessWrite() {
   liveGuessDirty = false;
 }
 
+// The TV mirrors the framing too: round/liveView carries the guess map's
+// center + zoom (same ≤4/s throttle) so the audience sees exactly what the
+// operator is looking at while they aim.
+let liveViewTimer = null;
+let liveViewDirty = false;
+function scheduleLiveViewWrite() {
+  liveViewDirty = true;
+  if (liveViewTimer) return;
+  liveViewTimer = setTimeout(() => {
+    liveViewTimer = null;
+    if (!liveViewDirty || !guessMap || !room || !room.round ||
+        room.phase !== "guessing") return;
+    liveViewDirty = false;
+    const c = guessMap.getCenter();
+    const liveView = {
+      lat: c.lat,
+      lng: L.Util.wrapNum(c.lng, [-180, 180], true),
+      zoom: guessMap.getZoom(),
+    };
+    room.round.liveView = liveView;
+    push({ "round/liveView": liveView });
+  }, 250);
+}
+
+function cancelLiveViewWrite() {
+  if (liveViewTimer) { clearTimeout(liveViewTimer); liveViewTimer = null; }
+  liveViewDirty = false;
+}
+
 function ensureGuessMap() {
   if (guessMap) return;
   guessMap = L.map("guessMap", { worldCopyJump: true, zoomControl: false })
@@ -644,6 +674,10 @@ function ensureGuessMap() {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(guessMap);
+  // moveend fires after pans, zooms, and setView alike — one event covers
+  // every way the framing can change. zoomend is belt-and-braces for
+  // pinch-zooms that settle without a pan.
+  guessMap.on("moveend zoomend", scheduleLiveViewWrite);
   guessMap.on("click", (e) => {
     if (guessMarker) {
       guessMarker.setLatLng(e.latlng);
@@ -662,8 +696,12 @@ function openGuessMap() {
   if (!setPhase("guessing")) return;
   stopTimer();
   cancelLiveGuessWrite();
-  if (room.round) room.round.liveGuess = null;
-  push({ phase: "guessing", "round/liveGuess": null });
+  cancelLiveViewWrite();
+  if (room.round) {
+    room.round.liveGuess = null;
+    room.round.liveView = null;
+  }
+  push({ phase: "guessing", "round/liveGuess": null, "round/liveView": null });
   showScreen("h-guess");
   ensureGuessMap();
   if (guessMarker) { guessMarker.remove(); guessMarker = null; }
@@ -677,6 +715,7 @@ function confirmGuess() {
   if (!guessMarker || !currentTruth) return;
   if (!setPhase("reveal")) return;
   cancelLiveGuessWrite(); // no trailing preview write after the phase flips
+  cancelLiveViewWrite();
   const g = guessMarker.getLatLng();
   // `name` rides along so the screen (a pure subscriber) can show the place
   // name at reveal without loading the pool itself. Older pool entries may
@@ -693,12 +732,14 @@ function confirmGuess() {
   room.round.truth = truth;
   room.round.guess = guess;
   room.round.liveGuess = null; // preview served its purpose
+  room.round.liveView = null;
   room.round.score = { points, distanceKm };
   room.teams[room.activeTeam].total += points;
 
   push({
     phase: "reveal",
     "round/liveGuess": null,
+    "round/liveView": null,
     "round/truth": truth,
     "round/guess": guess,
     "round/score": room.round.score,

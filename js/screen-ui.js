@@ -37,8 +37,10 @@ let revealMap = null;
 let revealShownForRound = null;
 let confettiDone = false;
 
-let liveMap = null;     // guessing-phase world map (kept across rounds)
-let liveMarker = null;  // the host's in-progress pin, mirrored live
+let liveMap = null;      // guessing-phase world map (kept across rounds)
+let liveMarker = null;   // the host's in-progress pin, mirrored live
+let liveViewKey = null;  // last host view applied, so we only animate on change
+let livePinPulseAt = 0;  // last ripple time — pulses are rationed, not per-write
 
 /* ================================================================
  * Room entry
@@ -150,6 +152,7 @@ function render(state) {
     liveMarker.remove();
     liveMarker = null;
   }
+  if (state.phase !== "guessing") liveViewKey = null;
 }
 
 function renderLobby(state) {
@@ -281,6 +284,30 @@ function ensureLiveMap() {
   return true;
 }
 
+// The pin is a divIcon so CSS can animate it: it drops in with a bounce the
+// first time the host places it, and fires a ripple pulse when it moves.
+// Anchored at its center to match the circleMarker it replaced.
+function livePinIcon() {
+  return L.divIcon({
+    className: "tv-live-pin-wrap",
+    html: '<div class="pin-ripple"></div><div class="tv-live-pin"></div>',
+    iconSize: [0, 0],
+  });
+}
+
+// Ripple on move — but rationed: liveGuess streams at ≤4/s and a ring per
+// write would be strobing, so pulses are spaced out to feel intentional.
+const PIN_PULSE_MIN_MS = 900;
+function pulseLivePin() {
+  if (!liveMarker) return;
+  const el = liveMarker.getElement();
+  const ring = el && el.querySelector(".pin-ripple");
+  if (!ring) return;
+  ring.classList.remove("go");
+  void ring.offsetWidth; // reflow so the animation restarts from frame 0
+  ring.classList.add("go");
+}
+
 function renderGuessing(state) {
   const wasHidden = $("s-guess").classList.contains("hidden");
   showScreen("s-guess");
@@ -295,17 +322,46 @@ function renderGuessing(state) {
     `Round ${round.number || 1}` +
     (state.settings ? ` / ${state.settings.roundCount}` : "");
 
+  // Follow the host's framing: round/liveView mirrors their guess map's
+  // center + zoom. Applied only when it actually changes, with a short
+  // glide so the TV tracks smoothly rather than teleporting.
+  const lv = round.liveView;
+  if (lv && typeof lv.lat === "number" && typeof lv.lng === "number" &&
+      typeof lv.zoom === "number") {
+    const key = `${lv.lat.toFixed(5)},${lv.lng.toFixed(5)},${lv.zoom}`;
+    if (key !== liveViewKey) {
+      liveViewKey = key;
+      liveMap.setView([lv.lat, lv.lng], lv.zoom, { animate: true, duration: 0.6 });
+    }
+  }
+
   const lg = round.liveGuess;
   if (lg && typeof lg.lat === "number" && typeof lg.lng === "number") {
     $("tvGuessHint").classList.add("hidden");
     const pos = L.latLng(lg.lat, lg.lng);
     if (liveMarker) {
+      const moved = liveMarker.getLatLng().distanceTo(pos) > 1; // metres
       liveMarker.setLatLng(pos);
+      if (moved && Date.now() - livePinPulseAt >= PIN_PULSE_MIN_MS) {
+        livePinPulseAt = Date.now();
+        pulseLivePin();
+      }
     } else {
-      liveMarker = L.circleMarker(pos, {
-        radius: 14, color: "#fff", weight: 3,
-        fillColor: "#ffcf3f", fillOpacity: 0.9,
+      liveMarker = L.marker(pos, {
+        icon: livePinIcon(),
+        interactive: false,
+        keyboard: false,
       }).addTo(liveMap);
+      // The drop-in bounce plays via CSS on the fresh element; hold the
+      // ripple until the pin "lands" so the two beats read as one gesture.
+      livePinPulseAt = Date.now();
+      const el = liveMarker.getElement();
+      const ring = el && el.querySelector(".pin-ripple");
+      if (ring) {
+        ring.style.animationDelay = "0.42s";
+        ring.classList.add("go");
+        setTimeout(() => { ring.style.animationDelay = ""; }, 1300);
+      }
     }
   } else {
     $("tvGuessHint").classList.remove("hidden");
