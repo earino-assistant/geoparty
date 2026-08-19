@@ -44,8 +44,13 @@ let liveMarker = null;  // the host's in-progress pin, mirrored live
  * Room entry
  * ================================================================ */
 
+// Rooms joined since the last manual entry — breaks nextRoom pointer cycles
+// (A -> B -> A would otherwise re-subscribe forever).
+let followedCodes = new Set();
+
 function joinRoom(code) {
   roomCode = code;
+  followedCodes.add(code);
   $("entryErr").textContent = "";
   let sawState = false;
 
@@ -58,10 +63,35 @@ function joinRoom(code) {
     if (!sawState) {
       sawState = true;
       startHeartbeat();
+      // Keep the URL on the current room so a TV refresh rejoins it.
+      try { history.replaceState(null, "", `?room=${code}`); } catch { /* file:// */ }
     }
     latestState = state;
+    // Follow the host: when the finished game grows a nextRoom pointer
+    // (written by the host on New Game), switch over automatically.
+    if (state.phase === "gameOver" &&
+        typeof state.nextRoom === "string" &&
+        isValidRoomCode(state.nextRoom) &&
+        !followedCodes.has(state.nextRoom)) {
+      followRoom(state.nextRoom);
+      return;
+    }
     render(state);
   });
+}
+
+// Drop the old room's subscription and join the host's next game. If the
+// target room doesn't exist, joinRoom falls back to the entry screen with
+// a "Room not found" message.
+function followRoom(code) {
+  if (unsubRoom) { unsubRoom(); unsubRoom = null; }
+  stopHeartbeat();
+  stopCountdown();
+  latestState = null;
+  revealShownForRound = null;
+  confettiDone = false;
+  $("roomInput").value = code;
+  joinRoom(code);
 }
 
 function leaveRoom(message) {
@@ -72,6 +102,9 @@ function leaveRoom(message) {
   roomCode = null;
   latestState = null;
   revealShownForRound = null;
+  confettiDone = false;
+  followedCodes = new Set();
+  try { history.replaceState(null, "", location.pathname); } catch { /* file:// */ }
   showScreen("s-entry");
   if (message) $("entryErr").textContent = message;
   $("roomInput").value = "";
@@ -439,8 +472,14 @@ input.addEventListener("input", () => {
   const code = input.value.toUpperCase().replace(/[^A-HJ-NP-Z]/g, "");
   input.value = code;
   $("entryErr").textContent = "";
-  if (code.length === 4 && isValidRoomCode(code)) joinRoom(code);
+  if (code.length === 4 && isValidRoomCode(code)) {
+    followedCodes = new Set(); // manual entry starts a fresh follow chain
+    joinRoom(code);
+  }
 });
+
+// Game-over escape hatch: back to the room-code entry screen.
+$("btnNewEntry").addEventListener("click", () => leaveRoom());
 
 onConnectionChange((isConnected) => {
   $("connPill").classList.toggle("hidden", isConnected);

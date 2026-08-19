@@ -518,6 +518,18 @@ button:disabled { opacity: 0.4; cursor: default; }
   font-weight: 800;
   color: #111;
 }
+.tv-newgame {
+  margin-top: 6vh;
+  font-size: 2.6vh;
+  padding: 1.4vh 2.5vw;
+  border-radius: 1.5vh;
+}
+.tv-newgame-hint {
+  margin: 1.5vh 0 0;
+  font-size: 1.9vh;
+  color: var(--muted);
+}
+
 .podium .slot:nth-child(1) .bar { height: 28vh; background: var(--accent); }
 .podium .slot:nth-child(2) .bar { height: 19vh; background: var(--team-2); }
 .podium .slot:nth-child(3) .bar { height: 13vh; background: var(--team-3); }

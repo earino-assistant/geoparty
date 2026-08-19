@@ -295,6 +295,8 @@ let guessMarker = null;
 let timerInterval = null;
 let unsubHeartbeat = null;
 let heartbeatSeen = false;
+let prevRoomCode = null;  // finished room to leave a nextRoom pointer in,
+                          // so a still-subscribed screen follows us over
 
 function persistActive() {
   lsSet(LS_ACTIVE, { code: roomCode, createdAt: room.createdAt });
@@ -394,6 +396,15 @@ async function newGame() {
     currentTruth = null;
     writeRoom(roomCode, room).catch((e) =>
       console.warn("Firebase write failed (continuing locally):", e));
+    if (prevRoomCode && prevRoomCode !== roomCode) {
+      // Queued after the new room's write on the same connection, so by the
+      // time any subscriber of the old room sees the pointer, the new room
+      // exists. The pointer lives inside the old room and is cleaned up
+      // with it by the janitor.
+      updateRoom(prevRoomCode, { nextRoom: roomCode }).catch((e) =>
+        console.warn("nextRoom pointer write failed:", e));
+    }
+    prevRoomCode = null;
     persistActive();
     const mine = lsGet(LS_MY_ROOMS, []);
     mine.push({ code: roomCode, createdAt: room.createdAt });
@@ -765,7 +776,9 @@ function saveToLeaderboard() {
 }
 
 function newGameFromOver() {
-  // gameOver -> lobby means: fresh room, back to setup (spec §7).
+  // gameOver -> lobby means: fresh room, back to setup (spec §7). Remember
+  // the finished room so the next game can point the screen at itself.
+  prevRoomCode = roomCode;
   if (unsubHeartbeat) { unsubHeartbeat(); unsubHeartbeat = null; }
   localStorage.removeItem(LS_ACTIVE);
   room = null;

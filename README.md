@@ -138,7 +138,13 @@ browser's site data clears the leaderboard history**.
 - **Host refresh / phone sleep** — the host page offers Resume for a room
   under 24h old and reattaches as authority.
 - **Screen refresh** — stateless; re-enter via the URL param and rendering
-  resumes from current state.
+  resumes from current state (the URL is kept in sync with the room the
+  screen is currently watching).
+- **Next game** — when the host starts a new game after game over, the new
+  room's code is written as a `nextRoom` pointer into the finished room; the
+  still-subscribed screen follows into the new game automatically. The
+  game-over screen also has a "New game — enter a room code" button back to
+  the room-code entry state as a fallback.
 - **Firebase unreachable** — both views show a "reconnecting" pill; the host
   can keep playing in degraded single-screen mode (viewer + guess map on the
   phone).
