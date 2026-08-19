@@ -19,15 +19,19 @@
 export const POSTHOG_PROJECT_KEY =
   "phc_Au8ogwiWbfcWqhbP6iE8ayyT5JSQtambPHFSffykdvkE";
 
-export const POSTHOG_INIT_OPTIONS = Object.freeze({
+// Deliberately NOT frozen: posthog.init() mutates the options object it is
+// given (it writes defaults like `debug` onto it), so a frozen object makes
+// init throw and analytics silently stay off. tests/analytics.test.js
+// asserts extensibility to keep it that way.
+export const POSTHOG_INIT_OPTIONS = {
   api_host: "https://eu.i.posthog.com",
   defaults: "2026-05-30",
   person_profiles: "identified_only",
   // Autocapture is restricted to button/link clicks: their labels are static
   // UI strings. Team names (user input) live in list items and headings,
   // which autocapture must never lift into $el_text.
-  autocapture: Object.freeze({ element_allowlist: ["button", "a"] }),
-});
+  autocapture: { element_allowlist: ["button", "a"] },
+};
 
 // The posthog-js bundle, loaded directly (no inline snippet — CSP-friendlier
 // and nothing runs before consent). EU assets host per the official snippet.

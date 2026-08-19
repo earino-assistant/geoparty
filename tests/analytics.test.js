@@ -207,6 +207,22 @@ test("tracker: accept loads once with the verbatim key+options and records conse
   assert.deepEqual(ph.captured.map((c) => c.event), ["consent_given", "consent_given"]);
 });
 
+// Regression: posthog.init() mutates the options object it receives (it sets
+// defaults like `debug` onto it), so a frozen options object makes init throw
+// "Cannot add property debug, object is not extensible" and analytics
+// silently stays off. The init options — including the nested autocapture
+// config, which posthog-js may also mutate — must stay extensible.
+test("init options are mutable: posthog.init() writes onto them", () => {
+  assert.equal(Object.isExtensible(POSTHOG_INIT_OPTIONS), true);
+  assert.equal(Object.isFrozen(POSTHOG_INIT_OPTIONS), false);
+  assert.equal(Object.isExtensible(POSTHOG_INIT_OPTIONS.autocapture), true);
+  assert.equal(Object.isFrozen(POSTHOG_INIT_OPTIONS.autocapture), false);
+  // Simulate the exact mutation posthog-js performs during _init.
+  POSTHOG_INIT_OPTIONS.debug = false;
+  assert.equal(POSTHOG_INIT_OPTIONS.debug, false);
+  delete POSTHOG_INIT_OPTIONS.debug;
+});
+
 test("tracker: events queued while the script loads flush in order", async () => {
   const storage = memStorage();
   const ph = fakePosthog();
