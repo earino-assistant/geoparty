@@ -54,10 +54,16 @@ export function scoreForDistance(km) {
  * instantly slamming a random pin earns ~nothing, instantly recognizing
  * the place earns the full bonus, and in head-to-head copying a rival's
  * visible pin costs the time they already spent placing it.
- * The clock: full bonus through the first TIME_GRACE_MS (time to look
- * around and physically drop a pin), then a straight slide to zero at the
- * round's time limit. No-limit rounds use a fixed window instead, so speed
- * still pays but a leisurely round simply scores on distance alone. */
+ * The clock is the ROUND's clock: what matters is where in the configured
+ * round length (settings.roundSeconds) the pin was locked, so "fast" means
+ * the same thing whether the host picked 60s or 180s. Full bonus through a
+ * short grace (time to look around and physically drop a pin — never more
+ * than a fifth of the round), then the remaining-time fraction SQUARED, so
+ * the bonus is meaningfully large only in the front half of the round,
+ * near-zero by the last quarter, and exactly zero when time runs out.
+ * No-limit rounds have no configured window, so they fall back to a fixed
+ * 90s one: speed still pays, a leisurely answer just scores on distance
+ * alone. The fallback is used ONLY when roundSeconds is 0. */
 export const TIME_BONUS_MAX = 1000;
 export const TIME_GRACE_MS = 10_000;
 export const NO_LIMIT_BONUS_WINDOW_MS = 90_000;
@@ -67,9 +73,10 @@ export function bonusWindowMs(roundSeconds) {
 }
 
 export function timeBonus(distancePoints, elapsedMs, windowMs) {
-  const span = Math.max(1000, windowMs - TIME_GRACE_MS);
-  const late = Math.max(0, elapsedMs - TIME_GRACE_MS);
-  const speed = Math.max(0, 1 - late / span);
+  const grace = Math.min(TIME_GRACE_MS, windowMs * 0.2);
+  const span = Math.max(1000, windowMs - grace);
+  const late = Math.max(0, elapsedMs - grace);
+  const speed = Math.max(0, 1 - late / span) ** 2;
   return Math.round(TIME_BONUS_MAX * (distancePoints / 5000) * speed);
 }
 
