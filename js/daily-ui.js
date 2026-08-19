@@ -139,17 +139,18 @@ async function startRound() {
   startTick();
 }
 
-// Fixed rules for comparable scores: looking around is allowed, moving
-// down the street is not — so no sequence/direction components.
+// Full navigation, matching regular play with moveAllowed on: everyone
+// gets the same rules (look around AND move down the street), so scores
+// stay comparable — movement is part of the fixed ruleset, like scoring.
 function makeViewer() {
   viewer = new mapillary.Viewer({
     accessToken: MAPILLARY_TOKEN,
     container: "dailyViewer",
     component: {
       cover: false,
-      direction: false,
-      sequence: false,
-      keyboard: false,
+      direction: true,
+      sequence: true,
+      keyboard: true,
       zoom: true,
       bearing: true,
     },

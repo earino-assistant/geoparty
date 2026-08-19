@@ -11,7 +11,7 @@ import { scoreForDistance, timeBonus, bonusWindowMs } from "./game.js";
 /* ================================================================
  * The fixed rules. Comparable scores need identical rules for every
  * player, so nothing here is configurable: five rounds, 60 seconds
- * each, no movement (the UI enforces that part).
+ * each, movement allowed (the UI wires that part up).
  * ================================================================ */
 
 export const DAILY_ROUNDS = 5;
