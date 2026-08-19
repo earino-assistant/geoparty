@@ -32,6 +32,7 @@ import {
 } from "./game.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
+import { track } from "./consent.js";
 
 /* ================================================================
  * DOM helpers
@@ -247,6 +248,12 @@ async function newGame() {
     const mine = lsGet(LS_MY_ROOMS, []);
     mine.push({ code: roomCode, createdAt: room.createdAt });
     lsSet(LS_MY_ROOMS, mine);
+    track("game_created", {
+      mode: "couch",
+      num_teams: teamIds(room.teams).length,
+      num_rounds: room.settings.roundCount,
+      round_seconds: room.settings.roundSeconds,
+    });
     enterLobby();
   } catch (e) {
     console.error(e);
@@ -294,6 +301,11 @@ function updateLobbyReadiness() {
 }
 
 async function abandonGame() {
+  track("game_abandoned", {
+    room: roomCode,
+    mode: "couch",
+    rounds_played: room && room.round ? room.round.number : 0,
+  });
   stopTimer();
   if (unsubHeartbeat) { unsubHeartbeat(); unsubHeartbeat = null; }
   try { await deleteRoom(roomCode); } catch (e) { console.warn(e); }
@@ -425,6 +437,7 @@ async function startRound() {
     activeTeam: room.activeTeam,
     poolCursor: room.poolCursor,
   });
+  track("round_started", { room: roomCode, mode: "couch", round_number: number });
 
   $("hudRound").textContent = `Round ${number}/${room.settings.roundCount}`;
   $("hudTeam").textContent = roundTeamLabel();
@@ -621,6 +634,18 @@ function confirmGuess() {
     timeBonus(distancePoints, elapsedMs, bonusWindowMs(room.settings.roundSeconds));
   const points = distancePoints + speedBonus;
 
+  // One event per confirmed pin, both solo and showdown turns. Only
+  // aggregates leave the device — never the pin itself.
+  track("guess_submitted", {
+    room: roomCode,
+    mode: "couch",
+    team_id: room.activeTeam,
+    distance_km: distanceKm,
+    time_bonus: speedBonus,
+    total_score: points,
+    time_seconds: elapsedMs / 1000,
+  });
+
   if (room.round.showdown) {
     confirmShowdownGuess({
       guess, distanceKm, points, distancePoints,
@@ -723,9 +748,14 @@ function confirmShowdownGuess(result) {
  * Reveal & game over
  * ================================================================ */
 
+let revealTracked = null; // "<room>:<round>" — resume re-enters the reveal
 function enterReveal() {
   showScreen("h-reveal");
   const { number, showdown } = room.round;
+  if (revealTracked !== `${roomCode}:${number}`) {
+    revealTracked = `${roomCode}:${number}`;
+    track("reveal_shown", { room: roomCode, mode: "couch", round_number: number });
+  }
   $("revealHeading").textContent = showdown
     ? "Final Showdown"
     : `Round ${number} of ${room.settings.roundCount}`;
@@ -814,6 +844,15 @@ function finishGame() {
   if (!setPhase("gameOver")) return;
   stopTimer();
   push({ phase: "gameOver" });
+  const winner = standings(room.teams)[0];
+  track("game_completed", {
+    room: roomCode,
+    mode: "couch",
+    rounds: room.round ? room.round.number : 0,
+    winner_team: winner.id,
+    winning_score: winner.total,
+    team_count: teamIds(room.teams).length,
+  });
   destroyViewer();
   showScreen("h-gameover");
   renderTotals($("finalTotals"));
@@ -841,6 +880,7 @@ function saveToLeaderboard() {
 function newGameFromOver() {
   // gameOver -> lobby means: fresh room, back to setup (spec §7). Remember
   // the finished room so the next game can point the screen at itself.
+  track("next_game", { mode: "couch" });
   prevRoomCode = roomCode;
   if (unsubHeartbeat) { unsubHeartbeat(); unsubHeartbeat = null; }
   localStorage.removeItem(LS_ACTIVE);

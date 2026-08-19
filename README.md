@@ -92,6 +92,19 @@ the repo as ESM for Node.
 For a map of the data model, write-ownership rules, and concurrency
 invariants, see [`docs/architecture.md`](docs/architecture.md).
 
+## Privacy & analytics
+
+Product analytics run on PostHog Cloud EU behind **GDPR opt-in consent**:
+the PostHog script is not even loaded until a visitor accepts the banner,
+only aggregate metrics are sent (distances, scores, times, mode, team
+counts — never coordinates, names, or identities), and the choice can be
+changed anytime via the 🍪 control on every page. The event schema is a
+hard allowlist in `js/analytics.js`, unit-tested in
+`tests/analytics.test.js`. See [`PRIVACY.md`](PRIVACY.md) for the policy
+and [`docs/analytics.md`](docs/analytics.md) for the event/KPI catalog.
+One manual dashboard step: enable *"Discard client IP data"* in the
+PostHog project settings.
+
 ## Deployment (GitHub Pages)
 
 1. Create a public GitHub repo `geoparty` and push this directory to `main`.

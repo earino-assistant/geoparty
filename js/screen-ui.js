@@ -24,6 +24,7 @@ import {
   renderH2HGameOverNote,
   disposeH2H,
 } from "./screen-h2h.js";
+import { track } from "./consent.js";
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = [
@@ -96,6 +97,10 @@ function joinRoom(code) {
     if (!sawState) {
       sawState = true;
       startHeartbeat();
+      track("screen_joined", {
+        room: code,
+        mode: state.mode === "h2h" ? "h2h" : "couch",
+      });
       // Keep the URL on the current room so a TV refresh rejoins it.
       try { history.replaceState(null, "", `?room=${code}`); } catch { /* file:// */ }
     }

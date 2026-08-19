@@ -52,6 +52,7 @@ import {
 } from "./h2h.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
+import { track } from "./consent.js";
 
 /* ================================================================
  * DOM helpers
@@ -159,6 +160,7 @@ let lastRoundSeen = null;   // round number the UI has been reset for
 let autoSubmitted = false;  // timeout auto-lock fired for this round
 let sweepDone = false;      // host forfeit sweep fired for this round
 let revealFlipPushed = null; // round number this phone already flipped for
+let revealTracked = null;   // round number reveal_shown was captured for (host)
 let prevSubmitted = 0;      // for "Team X locked in!" toasts
 let tickInterval = null;
 let revealFlipTimer = null; // phone-side hold during the TV countdown
@@ -219,6 +221,13 @@ async function createRoom() {
     const mine = lsGet(LS_MY_ROOMS, []);
     mine.push({ code, createdAt: state.createdAt });
     lsSet(LS_MY_ROOMS, mine);
+    track("game_created", {
+      mode: "h2h",
+      num_teams: 1, // teams join the lobby after creation
+      num_rounds: state.settings.roundCount,
+      round_seconds: state.settings.roundSeconds,
+    });
+    track("team_joined", { mode: "h2h", team_count: 1 });
     enterRoom(code, "t1");
   } catch (e) {
     console.error(e);
@@ -252,6 +261,7 @@ async function joinRoom() {
     }
     // Claim the first free slot atomically; retry on the next if raced.
     let claimed = null;
+    let teamCount = 0;
     for (let attempt = 0; attempt < MAX_TEAMS && !claimed; attempt++) {
       const fresh = attempt === 0 ? state : (await readRoom(code)) || state;
       const slot = freeTeamSlot(fresh.teams);
@@ -259,9 +269,13 @@ async function joinRoom() {
       const ok = await claimTeamSlot(code, slot, {
         name, total: 0, deviceId, joinedAt: Date.now(),
       });
-      if (ok) claimed = slot;
+      if (ok) {
+        claimed = slot;
+        teamCount = teamIds(fresh.teams).length + 1;
+      }
     }
     if (!claimed) { err.textContent = "Room is full (4 teams max)."; return; }
+    track("team_joined", { mode: "h2h", team_count: teamCount });
     enterRoom(code, claimed);
   } catch (e) {
     console.error(e);
@@ -282,6 +296,7 @@ function enterRoom(code, teamId) {
   autoSubmitted = false;
   sweepDone = false;
   revealFlipPushed = null;
+  revealTracked = null;
   prevSubmitted = 0;
   localStage = "explore";
   switchingRooms = false;
@@ -340,6 +355,11 @@ async function leaveOrAbandon() {
   if (!room) { leaveToHome(); return; }
   if (isHost()) {
     // Host abandoning the lobby kills the room for everyone.
+    track("game_abandoned", {
+      room: roomCode,
+      mode: "h2h",
+      rounds_played: room.round ? room.round.number : 0,
+    });
     try { await deleteRoom(roomCode); } catch (e) { console.warn(e); }
     const mine = lsGet(LS_MY_ROOMS, []).filter((r) => r.code !== roomCode);
     lsSet(LS_MY_ROOMS, mine);
@@ -500,6 +520,14 @@ async function startRound() {
       toast("Location pool exhausted!");
       const winner = h2hWinner(room.teams, roomCode);
       push({ phase: "gameOver", hostTeam: winner });
+      track("game_completed", {
+        room: roomCode,
+        mode: "h2h",
+        rounds: room.round ? room.round.number : 0,
+        winner_team: winner,
+        winning_score: room.teams[winner] ? room.teams[winner].total : 0,
+        team_count: teamIds(room.teams).length,
+      });
       return;
     }
     currentImageId = entry.image_id;
@@ -522,6 +550,7 @@ async function startRound() {
       revealAt: null,
     };
     push({ phase: "roundActive", round, poolCursor: sampler.cursor });
+    track("round_started", { room: roomCode, mode: "h2h", round_number: number });
   } catch (e) {
     console.error(e);
     toast("Could not start the round");
@@ -760,6 +789,19 @@ function lockIn(auto = false) {
     patch["round/revealAt"] = Date.now() + REVEAL_COUNTDOWN_MS;
   }
   push(patch);
+  if (guess) {
+    // Aggregates only — the pin itself never leaves the device. Forfeits
+    // (no pin at the buzzer) aren't guesses, so they aren't tracked here.
+    track("guess_submitted", {
+      room: roomCode,
+      mode: "h2h",
+      team_id: myTeam,
+      distance_km: distanceKm,
+      time_bonus: speedBonus,
+      total_score: points,
+      time_seconds: elapsedMs / 1000,
+    });
+  }
   if (auto && !guess) toast("Time! No pin — no points this round.");
   else if (auto) toast("Time! Your pin was locked in.");
 }
@@ -880,6 +922,14 @@ function renderReveal() {
   }
 
   showScreen("p-reveal");
+  // Host phone only, once per round — mirrors round_started's cardinality
+  // so the funnel counts rounds, not phones.
+  if (isHost() && revealTracked !== round.number) {
+    revealTracked = round.number;
+    track("reveal_shown", {
+      room: roomCode, mode: "h2h", round_number: round.number,
+    });
+  }
   const last = round.number >= room.settings.roundCount;
   $("pRevealHeading").textContent =
     `Round ${round.number} of ${room.settings.roundCount}`;
@@ -958,6 +1008,14 @@ function nextOrFinish() {
     // deterministic room-code coin flip in h2hWinner.
     const winner = h2hWinner(room.teams, roomCode);
     push({ phase: "gameOver", hostTeam: winner });
+    track("game_completed", {
+      room: roomCode,
+      mode: "h2h",
+      rounds: room.round.number,
+      winner_team: winner,
+      winning_score: room.teams[winner] ? room.teams[winner].total : 0,
+      team_count: teamIds(room.teams).length,
+    });
   } else {
     startRound();
   }
@@ -1013,6 +1071,13 @@ async function createNextGame() {
     const mine = lsGet(LS_MY_ROOMS, []);
     mine.push({ code, createdAt: state.createdAt });
     lsSet(LS_MY_ROOMS, mine);
+    track("next_game", { mode: "h2h" });
+    track("game_created", {
+      mode: "h2h",
+      num_teams: teamIds(teams).length, // carried over from the last game
+      num_rounds: state.settings.roundCount,
+      round_seconds: state.settings.roundSeconds,
+    });
     enterRoom(code, myTeam);
   } catch (e) {
     console.error(e);
