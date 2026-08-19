@@ -320,6 +320,14 @@ test("sanitizeEvent: overlong and empty strings are stripped", () => {
   assert.deepEqual(out.props, {});
 });
 
+test("sanitizeEvent: pwa_launch carries no properties — the launch is the signal", () => {
+  // S5: nothing identifying may ride along on an install-launch event.
+  const out = sanitizeEvent("pwa_launch", {
+    display: "standalone", device: "d-123", user_agent: "Mozilla/5.0",
+  });
+  assert.deepEqual(out, { event: "pwa_launch", props: {} });
+});
+
 test("sanitizeEvent: consent events carry no properties", () => {
   const out = sanitizeEvent("consent_given", { room: "KWPFRT", extra: 1 });
   assert.deepEqual(out, { event: "consent_given", props: {} });

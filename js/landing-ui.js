@@ -18,6 +18,7 @@ import {
   heroSequence,
 } from "./frontdoor.js";
 import { track } from "./consent.js";
+import { isStandaloneDisplay } from "./pwa.js";
 
 const $ = (id) => document.getElementById(id);
 const PANELS = { cta: "ld-cta", choose: "ld-choose", join: "ld-join" };
@@ -122,6 +123,18 @@ function startDrift(viewer) {
 }
 
 /* ---------------- Boot ---------------- */
+
+// S5: launched from the home screen? The manifest's start_url is this page,
+// so a standalone display mode here means an installed-app launch — the
+// signal behind the home-screen retention KPI. Fired once per launch (in-
+// scope navigation away and back stays in the same app window, but only the
+// landing fires it).
+if (isStandaloneDisplay({
+  matchMedia: window.matchMedia && window.matchMedia.bind(window),
+  navigatorStandalone: navigator.standalone,
+})) {
+  track("pwa_launch", {});
+}
 
 $("btnStartParty").addEventListener("click", () => showPanel("choose"));
 $("btnHaveCode").addEventListener("click", () => showPanel("join"));

@@ -138,6 +138,10 @@ export const EVENT_SCHEMA = Object.freeze({
     day_number: "int", score: "int", rounds_played: "int",
     best_distance_km: "float1",
   },
+  // S5 PWA: the landing page was launched as an installed app (standalone
+  // display mode — the manifest's start_url lands there). No properties:
+  // the launch itself is the signal; PostHog's device id carries retention.
+  pwa_launch: {},
   consent_given: {},
   consent_denied: {},
   next_game: { mode: "string" },
