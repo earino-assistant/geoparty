@@ -31,6 +31,8 @@ import {
 } from "./autoadvance.js";
 import { adjustedPoints, superSureLabel } from "./supersure.js";
 import { TV_VIAS, screenJoinVia } from "./tvlink.js";
+import { countdownTick, motionDuration, animFraction } from "./fx.js";
+import { initSound, playSound, prefersReducedMotion } from "./fx-ui.js";
 import { track } from "./consent.js";
 
 const $ = (id) => document.getElementById(id);
@@ -325,14 +327,29 @@ function renderRound(state) {
 
 // Countdown renders from endsAt minus our own clock (spec §4) — the timer is
 // never ticked through Firebase.
+// S4 tick memory. startCountdown restarts on EVERY state render (pose
+// writes echo ≤4/s), so the last-ticked second must outlive the interval —
+// it resets only when the deadline itself changes (a new round).
+let lastTicked = null;
+let lastTickEndsAt = null;
+
 function startCountdown(endsAt) {
   stopCountdown();
   const el = $("tvCountdown");
   if (!endsAt) { el.textContent = ""; return; }
+  if (endsAt !== lastTickEndsAt) {
+    lastTickEndsAt = endsAt;
+    lastTicked = null;
+  }
   const tick = () => {
     const left = endsAt - Date.now();
     el.textContent = formatCountdown(left);
     el.classList.toggle("low", left < 15_000);
+    const t = countdownTick(lastTicked, left);
+    if (t) {
+      lastTicked = t.second;
+      playSound(t.urgent ? "tickUrgent" : "tick");
+    }
     if (left <= 0) stopCountdown();
   };
   tick();
@@ -473,7 +490,8 @@ function renderGuessing(state) {
     const key = `${lv.lat.toFixed(5)},${lv.lng.toFixed(5)},${lv.zoom}`;
     if (key !== liveViewKey) {
       liveViewKey = key;
-      liveMap.setView([lv.lat, lv.lng], lv.zoom, { animate: true, duration: 0.6 });
+      liveMap.setView([lv.lat, lv.lng], lv.zoom,
+        { animate: !prefersReducedMotion(), duration: 0.6 });
     }
   }
 
@@ -620,15 +638,15 @@ function renderReveal(state) {
   setTimeout(() => revealMap.invalidateSize({ pan: false }), 60);
 
   // Animate the guess-to-truth line drawing over ~1s, then count the score up
-  // (spec §11 — get this beat right).
+  // (spec §11 — get this beat right). Reduced motion collapses the draw to
+  // an instant land (fx.js: zero duration => fraction 1 on the first frame).
   const line = L.polyline([guess], { color: "#ffcf3f", weight: 4, dashArray: "8 10" })
     .addTo(revealMap);
-  const DRAW_MS = 1000;
+  const DRAW_MS = motionDuration(1000, prefersReducedMotion());
   let start = null;
   const step = (t) => {
     if (start === null) start = t;
-    const f = Math.min(1, (t - start) / DRAW_MS);
-    const eased = 1 - Math.pow(1 - f, 3);
+    const eased = animFraction(t - start, DRAW_MS);
     line.setLatLngs([
       guess,
       L.latLng(
@@ -636,12 +654,13 @@ function renderReveal(state) {
         guess.lng + (truth.lng - guess.lng) * eased
       ),
     ]);
-    if (f < 1) {
+    if (eased < 1) {
       requestAnimationFrame(step);
     } else {
       truthMarker.addTo(revealMap)
         .bindTooltip("Answer", { permanent: true, direction: "top" });
       placeEl.classList.add("show");
+      playSound("sting"); // S4: the truth lands — the shout-it-out beat
       countUpPoints(adjustedPoints(round.score)); // ×2/0 applied for bets
       showSpeedNote(round.score); // speed lands with the score count-up
       showSuperSureNote(round.score);
@@ -723,6 +742,7 @@ function renderShowdownReveal(state, round) {
     }).addTo(revealMap)
       .bindTooltip("Answer", { permanent: true, direction: "top" });
     placeEl.classList.add("show");
+    playSound("sting"); // S4: the truth lands
     const row = rows[closestId];
     if (row) {
       row.classList.add("closest");
@@ -730,7 +750,7 @@ function renderShowdownReveal(state, round) {
     }
   };
 
-  const DRAW_MS = 800;
+  const DRAW_MS = motionDuration(800, prefersReducedMotion());
   const drawNext = (i) => {
     if (i >= order.length) { finish(); return; }
     const id = order[i];
@@ -755,8 +775,7 @@ function renderShowdownReveal(state, round) {
     let start = null;
     const step = (t) => {
       if (start === null) start = t;
-      const f = Math.min(1, (t - start) / DRAW_MS);
-      const eased = 1 - Math.pow(1 - f, 3);
+      const eased = animFraction(t - start, DRAW_MS);
       line.setLatLngs([
         guess,
         L.latLng(
@@ -764,7 +783,7 @@ function renderShowdownReveal(state, round) {
           guess.lng + (truth.lng - guess.lng) * eased
         ),
       ]);
-      if (f < 1) { requestAnimationFrame(step); return; }
+      if (eased < 1) { requestAnimationFrame(step); return; }
       const row = document.createElement("div");
       row.className = "row";
       const name = document.createElement("span");
@@ -827,14 +846,13 @@ function showSuperSureNote(score) {
 
 function countUpPoints(points) {
   const el = $("tvPoints");
-  const DUR = 1200;
+  const DUR = motionDuration(1200, prefersReducedMotion());
   let start = null;
   const step = (t) => {
     if (start === null) start = t;
-    const f = Math.min(1, (t - start) / DUR);
-    const eased = 1 - Math.pow(1 - f, 2);
+    const eased = animFraction(t - start, DUR);
     el.textContent = Math.round(points * eased).toLocaleString();
-    if (f < 1) requestAnimationFrame(step);
+    if (eased < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
 }
@@ -882,6 +900,7 @@ function renderGameOver(state) {
   });
   if (!confettiDone) {
     confettiDone = true;
+    playSound("fanfare"); // S4: podium + confetti get their chord
     spawnConfetti();
   }
 }
@@ -903,6 +922,8 @@ function spawnConfetti() {
 /* ================================================================
  * Boot: URL param or manual entry (TV-remote friendly)
  * ================================================================ */
+
+initSound("tv"); // S4: the TV defaults to sound ON (spec §2.4); 🔊 persists
 
 const input = $("roomInput");
 input.addEventListener("input", () => {

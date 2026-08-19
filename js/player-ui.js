@@ -79,6 +79,8 @@ import {
 import { withUtm, partyShareText, foldBestMoment } from "./share.js";
 import { shareResult, shareTvLink } from "./share-ui.js";
 import { screenLink, tvBrowserLine, phoneJoinLine } from "./tvlink.js";
+import { countdownTick } from "./fx.js";
+import { initSound, playSound, buzz } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -201,6 +203,10 @@ let autoAdvanceFired = null; // round number the S6 auto-advance fired for
 let prevSubmitted = 0;      // for "Team X locked in!" toasts
 let tickInterval = null;
 let revealFlipTimer = null; // phone-side hold during the TV countdown
+let lastTickSecond = null;  // S4: last countdown second the phone ticked for
+let revealTickSecond = null; // S4: same, for the no-TV reveal 3-2-1
+let stungFor = null;        // S4: round number the reveal sting played for
+let fanfarePlayed = false;  // S4: game-over fanfare, once per room
 
 const isHost = () => !!room && room.hostTeam === myTeam;
 const myResult = () =>
@@ -339,6 +345,8 @@ function enterRoom(code, teamId) {
   revealTracked = null;
   autoAdvanceFired = null;
   prevSubmitted = 0;
+  stungFor = null;
+  fanfarePlayed = false;
   localStage = "explore";
   superSureArmed = false;
   switchingRooms = false;
@@ -673,6 +681,8 @@ function renderRoundActive() {
     sweepDone = false;
     localStage = "explore";
     superSureArmed = false; // the bet is armed per-pin, never carried over
+    lastTickSecond = null;
+    revealTickSecond = null;
     clearTimeout(revealFlipTimer);
     if (guessMarker) { guessMarker.remove(); guessMarker = null; }
     clearRivalPins();
@@ -954,6 +964,7 @@ function lockIn(auto = false) {
     guess = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
   }
   if (!guess && !auto) return; // manual lock needs a pin; timeout may forfeit
+  if (guess) { playSound("stamp"); buzz(35); } // S4: the lock-in beat
   const distanceKm = guess
     ? haversineKm(truth.lat, truth.lng, guess.lat, guess.lng)
     : null;
@@ -1131,10 +1142,24 @@ function tick() {
   if (!endsAt) {
     timerEl.textContent = "∞";
     mapTimerEl.textContent = "";
+    timerEl.classList.remove("low");
+    mapTimerEl.classList.remove("low");
   } else {
     const left = endsAt - Date.now();
     timerEl.textContent = formatCountdown(left);
     mapTimerEl.textContent = formatCountdown(left);
+    // S4: the countdown pulse (CSS) + tick (Web Audio) over the final
+    // seconds — only while this phone is still in the race.
+    const low = left > 0 && left <= 10_500 && !myResult();
+    timerEl.classList.toggle("low", low);
+    mapTimerEl.classList.toggle("low", low);
+    if (!myResult()) {
+      const t = countdownTick(lastTickSecond, left);
+      if (t) {
+        lastTickSecond = t.second;
+        playSound(t.urgent ? "tickUrgent" : "tick");
+      }
+    }
     if (left <= 0 && !myResult() && !autoSubmitted) {
       // Time's up: lock whatever pin this phone has (or forfeit with none).
       autoSubmitted = true;
@@ -1165,9 +1190,16 @@ function renderReveal() {
   if (wait > 150) {
     if (shownScreen !== "p-locked") showScreen("p-locked");
     $("pLockedRank").textContent = "Everyone's in!";
-    $("pLockedSub").textContent = screenAttached(room, Date.now())
+    const attached = screenAttached(room, Date.now());
+    $("pLockedSub").textContent = attached
       ? "Eyes on the TV 📺"
       : `Reveal in ${Math.ceil(wait / 1000)}…`;
+    // S4: with no TV this phone runs the 3-2-1 — give it the beat too
+    // (with a TV attached the TV ticks; the phone stays quiet).
+    if (!attached) {
+      const t = countdownTick(revealTickSecond, wait, 3);
+      if (t) { revealTickSecond = t.second; playSound("tickUrgent"); }
+    }
     renderLockedRoster();
     $("btnCloseRound").classList.add("hidden");
     clearTimeout(revealFlipTimer);
@@ -1178,6 +1210,12 @@ function renderReveal() {
   }
 
   showScreen("p-reveal");
+  // S4: the reveal sting, once per round (renderReveal re-runs on every
+  // state echo while the phase holds).
+  if (stungFor !== round.number) {
+    stungFor = round.number;
+    playSound("sting");
+  }
   // First reveal ever: label the breakdown once (M5); the injected speed
   // line below carries the numbers themselves every round.
   oneShotHint("reveal", HINT_CARDS.reveal);
@@ -1445,6 +1483,7 @@ function nextOrFinish(advance) {
 
 function renderGameOver() {
   showScreen("p-gameover");
+  if (!fanfarePlayed) { fanfarePlayed = true; playSound("fanfare"); } // S4
   destroyViewer();
   const winner = room.hostTeam; // rotated to the winner at finish
   const winnerName = room.teams[winner] ? room.teams[winner].name : "The winner";
@@ -1613,6 +1652,7 @@ if (isValidRoomCode(urlCode)) {
   $("myTeamName").focus();
 }
 
+initSound("player"); // S4: muted by default on phones; 🔇 toggle persists
 showScreen("p-home");
 janitor();
 renderResumeBanner();

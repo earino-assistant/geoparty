@@ -1252,3 +1252,109 @@ body:has(.action-bar) .consent-settings {
   padding: 12px 10px;
 }
 .daily-back-link:hover { color: var(--fg); }
+
+/* ---------- S4: sound + motion pass (design review §2.4) ---------- */
+
+/* Phones no longer just toggle `hidden`: every phase screen rises in.
+   Quick and composited (opacity + transform only); the class only changes
+   on a real phase change, so steady-state re-renders never replay it. */
+.phase-screen { animation: screen-in 0.28s ease-out; }
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Countdown urgency: the phone HUD timers pulse (and go red) over the
+   final seconds — same count-beat the TV's 3-2-1 uses. JS adds .low. */
+.hud-item.low {
+  color: var(--bad);
+  animation: count-beat 1s ease-out infinite;
+}
+/* The TV clocks already turn red on .low; give them the pulse too. */
+.tv-countdown.low,
+.h2h-countdown.low { animation: count-beat 1s ease-out infinite; }
+
+/* Phone-side reveal: the map, cards, and result rows land in a quick
+   cascade — the phone's version of the TV's reveal drama. */
+#p-reveal .p-reveal-map,
+#p-reveal .stat-card, #h-reveal .stat-card, #d-reveal .stat-card,
+#p-reveal .totals-list li, #h-reveal .totals-list li,
+#d-reveal .p-reveal-map, #d-reveal .totals-list li {
+  animation: rise-in 0.35s ease-out both;
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+#p-reveal .stat-card:nth-of-type(2), #h-reveal .stat-card:nth-of-type(2),
+#d-reveal .stat-card:nth-of-type(2) { animation-delay: 0.06s; }
+#p-reveal .stat-card:nth-of-type(3), #h-reveal .stat-card:nth-of-type(3),
+#d-reveal .stat-card:nth-of-type(3) { animation-delay: 0.12s; }
+#d-reveal .stat-card:nth-of-type(4) { animation-delay: 0.18s; }
+#p-reveal .totals-list li:nth-child(1), #h-reveal .totals-list li:nth-child(1) { animation-delay: 0.16s; }
+#p-reveal .totals-list li:nth-child(2), #h-reveal .totals-list li:nth-child(2) { animation-delay: 0.22s; }
+#p-reveal .totals-list li:nth-child(3), #h-reveal .totals-list li:nth-child(3) { animation-delay: 0.28s; }
+#p-reveal .totals-list li:nth-child(4), #h-reveal .totals-list li:nth-child(4) { animation-delay: 0.34s; }
+
+/* Transient lock-in stamp for surfaces with no locked screen of their own
+   (couch host, daily): slams in, holds a beat, fades. Injected by fx-ui. */
+.stamp-flash {
+  position: fixed;
+  top: 40%;
+  left: 50%;
+  z-index: 1500;
+  transform: translate(-50%, -50%) rotate(-5deg);
+  font-size: clamp(2.4rem, 12vw, 4rem);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  border: 4px solid var(--accent);
+  border-radius: 16px;
+  padding: 6px 22px;
+  background: rgba(17, 17, 17, 0.72);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: stamp-flash 0.9s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes stamp-flash {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(-5deg) scale(2.1); }
+  18% { opacity: 1; transform: translate(-50%, -50%) rotate(-5deg) scale(1); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(-5deg) scale(1); }
+}
+
+/* The 🔊/🔇 toggle: quiet corner control, mirroring the consent 🍪 on the
+   opposite side. Always present in-game — sound must be one tap away. */
+.sound-toggle {
+  position: fixed;
+  right: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  z-index: 2900;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(28, 28, 34, 0.7);
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.5;
+}
+.sound-toggle:hover, .sound-toggle:focus-visible { opacity: 1; }
+/* Keep it clear of the bottom action bar on the phone pages. */
+body:has(.action-bar) .sound-toggle {
+  bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
+/* Reduced motion: collapse every CSS animation/transition to a single
+   instant frame (states still land — nothing depends on motion), and drop
+   the looping confetti outright. JS-driven motion (reveal line draws, the
+   score count-up, map glides) respects the same preference via
+   fx.js motionDuration / fx-ui.js prefersReducedMotion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .confetti { display: none; }
+}

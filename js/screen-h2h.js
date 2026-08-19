@@ -14,6 +14,8 @@ import {
 } from "./autoadvance.js";
 import { superSureLabel } from "./supersure.js";
 import { phoneJoinLine } from "./tvlink.js";
+import { countdownTick, motionDuration, animFraction } from "./fx.js";
+import { playSound, prefersReducedMotion } from "./fx-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
@@ -41,6 +43,7 @@ let timerInterval = null;
 let revealMap = null;
 let revealShownFor = null;   // `${createdAt}:${round}` — animate once
 let countInterval = null;
+let countTicked = null;      // S4: last 3-2-1 second the TV ticked for
 
 function panelStatus(p, text) {
   if (p.statusEl.textContent !== text) p.statusEl.textContent = text;
@@ -65,6 +68,7 @@ function stopTimer() {
 
 function stopCount() {
   if (countInterval) { clearInterval(countInterval); countInterval = null; }
+  countTicked = null;
 }
 
 // Full teardown — called when the TV leaves the room or a couch-mode
@@ -394,7 +398,8 @@ function applyTeamFeed(p, state, round, feed, result, tid) {
       const key = `${v.lat.toFixed(4)},${v.lng.toFixed(4)},${v.zoom}`;
       if (key !== p.viewKey) {
         p.viewKey = key;
-        p.map.setView([v.lat, v.lng], v.zoom, { animate: true, duration: 0.5 });
+        p.map.setView([v.lat, v.lng], v.zoom,
+          { animate: !prefersReducedMotion(), duration: 0.5 });
       }
     }
     const pin = feed && feed.pin;
@@ -434,14 +439,29 @@ function applyTeamFeed(p, state, round, feed, result, tid) {
 
 // Round countdown from endsAt minus our own clock (never ticked through
 // Firebase) — same rule as couch.
+// S4 tick memory: renderLive restarts this timer on every state render
+// (team feeds echo ≤4/s each), so the last-ticked second lives outside the
+// interval and resets only when the deadline changes (a new round).
+let lastTicked = null;
+let lastTickEndsAt = null;
+
 function startTimer(endsAt) {
   stopTimer();
   const el = $("h2hCountdown");
   if (!endsAt) { el.textContent = ""; return; }
+  if (endsAt !== lastTickEndsAt) {
+    lastTickEndsAt = endsAt;
+    lastTicked = null;
+  }
   const tick = () => {
     const left = endsAt - Date.now();
     el.textContent = formatCountdown(left);
     el.classList.toggle("low", left < 15_000);
+    const t = countdownTick(lastTicked, left);
+    if (t) {
+      lastTicked = t.second;
+      playSound(t.urgent ? "tickUrgent" : "tick");
+    }
     if (left <= 0) stopTimer();
   };
   tick();
@@ -464,11 +484,18 @@ function renderReveal(state, showScreen) {
   const key = `${state.createdAt}:${round.number}`;
   const overlay = $("h2hCountOverlay");
 
+  // S4: the 3-2-1 gets an urgent tick per second — the heads-up cue.
+  const countBeat = (left) => {
+    const t = countdownTick(countTicked, left, 5);
+    if (t) { countTicked = t.second; playSound("tickUrgent"); }
+  };
+
   const msLeft = (round.revealAt || 0) - Date.now();
   if (msLeft > 150) {
     if (revealShownFor === key) return;
     overlay.classList.remove("hidden");
     $("h2hCountNum").textContent = String(Math.ceil(msLeft / 1000));
+    countBeat(msLeft);
     if (!countInterval) {
       countInterval = setInterval(() => {
         const left = (round.revealAt || 0) - Date.now();
@@ -478,6 +505,7 @@ function renderReveal(state, showScreen) {
           return;
         }
         $("h2hCountNum").textContent = String(Math.ceil(left / 1000));
+        countBeat(left);
       }, 100);
     }
     return;
@@ -543,6 +571,7 @@ function runRevealAnimation(state, round) {
     }).addTo(revealMap)
       .bindTooltip("Answer", { permanent: true, direction: "top" });
     placeEl.classList.add("show");
+    playSound("sting"); // S4: the truth lands — every head turns up
     if (closestId && rows[closestId]) {
       rows[closestId].classList.add("closest");
       rows[closestId].firstChild.textContent =
@@ -550,7 +579,7 @@ function runRevealAnimation(state, round) {
     }
   };
 
-  const DRAW_MS = 800;
+  const DRAW_MS = motionDuration(800, prefersReducedMotion());
   const drawNext = (i) => {
     if (i >= order.length) { finish(); return; }
     const r = order[i];
@@ -577,8 +606,7 @@ function runRevealAnimation(state, round) {
     let start = null;
     const step = (t) => {
       if (start === null) start = t;
-      const f = Math.min(1, (t - start) / DRAW_MS);
-      const eased = 1 - Math.pow(1 - f, 3);
+      const eased = animFraction(t - start, DRAW_MS);
       line.setLatLngs([
         guess,
         L.latLng(
@@ -586,7 +614,7 @@ function runRevealAnimation(state, round) {
           guess.lng + (truth.lng - guess.lng) * eased
         ),
       ]);
-      if (f < 1) { requestAnimationFrame(step); return; }
+      if (eased < 1) { requestAnimationFrame(step); return; }
       addRow(r);
       setTimeout(() => drawNext(i + 1), 300);
     };

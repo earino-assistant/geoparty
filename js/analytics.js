@@ -142,6 +142,11 @@ export const EVENT_SCHEMA = Object.freeze({
   // display mode — the manifest's start_url lands there). No properties:
   // the launch itself is the signal; PostHog's device id carries retention.
   pwa_launch: {},
+  // S4 sound + motion: the 🔊/🔇 toggle was used. surface: "host" | "player"
+  // | "tv" | "daily"; enabled is the state AFTER the tap. Phones default
+  // muted and the TV defaults on, so opt-ins (phone → on) and opt-outs
+  // (tv → off) directly test the "silence reads as unfinished" hypothesis.
+  sound_toggled: { surface: "string", enabled: "bool" },
   consent_given: {},
   consent_denied: {},
   next_game: { mode: "string" },

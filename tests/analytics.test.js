@@ -328,6 +328,23 @@ test("sanitizeEvent: pwa_launch carries no properties — the launch is the sign
   assert.deepEqual(out, { event: "pwa_launch", props: {} });
 });
 
+test("sanitizeEvent: sound_toggled keeps surface + strictly-boolean enabled", () => {
+  // S4: which surface the 🔊/🔇 toggle was tapped on, nothing else.
+  const out = sanitizeEvent("sound_toggled", {
+    surface: "tv", enabled: false,
+    room: "KWPFRT", team_name: "The Atlas Cats", lat: 1, lng: 2,
+  });
+  assert.deepEqual(out, {
+    event: "sound_toggled",
+    props: { surface: "tv", enabled: false },
+  });
+  // Truthy-but-not-boolean is stripped, never coerced.
+  for (const bad of [1, 0, "true", null]) {
+    const o = sanitizeEvent("sound_toggled", { surface: "player", enabled: bad });
+    assert.ok(!("enabled" in o.props), `coerced ${JSON.stringify(bad)}`);
+  }
+});
+
 test("sanitizeEvent: consent events carry no properties", () => {
   const out = sanitizeEvent("consent_given", { room: "KWPFRT", extra: 1 });
   assert.deepEqual(out, { event: "consent_given", props: {} });

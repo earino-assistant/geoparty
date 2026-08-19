@@ -36,6 +36,8 @@ import {
   lockNowLabel,
 } from "./hints.js";
 import { oneShotHint, dismissHintCard } from "./hints-ui.js";
+import { countdownTick } from "./fx.js";
+import { initSound, playSound, buzz } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { track } from "./consent.js";
 
@@ -82,6 +84,7 @@ let guessMap = null;
 let guessMarker = null;
 let revealMap = null;
 let tickInterval = null;
+let lastTickSecond = null; // S4: last countdown second this page ticked for
 
 /* ================================================================
  * Start
@@ -111,6 +114,7 @@ async function startChallenge() {
 async function startRound() {
   locked = false;
   stage = "explore";
+  lastTickSecond = null;
   if (guessMarker) { guessMarker.remove(); guessMarker = null; }
   if (guessMap) guessMap.setView([25, 10], 2);
   destroyRevealMap();
@@ -248,6 +252,15 @@ function tick() {
   const left = endsAt - Date.now();
   $("dHudTimer").textContent = formatCountdown(left);
   $("dGuessTimer").textContent = formatCountdown(left);
+  // S4: countdown pulse (CSS .low) + tick over the final seconds.
+  const low = left > 0 && left <= 10_500;
+  $("dHudTimer").classList.toggle("low", low);
+  $("dGuessTimer").classList.toggle("low", low);
+  const t = countdownTick(lastTickSecond, left);
+  if (t) {
+    lastTickSecond = t.second;
+    playSound(t.urgent ? "tickUrgent" : "tick");
+  }
   if (left <= 0) lockIn(true); // pin if placed, forfeit if not
 }
 
@@ -263,6 +276,7 @@ function lockIn(auto = false) {
   if (!guess && !auto) return; // manual lock needs a pin; timeout may forfeit
   locked = true;
   stopTick();
+  if (guess) { playSound("stamp"); buzz(35); } // S4: the lock-in beat
   const elapsedMs = Math.max(0, Date.now() - roundStartedAt);
   const distanceKm = guess
     ? haversineKm(current.lat, current.lng, guess.lat, guess.lng)
@@ -278,6 +292,7 @@ function lockIn(auto = false) {
 
 function renderReveal(guess, elapsedMs) {
   showScreen("d-reveal");
+  playSound("sting"); // S4: the reveal beat (called once per round)
   oneShotHint("reveal", HINT_CARDS.reveal);
   const r = run.rounds[run.rounds.length - 1];
   $("dRevealHeading").textContent =
@@ -342,6 +357,7 @@ function nextOrFinish() {
 function finishRun() {
   stopTick();
   destroyViewer();
+  playSound("fanfare"); // S4
   saveDailyResult(localStorage, run);
   // best_distance_km is absent for an all-forfeit run (sanitizer drops the
   // null) — rounds_played: 0 already tells that story.
@@ -384,6 +400,7 @@ function renderDone(result, alreadyPlayed) {
  * Boot
  * ================================================================ */
 
+initSound("daily"); // S4: muted by default on phones; 🔇 toggle persists
 $("btnDailyStart").addEventListener("click", startChallenge);
 $("btnDOpenMap").addEventListener("click", openGuessMap);
 $("btnDBackToStreet").addEventListener("click", backToStreet);

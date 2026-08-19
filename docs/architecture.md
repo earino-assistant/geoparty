@@ -18,11 +18,15 @@ js/hints.js        Pure education logic: one-shot flags, lock-now estimate ← t
 js/autoadvance.js  Pure S6 soft auto-advance: countdown, hold, firing      ← tested
 js/daily.js        Pure Daily Challenge logic: date seed, run fold, lock   ← tested
 js/share.js        Pure share-artifact logic: UTM links, card text, grid   ← tested
+js/fx.js           Pure S4 sound+motion: sound pref, tick scheduling,
+                   synth specs as data, reduced-motion easing math         ← tested
 js/pool.js         Location pool: seeded shuffle + cursor sampler          ← tested
 js/qr.js           Self-contained QR encoder (join/screen URLs)            ← tested
 js/firebase.js     Firebase init + thin typed helpers (the only SDK import)
 js/landing-ui.js   The one front door: hero pano, chooser, code routing
 js/hints-ui.js     One-shot hint overlay renderer (shared by both phones)
+js/fx-ui.js        Web Audio synth + gesture unlock, 🔊/🔇 toggle, haptics,
+                   stamp overlay, reduced-motion probe (all game pages)
 js/share-ui.js     Web Share / clipboard glue for the result card (S1)
 js/host-ui.js      Couch-mode operator phone (DOM + viewer + writes)
 js/player-ui.js    Head-to-head team phone (DOM + viewer + writes)

@@ -16,8 +16,8 @@ implementation (unit-tested in `tests/analytics.test.js`).
   accept). Exports `track(event, props)`.
 - Instrumented call sites live in `js/host-ui.js` (couch), `js/player-ui.js`
   (head-to-head), `js/screen-ui.js` (TV), `js/landing-ui.js` (the front
-  door), `js/daily-ui.js` (the Daily Challenge), and `js/share-ui.js` (the
-  shared result-card glue).
+  door), `js/daily-ui.js` (the Daily Challenge), `js/share-ui.js` (the
+  shared result-card glue), and `js/fx-ui.js` (the S4 sound toggle).
 
 PostHog init (owner-provided, verbatim): key
 `phc_Au8ogwiWbfcWqhbP6iE8ayyT5JSQtambPHFSffykdvkE`, `api_host:
@@ -53,6 +53,7 @@ the user-entered team name.
 | `result_shared` | `mode, method` | game-over screen / daily done screen | S1: a post-game result card left the app. `mode` is `couch` \| `h2h` \| `daily`; `method` mirrors `invite_shared`. The card's **text** (score, closest distance, place name) and link never ride on the event — inbound attribution uses the link's UTM tags instead (see KPIs) |
 | `daily_challenge_started` | `day_number` | daily page | S2: "Play Today's Daily" pressed and the seeded run began. `day_number` is the public puzzle index ("Daily #37") — a calendar fact, not an identity |
 | `daily_challenge_completed` | `day_number, score, rounds_played, best_distance_km` | daily page | All five rounds resolved (forfeits included). `rounds_played` counts rounds that landed a pin (0–5); `best_distance_km` is the run's closest guess, absent when every round forfeited. The started→completed gap is mid-run bail-out |
+| `sound_toggled` | `surface, enabled` | 🔊/🔇 corner toggle (all game pages) | S4: the sound toggle was tapped. `surface` is `host` \| `player` \| `tv` \| `daily`; `enabled` is the state **after** the tap. Defaults are muted on phones and ON on the TV, so phone→on taps measure demand for sound where we mute it, and tv→off taps measure rejection where we impose it — both direct reads on the §2.4 "silence feels unfinished" hypothesis |
 | `pwa_launch` | — | landing page | S5: the page opened in an installed-app display mode (`standalone`/`fullscreen`/`minimal-ui`, or iOS's `navigator.standalone`) — i.e. launched from a home-screen icon, not a browser tab. Fires once per launch: the manifest's `start_url` is the landing, and in-scope navigation stays in the same app window. Deliberately propertyless — the launch itself is the signal |
 | `consent_given` | — | consent module | Banner accepted (first event after PostHog init) |
 | `consent_denied` | — | consent module | A previously-consented user revokes. A **first-time** decline sends nothing — PostHog was never loaded, by design |
@@ -83,6 +84,7 @@ Plus PostHog defaults: `$pageview` and (button/link-only) autocapture.
 | **SUPER SURE timing** (M6) | Distribution of `round_number ÷ rounds` — early confidence plays vs late hail-marys | `super_sure_resolved` |
 | **Between-round tempo** (S6) | The dead-air KPI: time between `reveal_shown` and the next `round_started` in the same `room` (both host-phone events with matching cardinality — a PostHog funnel with time-to-convert, or HogQL on the event pair). S6 should pull the tail in. `round_started.advance` splits the mix: `auto` share = the timer is doing the advancing; `auto_advance_hold` count and its `seconds_left` distribution tune the 15s default | `reveal_shown`, `round_started`, `auto_advance_hold` |
 | **Share → new rooms** (S1) | The card KPI: **new-room creations from shared links**. Every card link carries `utm_source=share` + `utm_campaign` (`couch` \| `h2h` \| `daily`); PostHog's defaults capture `utm_*` on `$pageview` and as session/person *entry* properties automatically, so no code reads them. Insight: `game_created` (and `daily_challenge_started`) filtered by session entry `utm_source = share`, broken down by `utm_campaign`. `result_shared` counts the top of that funnel (cards sent) | `result_shared`, `game_created`, `$pageview` |
+| **Sound opt-in/opt-out** (S4) | `sound_toggled` broken down by `surface` + `enabled`: phone `enabled=true` share is demand for sound where the default mutes it; TV `enabled=false` share is rejection of the default-on sting/ticks. S4's headline KPIs (session length, `game_completed` rate) are trend comparisons before/after the pass | `sound_toggled`, `game_completed` |
 | **Daily actives & retention** (S2) | The ritual KPI: `daily_challenge_started` unique users per day (daily actives); PostHog Retention on `daily_challenge_started` (does the ritual bring people back?) and on `game_created` (does the daily feed the party game?). Completion rate = `daily_challenge_completed ÷ daily_challenge_started`; `score` / `best_distance_km` distributions calibrate difficulty day over day | `daily_challenge_started`, `daily_challenge_completed`, `game_created` |
 
 ## Adding a new event

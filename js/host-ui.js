@@ -56,6 +56,8 @@ import {
   countdownText,
   holdAdvancePatch,
 } from "./autoadvance.js";
+import { countdownTick } from "./fx.js";
+import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -499,17 +501,31 @@ function roundTeamLabel() {
   return room.teams[room.activeTeam].name;
 }
 
+let lastTickSecond = null; // S4: last countdown second this phone ticked for
+
 function startTimer() {
   stopTimer();
+  lastTickSecond = null;
   const tick = () => {
     if (!room || !room.round) return;
     const endsAt = room.round.endsAt;
     if (!endsAt) {
       $("hudTimer").textContent = "∞";
+      $("hudTimer").classList.remove("low");
       return;
     }
     const left = endsAt - Date.now();
     $("hudTimer").textContent = formatCountdown(left);
+    // S4: countdown pulse + tick over the final seconds of the pano phase.
+    $("hudTimer").classList.toggle(
+      "low", left > 0 && left <= 10_500 && room.phase === "roundActive");
+    if (room.phase === "roundActive") {
+      const t = countdownTick(lastTickSecond, left);
+      if (t) {
+        lastTickSecond = t.second;
+        playSound(t.urgent ? "tickUrgent" : "tick");
+      }
+    }
     if (left <= 0 && room.phase === "roundActive") {
       toast("Time's up!");
       openGuessMap();
@@ -762,6 +778,8 @@ function confirmGuess() {
   const betting = superSureArmed &&
     superSureAvailable(room.teams, room.activeTeam);
   superSureArmed = false;
+  playSound("stamp"); // S4: the lock-in beat on the operator phone
+  buzz(35);
 
   // One event per confirmed pin, both solo and showdown turns. Only
   // aggregates leave the device — never the pin itself.
@@ -882,6 +900,9 @@ function confirmShowdownGuess(result) {
     updateGuessHint();
     superSureArmed = false; // the next team arms (or not) for itself
     renderSuperSureToggle();
+    // S4: a mid-showdown turn has no reveal to punctuate it — the stamp
+    // overlay marks the handoff instead.
+    stampFlash("LOCKED IN");
     toast(`Pass the phone — ${room.teams[next].name} is up!`);
     return;
   }
@@ -1002,6 +1023,7 @@ function enterReveal() {
     room.round.truth && room.round.truth.name);
   if (revealTracked !== `${roomCode}:${number}`) {
     revealTracked = `${roomCode}:${number}`;
+    playSound("sting"); // S4: the reveal beat, once per round
     track("reveal_shown", { room: roomCode, mode: "couch", round_number: number });
     // One super_sure_resolved per bet (host phone at reveal, same
     // once-per-round cardinality). Solo rounds carry the bet on the score;
@@ -1138,6 +1160,7 @@ function finishGame(advance) {
   });
   destroyViewer();
   showScreen("h-gameover");
+  playSound("fanfare"); // S4
   renderTotals($("finalTotals"));
   $("btnSaveLeaderboard").disabled = false;
   $("btnSaveLeaderboard").textContent = "Save to leaderboard";
@@ -1320,6 +1343,7 @@ onConnectionChange((isConnected) => {
   if (room && room.phase === "lobby") updateLobbyReadiness();
 });
 
+initSound("host"); // S4: muted by default on phones; 🔇 toggle persists
 enterSetup();
 janitor();
 checkResume();
