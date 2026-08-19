@@ -374,6 +374,38 @@ button:disabled { opacity: 0.4; cursor: default; }
   margin: 0 0 16px;
 }
 
+/* "Add a TV" affordance (both lobbies): a QR to scan-and-cast, one button
+ * to send the link, one short typing fallback — never a raw URL for a human
+ * to copy off the screen (tvlink.js owns that rule). Collapsed <details> on
+ * the h2h phone, where the TV is a bonus; inline on the couch lobby, where
+ * attaching a screen is the whole job. */
+.tv-add {
+  border: 1px solid var(--panel-2);
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 0 14px;
+  margin: 0 0 16px;
+}
+.tv-add summary {
+  cursor: pointer;
+  padding: 12px 2px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.tv-add[open] summary { color: var(--fg); }
+.qr-small canvas { width: min(45vw, 180px); height: min(45vw, 180px); }
+.tv-add-hint {
+  text-align: center;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.tv-add-alt {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 4px 0 14px;
+}
+
 /* Head-to-head reveal map on the phone — the all-pins beat when no TV is
  * attached (and a recap when one is). */
 .p-reveal-map {

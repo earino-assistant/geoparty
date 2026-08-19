@@ -80,7 +80,11 @@ export const EVENT_SCHEMA = Object.freeze({
     mode: "string", num_teams: "int", num_rounds: "int", round_seconds: "int",
   },
   team_joined: { mode: "string", team_count: "int" },
-  screen_joined: { room: "string", mode: "string" },
+  // via: how this screen got attached — "qr" (scanned, usually then cast to
+  // the TV) | "link" (shared TV link opened) | "typed" (code entered by
+  // hand) | "follow" (auto-rejoined the host's next game). Feeds the
+  // which-path-attaches-TVs question behind the Add a TV affordance.
+  screen_joined: { room: "string", mode: "string", via: "string" },
   round_started: { room: "string", mode: "string", round_number: "int" },
   guess_submitted: {
     room: "string", mode: "string", team_id: "string",
@@ -103,6 +107,10 @@ export const EVENT_SCHEMA = Object.freeze({
   game_abandoned: { room: "string", mode: "string", rounds_played: "int" },
   // method: "share" (Web Share sheet) | "copy" (clipboard fallback).
   invite_shared: { mode: "string", method: "string" },
+  // The lobby "Send the TV link" affordance was used (both modes); method
+  // mirrors invite_shared. Pairs with screen_joined.via="link" to show
+  // whether handed-over TV links actually get opened.
+  tv_link_shared: { mode: "string", method: "string" },
   // S1 share artifact: a post-game result card left the app. mode adds
   // "daily" to the usual pair; method mirrors invite_shared. The card's
   // link is UTM-tagged (utm_source=share) — inbound attribution rides on

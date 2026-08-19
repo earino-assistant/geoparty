@@ -25,6 +25,7 @@ import {
   disposeH2H,
 } from "./screen-h2h.js";
 import { adjustedPoints, superSureLabel } from "./supersure.js";
+import { TV_VIAS, screenJoinVia } from "./tvlink.js";
 import { track } from "./consent.js";
 
 const $ = (id) => document.getElementById(id);
@@ -79,6 +80,12 @@ let placedKey = null;    // results fingerprint, so we redraw only on change
 // (A -> B -> A would otherwise re-subscribe forever).
 let followedCodes = new Set();
 
+// How THIS attach happened — rides on screen_joined so we learn which Add a
+// TV path actually attaches screens: "qr" | "link" (from the lobby
+// affordance's ?via= tag), "typed" (hand-entered code), "follow" (auto-
+// rejoined the host's next game).
+let joinVia = "typed";
+
 function joinRoom(code) {
   // A prior subscription can still be live here (e.g. the user re-typed a
   // code while the first room's "not found" was in flight) — drop it, or
@@ -101,9 +108,14 @@ function joinRoom(code) {
       track("screen_joined", {
         room: code,
         mode: state.mode === "h2h" ? "h2h" : "couch",
+        via: joinVia,
       });
-      // Keep the URL on the current room so a TV refresh rejoins it.
-      try { history.replaceState(null, "", `?room=${code}`); } catch { /* file:// */ }
+      // Keep the URL on the current room so a TV refresh rejoins it — and
+      // keep a qr/link via tag so the refresh reports the same attribution.
+      const keepVia = TV_VIAS.includes(joinVia) ? `&via=${joinVia}` : "";
+      try {
+        history.replaceState(null, "", `?room=${code}${keepVia}`);
+      } catch { /* file:// */ }
     }
     latestState = state;
     // Follow the host: when the finished game grows a nextRoom pointer
@@ -131,6 +143,7 @@ function followRoom(code) {
   revealShownForRound = null;
   confettiDone = false;
   $("roomInput").value = code;
+  joinVia = "follow";
   joinRoom(code);
 }
 
@@ -859,6 +872,7 @@ input.addEventListener("input", () => {
   $("entryErr").textContent = "";
   if (code.length === 6 && isValidRoomCode(code)) {
     followedCodes = new Set(); // manual entry starts a fresh follow chain
+    joinVia = "typed";
     joinRoom(code);
   }
 });
@@ -870,10 +884,11 @@ onConnectionChange((isConnected) => {
   $("connPill").classList.toggle("hidden", isConnected);
 });
 
-const urlCode = (new URLSearchParams(location.search).get("room") || "")
-  .toUpperCase();
+const bootParams = new URLSearchParams(location.search);
+const urlCode = (bootParams.get("room") || "").toUpperCase();
 if (isValidRoomCode(urlCode)) {
   input.value = urlCode;
+  joinVia = screenJoinVia(bootParams.get("via"));
   joinRoom(urlCode);
 } else {
   input.focus();

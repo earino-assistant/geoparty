@@ -13,6 +13,7 @@ js/game.js         Pure couch-mode logic: scoring, phases, turn schedule   ← t
 js/h2h.js          Pure head-to-head logic: slots, submissions, winner     ← tested
 js/supersure.js    Pure SUPER SURE bet logic: resolution + settlement      ← tested
 js/frontdoor.js    Pure front-door logic: join routing, chooser targets    ← tested
+js/tvlink.js       Pure "Add a TV" logic: screen links, typeable address   ← tested
 js/hints.js        Pure education logic: one-shot flags, lock-now estimate ← tested
 js/daily.js        Pure Daily Challenge logic: date seed, run fold, lock   ← tested
 js/share.js        Pure share-artifact logic: UTM links, card text, grid   ← tested

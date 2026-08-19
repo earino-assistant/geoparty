@@ -91,6 +91,16 @@
         <button id="btnPShare" class="btn-primary">📤 Send invite link</button>
       </div>
       <div id="pScreenNote" class="waiting-screen-note"></div>
+      <!-- Add a TV: collapsed by default — the TV is a bonus, never homework.
+           QR → any spare device becomes the screen, then cast/AirPlay it. -->
+      <details id="pTvAdd" class="tv-add">
+        <summary>📺 Add a TV — optional</summary>
+        <div class="qr-box qr-small"><canvas id="pTvQr"></canvas></div>
+        <p class="tv-add-hint">Scan with any phone or tablet, then cast or
+          AirPlay it to the TV.</p>
+        <div class="share-row"><button id="btnPTvLink">📤 Send the TV link</button></div>
+        <p id="pTvType" class="tv-add-alt"></p>
+      </details>
       <h2>Teams</h2>
       <ul id="pLobbyTeams" class="totals-list lobby-teams"></ul>
       <div id="pLobbyNote" class="waiting-screen-note"></div>

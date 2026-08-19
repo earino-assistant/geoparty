@@ -8,6 +8,7 @@ import { MAPILLARY_TOKEN } from "../config.js";
 import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
 import { superSureLabel } from "./supersure.js";
+import { phoneJoinLine } from "./tvlink.js";
 
 const $ = (id) => document.getElementById(id);
 const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
@@ -113,9 +114,9 @@ function renderLobby(state, showScreen) {
   showScreen("s-h2h-lobby");
   const code = codeFromUrl();
   $("h2hLobbyCode").textContent = code || "";
-  $("h2hLobbyUrl").textContent = code
-    ? `Phones join at ${new URL(`player.html?room=${code}`, location.href).href}`
-    : "";
+  // Readable from the couch: the short site address + code, never a raw
+  // URL dump (tvlink.js owns that rule).
+  $("h2hLobbyUrl").textContent = code ? phoneJoinLine(location.href, code) : "";
   const wrap = $("h2hLobbyTeams");
   wrap.innerHTML = "";
   const ids = teamIds(state.teams);

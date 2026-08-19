@@ -45,7 +45,8 @@ import {
 } from "./hints.js";
 import { oneShotHint, dismissHintCard } from "./hints-ui.js";
 import { withUtm, partyShareText, foldBestMoment } from "./share.js";
-import { shareResult } from "./share-ui.js";
+import { shareResult, shareTvLink } from "./share-ui.js";
+import { screenLink, tvBrowserLine } from "./tvlink.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -290,9 +291,11 @@ async function newGame() {
 function enterLobby() {
   showScreen("h-lobby");
   $("roomCodeHuge").textContent = roomCode;
-  const screenUrl = new URL(`screen.html?room=${roomCode}`, location.href).href;
-  $("screenUrl").textContent = screenUrl;
-  drawQr($("qrCanvas"), screenUrl);
+  // The Add a TV affordance: scan-and-cast QR (any spare device becomes the
+  // screen), one-tap link share, and the typing fallback line — never a raw
+  // URL. The line hides itself on file://, where nothing is typeable.
+  drawQr($("qrCanvas"), screenLink(location.href, roomCode, "qr"));
+  $("tvType").textContent = tvBrowserLine(location.href) || "";
   heartbeatSeen = false;
   updateLobbyReadiness();
   if (unsubHeartbeat) unsubHeartbeat();
@@ -314,7 +317,7 @@ function updateLobbyReadiness() {
     note.classList.remove("ok");
     $("btnStartRound").disabled = false;
   } else {
-    note.textContent = "Add the TV: open the link above on it (the QR points there too)…";
+    note.textContent = "The game starts the moment a screen joins…";
     note.classList.remove("ok");
     $("btnStartRound").disabled = true;
   }
@@ -1218,6 +1221,10 @@ wireSeg("segTeams", (v) => renderTeamNameInputs(parseInt(v, 10)));
 $("btnNewGame").addEventListener("click", newGame);
 $("btnStartRound").addEventListener("click", startRound);
 $("btnAbandon").addEventListener("click", abandonGame);
+$("btnTvLink").addEventListener("click", () => {
+  if (!roomCode) return;
+  shareTvLink(screenLink(location.href, roomCode, "link"), roomCode, "couch", toast);
+});
 $("btnMakeGuess").addEventListener("click", openGuessMap);
 $("btnSuperSure").addEventListener("click", toggleSuperSure);
 $("btnConfirmGuess").addEventListener("click", confirmGuess);

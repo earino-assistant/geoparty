@@ -68,7 +68,8 @@ import {
 } from "./hints.js";
 import { oneShotHint, dismissHintCard } from "./hints-ui.js";
 import { withUtm, partyShareText, foldBestMoment } from "./share.js";
-import { shareResult } from "./share-ui.js";
+import { shareResult, shareTvLink } from "./share-ui.js";
+import { screenLink, tvBrowserLine } from "./tvlink.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -481,22 +482,26 @@ function renderLobby() {
     showScreen("p-lobby");
     $("pRoomCodeHuge").textContent = roomCode;
     const joinUrl = new URL(`player.html?room=${roomCode}`, location.href).href;
-    const screenUrl = new URL(`screen.html?room=${roomCode}`, location.href).href;
     $("pJoinUrl").textContent = `Teams join at ${joinUrl}`;
     drawQr($("pQrCanvas"), joinUrl);
-    $("pScreenNote").dataset.screenUrl = screenUrl;
+    // The Add a TV panel: scan-and-cast QR, plus the typing fallback line
+    // (hidden on file://, where there's nothing typeable to point at).
+    drawQr($("pTvQr"), screenLink(location.href, roomCode, "qr"));
+    $("pTvType").textContent = tvBrowserLine(location.href) || "";
   }
 
   // TV presence comes free with the room subscription (screenHeartbeat).
   // A TV is a bonus, never a requirement: remote rivals join by link and
-  // every phone carries its own reveal.
+  // every phone carries its own reveal — so the whole affordance collapses
+  // to a checkmark the moment a screen attaches.
   const note = $("pScreenNote");
-  if (screenAttached(room, Date.now())) {
+  const attached = screenAttached(room, Date.now());
+  $("pTvAdd").classList.toggle("hidden", attached);
+  if (attached) {
     note.textContent = "TV connected ✓";
     note.classList.add("ok");
   } else {
-    note.textContent = "No TV needed — every phone shows the reveal. " +
-      `Add a TV (optional): open ${note.dataset.screenUrl || "screen.html"} and enter ${roomCode}`;
+    note.textContent = "No TV needed — every phone shows the reveal.";
     note.classList.remove("ok");
   }
 
@@ -1472,6 +1477,10 @@ wireSeg("nSegMove");
 $("btnCreateRoom").addEventListener("click", createRoom);
 $("btnJoin").addEventListener("click", joinRoom);
 $("btnPShare").addEventListener("click", shareInvite);
+$("btnPTvLink").addEventListener("click", () => {
+  if (!roomCode) return;
+  shareTvLink(screenLink(location.href, roomCode, "link"), roomCode, "h2h", toast);
+});
 $("btnPLeave").addEventListener("click", leaveOrAbandon);
 $("btnPStart").addEventListener("click", startRound);
 $("btnOpenMap").addEventListener("click", openGuessMapScreen);
