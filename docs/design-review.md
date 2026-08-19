@@ -32,6 +32,10 @@ tied to the PostHog KPIs we already collect (`docs/analytics.md`).
 - **Resilience details** (resume banners, deadlock guard, forfeit sweeps,
   offline degradation) are above prototype grade and directly protect the
   funnel's `round_started → reveal_shown` step.
+- **The couch Final Showdown stays** — as an all-play, shared-location final
+  round (every team guesses the same spot, standings-order drama), **not** as
+  a comeback mechanic. That framing is retired by owner decision; the SUPER
+  SURE pin (§1.6, roadmap M6) owns stakes and comebacks now.
 
 ### 1.2 Game loop & pacing
 
@@ -57,10 +61,13 @@ Issues:
 - The **reveal is thin on the phone** when no TV is present: text rows, no
   map, so the payoff moment ("*that's* where it was?!") only exists on the
   TV. (Being addressed by the remote-play work.)
-- **No comeback mechanic.** Couch has the Showdown; h2h is a flat sum of
-  identical rounds, so a 2,000-point lead by round 3 of 5 kills tension.
-  H2H needs its own final-round stakes (see roadmap: "Final round counts
-  double" or an h2h Showdown variant).
+- **No stakes layer (yet).** A flat sum of identical rounds means a
+  2,000-point lead by round 3 of 5 kills tension. The fix is explicitly
+  *not* a scripted finale — "final round counts double" and any
+  finale-tied comeback are rejected (owner decision, §1.6). Instead the
+  SUPER SURE pin (§1.6, roadmap M6) gives every player one hidden,
+  self-timed double-or-nothing per game, in both modes, so the hail-mary
+  can happen in whichever round the trailing player chooses.
 - Between-round dead air: only the host phone can advance past the reveal;
   if the host is chatting, everyone else stares at "X starts the next
   round…". A soft auto-advance timer (host can cancel) would keep tempo.
@@ -110,6 +117,12 @@ up to +20% scaled by speed² and accuracy) is good; its opacity costs tension
   point hint while aiming (couch host already has live distance internally);
   a scoring line in the lobby. Full formula belongs in a "?" sheet, not the
   main flow.
+- The SUPER SURE pin (§1.6, roadmap M6) is the explicit **risk/reward layer
+  on top of** distance + time scoring: one hidden double-or-nothing per game
+  on a round's total (distance score + time bonus). Its legibility need is
+  the same as the base formula's — the bet only creates tension if players
+  can feel what a round's total is worth, which makes the scoring one-liners
+  (M3) a prerequisite for the mechanic landing.
 - KPI: `guess_submitted.time_bonus` distribution — if education works, the
   share of guesses earning a non-zero bonus rises.
 
@@ -130,7 +143,7 @@ and can bury a new group in three unguessable rounds.
   `round_number` — today's spread is the baseline; tiers should compress it
   within a chosen difficulty.
 
-### 1.6 Team model, reveal, comeback
+### 1.6 Team model, reveal, stakes — the SUPER SURE pin
 
 - **Team model**: slots-as-identity (device id ↔ `t1..t4`) is robust and
   survives refreshes; keep. For 1v1 remote play the word "team" reads
@@ -138,10 +151,48 @@ and can bury a new group in three unguessable rounds.
 - **Reveal**: the TV animation (farthest-first elimination, truth lands
   last, crown) is the best moment in the game. The phone deserves a version
   of it; the couch host phone too.
-- **Comeback**: the Showdown (leader guesses blind, underdog reacts last)
-  is a genuinely clever couch mechanic and is invisible until it happens —
-  a "FINAL SHOWDOWN" interstitial with one line of rules would sell it.
-  H2H's equivalent gap is §1.2. Keep the mechanic; explain it and export it.
+
+**Stakes: the SUPER SURE pin (owner decision — replaces all comeback
+plans).** Any mechanic that scripts drama into the final round to rescue
+the trailer is rejected. In its place, one player-initiated risk lever:
+
+- When dropping a pin, a player may mark it **SUPER SURE** — a bet on their
+  own confidence. Available **every round, in both modes** (couch team and
+  h2h player). **One use per game** per team/player; the player chooses
+  which round to spend it on.
+- **Double-or-nothing on that round's total** (distance score + time
+  bonus): if the super-sure pin is the closest to the truth that round, its
+  owner scores **2×** the round total; if anyone else is closer, they score
+  **0** for the round. The running total never dips below what they already
+  had.
+- **Hidden during play.** Rivals must not learn a pin is super-sure until
+  the reveal — never on live pins, lock-in toasts, or any other in-play
+  surface. At the reveal it is shown explicitly: **"SUPER SURE ×2"** or
+  **"SUPER SURE — 0"**.
+- **Edge cases.** Ties (two super-sure pins equally closest): **both win**
+  — both get ×2, neither loses. A bet armed with no pin at timeout is a
+  **burned bet** — treated as losing → 0; the reveal must clearly
+  distinguish "bet & lost → 0" from a plain "no pin → +0".
+
+Why this beats a finale: hidden + once-per-game + self-timed makes it a
+skill-based swing a trailing player can deploy as a hail-mary in *any*
+round — a comeback that isn't scripted to round N, rewards genuine
+knowledge, and punishes overconfidence. It also layers with the
+visible-pins gamesmanship h2h already has: post-reveal, a super-sure pin is
+a tell about how that player reads the world, and pre-reveal, confidence
+can be bluffed.
+
+**The Showdown's fate: keep it — as an all-play final, not a comeback.**
+The couch Final Showdown (all teams guess the same location, standings
+order) is shipped code and its real value was never the comeback: it's
+that *everyone plays at once* in the final round — the only round with
+zero solo-round downtime (§1.2) — plus a shared "we all saw the same spot"
+reveal and the pass-the-phone ritual. That's worth protecting on its own
+merits, so it stays. What changes is the framing: the standings-order
+sequence remains as ritual and drama, but the spec (and any interstitial
+copy) stops selling it as the trailer's rescue — the SUPER SURE pin owns
+that job, and no "last chance to catch up" language survives anywhere.
+No code change either way.
 
 ### 1.7 Friction & lost-player moments (ranked)
 
@@ -213,8 +264,11 @@ device (localStorage flag), never a tutorial screen.
   Bluff away."
 - First reveal: label the breakdown ("distance + ⚡speed bonus") the first
   time only.
-- Showdown: interstitial card with the one rule that matters ("Leader
-  guesses first. Everyone plays. Last chance to catch up.").
+- Showdown: interstitial card with the one rule that matters ("Everyone
+  guesses the same spot. Leader goes first."). No comeback promises — the
+  drama is the shared location, not a rescue (§1.6).
+- SUPER SURE (once M6 ships): one-shot hint on the first guess map —
+  "Feeling certain? Mark it SUPER SURE: double or nothing, once per game."
 - The TV already narrates itself well (lobby join line, lock-in statuses,
   "ALL TEAMS LOCKED IN"); add the room code persistently in a corner
   during rounds so latecomers can join the *next* game (couch) or know
@@ -258,6 +312,7 @@ Effort: S ≤ ½ day · M ≈ 1–2 days · L ≈ 1 wk+. Lens: 🚪 onboarding /
 | M3 | **Scoring one-liners** at guess time + labeled first reveal | 🎉 | The best mechanic in the game is currently a secret | S | `time_bonus` > 0 share of `guess_submitted` |
 | M4 | **Landing rewrite** per §2.2 (hero, 3-step visual, one CTA) | 🚪 | Prose-wall → 5-second comprehension | S–M | Funnel entry rate |
 | M5 | **First-time hints** (one-shot pano/map overlays, localStorage-flagged) | 🚪 | First round decides whether the room comes back | S | Round-1 `guess_submitted.distance_km`; funnel `round_started → reveal_shown` |
+| M6 | **SUPER SURE pin** (§1.6): once-per-game hidden double-or-nothing on a round's total; both modes; ties both win; burned bet → 0; revealed only at reveal | 🎉 | Owner-mandated stakes system — a player-timed, skill-based swing replacing the rejected finale comeback | M | `super_sure_resolved` outcome mix; share of games with a bet spent |
 
 ### SHOULD
 
@@ -265,12 +320,14 @@ Effort: S ≤ ½ day · M ≈ 1–2 days · L ≈ 1 wk+. Lens: 🚪 onboarding /
 |---|---|---|---|---|---|
 | S1 | **Share artifact**: post-game emoji/result card, copy-to-clipboard | 🔁 | The Wordle growth loop; zero backend | S | New-room creations from shared links (UTM-tagged) |
 | S2 | **Daily Challenge**: date-seeded 5-location run (PoolSampler is already seed-based), same for everyone, shareable score | 🔁 | The Wordle *retention* loop: a reason to return alone, recruit friends | M | PostHog Retention on `game_created`; daily actives |
-| S3 | **H2H comeback stakes**: final round counts double (or h2h Showdown) | 🎉 | Flat scoring kills late-game tension | S | `game_completed` margin distribution; abandonment at late rounds |
-| S4 | **Difficulty tiers** for the pool + easy-tier first round (pool-tools task) | 🎉 | Uniform sampling makes first impressions a coin flip | L | `distance_km` spread by tier |
-| S5 | **Sound + motion pass** (lock-in, countdown, reveal; respects reduced-motion) | 🎉 | The felt-quality gap between prototype and product | M | Session length; `game_completed` rate |
-| S6 | **PWA + social meta + icons** | 🔁 | Home-screen presence is the no-account retention surface | S | Return sessions (device retention) |
-| S7 | **Soft auto-advance** after reveal (host can hold) | 🎉 | Removes dead air between rounds | S | Time between `reveal_shown` and next `round_started` |
-| S8 | **Couch without a TV** (host phone becomes the shared screen) | 🚪 | The last hard device-gate in the product | M | Couch `game_created → round_started` conversion |
+| S3 | **Difficulty tiers** for the pool + easy-tier first round (pool-tools task) | 🎉 | Uniform sampling makes first impressions a coin flip | L | `distance_km` spread by tier |
+| S4 | **Sound + motion pass** (lock-in, countdown, reveal; respects reduced-motion) | 🎉 | The felt-quality gap between prototype and product | M | Session length; `game_completed` rate |
+| S5 | **PWA + social meta + icons** | 🔁 | Home-screen presence is the no-account retention surface | S | Return sessions (device retention) |
+| S6 | **Soft auto-advance** after reveal (host can hold) | 🎉 | Removes dead air between rounds | S | Time between `reveal_shown` and next `round_started` |
+| S7 | **Couch without a TV** (host phone becomes the shared screen) | 🚪 | The last hard device-gate in the product | M | Couch `game_created → round_started` conversion |
+
+*(The former S3 — "final round counts double / h2h Showdown comeback" — is
+removed by owner decision; its job is done better by M6.)*
 
 ### COULD
 
@@ -295,9 +352,22 @@ seed, a score summary, and a clipboard string.
 
 - Funnel: `game_created → round_started → reveal_shown → game_completed`
   per mode — the scoreboard for M1–M5.
-- Mode Adoption + `screen_joined`-per-room — validates M1/M2/S8.
+- Mode Adoption + `screen_joined`-per-room — validates M1/M2/S7.
 - `guess_submitted` (`distance_km`, `time_seconds`, `time_bonus`) — M3, M5,
-  S4, C5.
-- Retention insight on `game_created` — S1/S2/S6 (S2 needs one new event,
+  S3, C5.
+- Retention insight on `game_created` — S1/S2/S5 (S2 needs one new event,
   e.g. `daily_challenge_started`, added per `docs/analytics.md` process).
 - `invite_shared` (added with M2) — remote-play adoption.
+- SUPER SURE (added with M6, per the `docs/analytics.md` process —
+  aggregates only, no coordinates/identity):
+  - Instrumentation: a `super_sure` boolean on `guess_submitted`, plus one
+    new event `super_sure_resolved` fired from the host phone at reveal
+    with `mode, round_number, rounds, outcome ("won"|"lost"|"burned"),
+    round_total` (the points at stake; 0 when burned). The resolved event
+    is needed because a burned bet has no `guess_submitted` (forfeits are
+    not guesses), and win/lose is only known at reveal.
+  - KPIs: **deployment rate** (share of completed games where a team spent
+    the bet), **win rate** (`outcome = won` share — measures whether it
+    rewards knowledge or just gambling), **timing** (`round_number ÷
+    rounds` distribution — early confidence vs late hail-mary), and **EV**
+    (mean signed swing from `round_total` × outcome).
