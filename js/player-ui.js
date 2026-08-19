@@ -69,7 +69,7 @@ import {
 import { oneShotHint, dismissHintCard } from "./hints-ui.js";
 import { withUtm, partyShareText, foldBestMoment } from "./share.js";
 import { shareResult, shareTvLink } from "./share-ui.js";
-import { screenLink, tvBrowserLine } from "./tvlink.js";
+import { screenLink, tvBrowserLine, phoneJoinLine } from "./tvlink.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -482,7 +482,7 @@ function renderLobby() {
     showScreen("p-lobby");
     $("pRoomCodeHuge").textContent = roomCode;
     const joinUrl = new URL(`player.html?room=${roomCode}`, location.href).href;
-    $("pJoinUrl").textContent = `Teams join at ${joinUrl}`;
+    $("pJoinUrl").textContent = phoneJoinLine(location.href, roomCode);
     drawQr($("pQrCanvas"), joinUrl);
     // The Add a TV panel: scan-and-cast QR, plus the typing fallback line
     // (hidden on file://, where there's nothing typeable to point at).

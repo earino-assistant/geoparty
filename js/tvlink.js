@@ -50,9 +50,10 @@ export function tvBrowserLine(baseHref) {
     : null;
 }
 
-// What the TV's own h2h lobby tells phones — same rule as above: the short
-// site address plus the code, never a raw URL. The front door routes an h2h
-// code to the player page. Falls back to the QR when nothing is typeable.
+// What the h2h lobbies (the TV's and the host phone's) tell joining phones —
+// same rule as above: the short site address plus the code, never a raw URL.
+// The front door routes an h2h code to the player page. Falls back to the QR
+// when nothing is typeable.
 export function phoneJoinLine(baseHref, code) {
   const site = siteAddress(baseHref);
   return site
