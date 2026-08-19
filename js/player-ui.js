@@ -49,6 +49,9 @@ import {
   h2hWinner,
   initialH2hRoomState,
   carryTeams,
+  screenAttached,
+  liveRivalPins,
+  revealPins,
 } from "./h2h.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
@@ -154,6 +157,9 @@ let viewer = null;         // MapillaryJS viewer (this phone's own eyes)
 let currentImageId = null;
 let guessMap = null;
 let guessMarker = null;
+let rivalMarkers = {};     // tid -> live rival pin on MY guess map
+let revealMap = null;      // per-round reveal map (phone-sized TV reveal)
+let revealMapShownFor = null; // round number the reveal map was built for
 
 let localStage = "explore"; // "explore" (pano) | "map" — this phone's UI mode
 let lastRoundSeen = null;   // round number the UI has been reset for
@@ -288,6 +294,8 @@ async function joinRoom() {
 function enterRoom(code, teamId) {
   if (unsubRoom) { unsubRoom(); unsubRoom = null; }
   destroyViewer();
+  clearRivalPins();
+  destroyRevealMap();
   roomCode = code;
   myTeam = teamId;
   room = null;
@@ -340,6 +348,8 @@ function leaveToHome(message) {
   stopTick();
   clearTimeout(revealFlipTimer);
   destroyViewer();
+  clearRivalPins();
+  destroyRevealMap();
   cancelLiveWrite();
   localStorage.removeItem(LS_H2H_ACTIVE);
   roomCode = null;
@@ -450,13 +460,15 @@ function renderLobby() {
   }
 
   // TV presence comes free with the room subscription (screenHeartbeat).
+  // A TV is a bonus, never a requirement: remote rivals join by link and
+  // every phone carries its own reveal.
   const note = $("pScreenNote");
-  const beat = room.screenHeartbeat;
-  if (beat && Date.now() - beat < 30_000) {
+  if (screenAttached(room, Date.now())) {
     note.textContent = "TV connected ✓";
     note.classList.add("ok");
   } else {
-    note.textContent = `TV: open ${note.dataset.screenUrl || "screen.html"} and enter ${roomCode}`;
+    note.textContent = "No TV needed — playing in one room? " +
+      `Optional big screen: open ${note.dataset.screenUrl || "screen.html"} and enter ${roomCode}`;
     note.classList.remove("ok");
   }
 
@@ -486,6 +498,34 @@ function renderLobby() {
         ? "You can start solo, but it's better with rivals — phones join with the QR."
         : `${ids.length} teams in — start when everyone's ready.`)
     : `Waiting for ${room.teams[room.hostTeam] ? room.teams[room.hostTeam].name : "the host"} to start…`;
+}
+
+// Remote play: the QR only works across a table — a rival across the
+// internet gets the join link by share sheet (or clipboard fallback).
+async function shareInvite() {
+  if (!roomCode) return;
+  const url = new URL(`player.html?room=${roomCode}`, location.href).href;
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: "GeoParty",
+        text: `Join my GeoParty head-to-head — room ${roomCode}`,
+        url,
+      });
+      track("invite_shared", { mode: "h2h", method: "share" });
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return; // user closed the sheet
+      // Share sheet unavailable/failed: fall through to the clipboard.
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast("Invite link copied — send it to your rival");
+    track("invite_shared", { mode: "h2h", method: "copy" });
+  } catch {
+    toast(`Send this link: ${url}`);
+  }
 }
 
 /* ---------------- Round start (host only) ---------------- */
@@ -574,10 +614,16 @@ function renderRoundActive() {
     localStage = "explore";
     clearTimeout(revealFlipTimer);
     if (guessMarker) { guessMarker.remove(); guessMarker = null; }
+    clearRivalPins();
     if (guessMap) guessMap.setView([25, 10], 2);
     $("btnLockIn").disabled = true;
     startTick();
   }
+
+  // Rivals' pins land on MY map too (not just the TV panels), so the
+  // stare-down works with no shared screen. onState fires on their every
+  // throttled live write, so this tracks them at the same ≤4/s cadence.
+  updateRivalPins();
 
   if (myResult()) {
     renderLockedScreen();
@@ -667,6 +713,38 @@ function ensureGuessMap() {
   });
 }
 
+// Live rival pins, in team colors, on this phone's own guess map — the
+// same public-until-lock-in pins the TV panels show, so the gamesmanship
+// (bluffs, copies, stare-downs) survives with no shared screen. A rival's
+// pin disappears the moment they lock in (lockIn nulls live/<tid>/pin).
+function updateRivalPins() {
+  if (!guessMap) return;
+  const pins = (room && room.phase === "roundActive")
+    ? liveRivalPins(room.round, myTeam)
+    : [];
+  const want = new Set(pins.map((p) => p.id));
+  for (const id of Object.keys(rivalMarkers)) {
+    if (!want.has(id)) { rivalMarkers[id].remove(); delete rivalMarkers[id]; }
+  }
+  for (const p of pins) {
+    const pos = [p.lat, p.lng];
+    if (rivalMarkers[p.id]) {
+      rivalMarkers[p.id].setLatLng(pos);
+    } else {
+      rivalMarkers[p.id] = L.circleMarker(pos, {
+        radius: 9, color: "#fff", weight: 2, opacity: 0.9,
+        fillColor: teamHex(room.teams, p.id), fillOpacity: 0.75,
+        interactive: false,
+      }).addTo(guessMap);
+    }
+  }
+}
+
+function clearRivalPins() {
+  for (const id of Object.keys(rivalMarkers)) rivalMarkers[id].remove();
+  rivalMarkers = {};
+}
+
 function openGuessMapScreen() {
   localStage = "map";
   showScreen("p-guess");
@@ -674,8 +752,9 @@ function openGuessMapScreen() {
   $("btnLockIn").disabled = !guessMarker;
   $("pGuessHint").textContent = guessMarker
     ? "Drag to adjust, then lock it in"
-    : "Tap the map to drop your pin";
+    : "Tap the map to drop your pin — rivals can see it move";
   setTimeout(() => guessMap.invalidateSize(), 50);
+  updateRivalPins();
   scheduleLiveWrite();
 }
 
@@ -827,6 +906,10 @@ function renderLockedScreen() {
   if (shownScreen !== "p-locked") showScreen("p-locked");
   const rank = submitRank(room.round, myTeam);
   $("pLockedRank").textContent = rank ? `#${rank} to lock in` : "";
+  // With no TV attached (remote play), this phone IS the show.
+  $("pLockedSub").textContent = screenAttached(room, Date.now())
+    ? "Eyes on the TV 📺"
+    : "Results land right here when everyone's in";
   renderLockedRoster();
   // Host safety valve: close a stuck round (no-limit games, dead phones).
   const stuck = pendingTeams(room.teams, room.round).length > 0;
@@ -906,22 +989,27 @@ function renderReveal() {
   stopTick();
   cancelLiveWrite();
 
-  // Hold the phones during the TV's countdown so the place name doesn't
-  // leak early — the phone literally says "look up".
+  // Hold the phones during the reveal countdown so the place name doesn't
+  // leak early. With a TV the phone says "look up"; without one, the phone
+  // runs the 3-2-1 itself. Re-arming every ≤300ms keeps the number ticking.
   const wait = (round.revealAt || 0) - Date.now();
   if (wait > 150) {
     if (shownScreen !== "p-locked") showScreen("p-locked");
     $("pLockedRank").textContent = "Everyone's in!";
+    $("pLockedSub").textContent = screenAttached(room, Date.now())
+      ? "Eyes on the TV 📺"
+      : `Reveal in ${Math.ceil(wait / 1000)}…`;
     renderLockedRoster();
     $("btnCloseRound").classList.add("hidden");
     clearTimeout(revealFlipTimer);
     revealFlipTimer = setTimeout(() => {
       if (room && room.phase === "reveal") renderReveal();
-    }, wait + 50);
+    }, Math.min(wait + 50, 300));
     return;
   }
 
   showScreen("p-reveal");
+  renderRevealMap(round);
   // Host phone only, once per round — mirrors round_started's cardinality
   // so the funnel counts rounds, not phones.
   if (isHost() && revealTracked !== round.number) {
@@ -983,6 +1071,52 @@ function renderReveal() {
   $("pRevealNote").textContent = host
     ? ""
     : `${room.teams[room.hostTeam] ? room.teams[room.hostTeam].name : "The host"} starts the next round…`;
+}
+
+// The all-pins reveal, phone-sized: every guess, a line to the truth, the
+// answer pinned gold. This is what makes head-to-head complete on a single
+// device per player — no TV required for the payoff moment.
+function renderRevealMap(round) {
+  if (revealMapShownFor === round.number) return;
+  if (!round.truth || typeof round.truth.lat !== "number") return;
+  destroyRevealMap();
+  revealMapShownFor = round.number;
+  revealMap = L.map("pRevealMap", {
+    zoomControl: false, dragging: false, scrollWheelZoom: false,
+    doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false,
+  });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(revealMap);
+  const truth = L.latLng(round.truth.lat, round.truth.lng);
+  const pins = revealPins(round);
+  revealMap.fitBounds(
+    L.latLngBounds([truth, ...pins.map((p) => L.latLng(p.lat, p.lng))])
+      .pad(0.25),
+    { maxZoom: 10 }
+  );
+  for (const p of pins) {
+    const guess = L.latLng(p.lat, p.lng);
+    const color = teamHex(room.teams, p.id);
+    L.polyline([guess, truth], { color, weight: 3, dashArray: "6 8" })
+      .addTo(revealMap);
+    L.circleMarker(guess, {
+      radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1,
+    }).addTo(revealMap);
+  }
+  L.circleMarker(truth, {
+    radius: 10, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
+  }).addTo(revealMap);
+  setTimeout(() => revealMap && revealMap.invalidateSize({ pan: false }), 60);
+}
+
+function destroyRevealMap() {
+  if (revealMap) {
+    try { revealMap.remove(); } catch { /* already gone */ }
+    revealMap = null;
+  }
+  revealMapShownFor = null;
 }
 
 function renderTotalsList(listEl) {
@@ -1136,6 +1270,7 @@ wireSeg("nSegMove");
 
 $("btnCreateRoom").addEventListener("click", createRoom);
 $("btnJoin").addEventListener("click", joinRoom);
+$("btnPShare").addEventListener("click", shareInvite);
 $("btnPLeave").addEventListener("click", leaveOrAbandon);
 $("btnPStart").addEventListener("click", startRound);
 $("btnOpenMap").addEventListener("click", openGuessMapScreen);

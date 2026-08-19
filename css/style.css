@@ -249,6 +249,24 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 .waiting-screen-note.ok { color: var(--good); font-weight: 700; }
 
+/* Head-to-head lobby: invite link for remote rivals (no shared TV needed). */
+.share-row {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 16px;
+}
+
+/* Head-to-head reveal map on the phone — the all-pins beat when no TV is
+ * attached (and a recap when one is). */
+.p-reveal-map {
+  height: 36vh;
+  min-height: 200px;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  background: #0b0b0f;
+}
+
 /* Host round: full-bleed viewer + overlay HUD. */
 .viewer-full {
   position: absolute;

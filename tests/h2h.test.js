@@ -19,6 +19,10 @@ import {
   h2hWinner,
   initialH2hRoomState,
   carryTeams,
+  SCREEN_STALE_MS,
+  screenAttached,
+  liveRivalPins,
+  revealPins,
 } from "../js/h2h.js";
 
 const teams = {
@@ -159,6 +163,72 @@ test("roundClosest: crowns the nearest real guess, null if all forfeited", () =>
   assert.equal(roundClosest(round), "t2");
   assert.equal(roundClosest({ results: { t1: { guess: null } } }), null);
   assert.equal(roundClosest(null), null);
+});
+
+/* ---------------- no-screen remote play ---------------- */
+
+test("screenAttached: fresh heartbeat only; stale/missing/no state is false", () => {
+  const now = 1_000_000_000;
+  assert.equal(screenAttached({ screenHeartbeat: now - 1000 }, now), true);
+  assert.equal(
+    screenAttached({ screenHeartbeat: now - SCREEN_STALE_MS + 1 }, now), true);
+  assert.equal(
+    screenAttached({ screenHeartbeat: now - SCREEN_STALE_MS }, now), false);
+  assert.equal(screenAttached({ screenHeartbeat: null }, now), false);
+  assert.equal(screenAttached({}, now), false);
+  assert.equal(screenAttached(null, now), false);
+});
+
+test("liveRivalPins: rivals with real pins only, my own pin excluded", () => {
+  const round = {
+    live: {
+      t1: { stage: "map", pin: { lat: 10, lng: 20 } },   // me — excluded
+      t2: { stage: "map", pin: { lat: -5, lng: 100 } },  // rival with a pin
+      t3: { stage: "explore", pin: null },               // rival, no pin yet
+      t4: { stage: "locked" },                           // locked: pin nulled
+    },
+  };
+  assert.deepEqual(liveRivalPins(round, "t1"), [
+    { id: "t2", lat: -5, lng: 100 },
+  ]);
+});
+
+test("liveRivalPins: malformed pins are dropped, empty rounds are empty", () => {
+  const round = {
+    live: {
+      t2: { pin: { lat: "5", lng: 6 } },  // wrong type
+      t3: { pin: { lat: 5 } },            // missing lng
+    },
+  };
+  assert.deepEqual(liveRivalPins(round, "t1"), []);
+  assert.deepEqual(liveRivalPins(null, "t1"), []);
+  assert.deepEqual(liveRivalPins({}, "t1"), []);
+});
+
+test("liveRivalPins: stable team-id order for consistent map layering", () => {
+  const round = {
+    live: {
+      t3: { pin: { lat: 3, lng: 3 } },
+      t2: { pin: { lat: 2, lng: 2 } },
+    },
+  };
+  assert.deepEqual(liveRivalPins(round, "t1").map((p) => p.id), ["t2", "t3"]);
+});
+
+test("revealPins: real guesses only, farthest first (the reveal draw order)", () => {
+  const round = {
+    results: {
+      t1: { guess: { lat: 1, lng: 1 }, distanceKm: 40 },
+      t2: { guess: null, forfeited: true },
+      t3: { guess: { lat: 3, lng: 3 }, distanceKm: 4000 },
+    },
+  };
+  assert.deepEqual(revealPins(round), [
+    { id: "t3", lat: 3, lng: 3, distanceKm: 4000 },
+    { id: "t1", lat: 1, lng: 1, distanceKm: 40 },
+  ]);
+  assert.deepEqual(revealPins(null), []);
+  assert.deepEqual(revealPins({ results: { t1: { guess: null } } }), []);
 });
 
 /* ---------------- winner & handoff ---------------- */

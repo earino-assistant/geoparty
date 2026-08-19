@@ -132,6 +132,18 @@ test("sanitizeEvent: no schema key may look location- or identity-shaped", () =>
   }
 });
 
+test("sanitizeEvent: invite_shared keeps mode/method, strips everything else", () => {
+  const out = sanitizeEvent("invite_shared", {
+    mode: "h2h", method: "copy",
+    url: "https://example.com/player.html?room=KWPFRT", // never sent
+    room_code: "KWPFRT", team_name: "The Atlas Cats", lat: 1, lng: 2,
+  });
+  assert.deepEqual(out, {
+    event: "invite_shared",
+    props: { mode: "h2h", method: "copy" },
+  });
+});
+
 test("sanitizeEvent: wrong-typed props are stripped, not coerced", () => {
   const out = sanitizeEvent("game_created", {
     mode: 5, num_teams: "two", num_rounds: 5, round_seconds: 120,

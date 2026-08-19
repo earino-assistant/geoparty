@@ -87,6 +87,9 @@
       <div id="pRoomCodeHuge" class="room-code-huge">······</div>
       <div class="qr-box"><canvas id="pQrCanvas"></canvas></div>
       <div id="pJoinUrl" class="screen-url"></div>
+      <div class="share-row">
+        <button id="btnPShare" class="btn-primary">📤 Send invite link</button>
+      </div>
       <div id="pScreenNote" class="waiting-screen-note"></div>
       <h2>Teams</h2>
       <ul id="pLobbyTeams" class="totals-list lobby-teams"></ul>
@@ -127,7 +130,7 @@
     <div class="host-wrap locked-wrap">
       <div class="locked-stamp">LOCKED IN</div>
       <div id="pLockedRank" class="locked-rank"></div>
-      <p class="locked-sub">Eyes on the TV 📺</p>
+      <p class="locked-sub" id="pLockedSub">Eyes on the TV 📺</p>
       <h2>Who's in</h2>
       <ul id="pLockedList" class="totals-list"></ul>
     </div>
@@ -140,6 +143,7 @@
   <section id="p-reveal" class="phase-screen hidden">
     <div class="host-wrap">
       <h1 id="pRevealHeading">Round 1</h1>
+      <div id="pRevealMap" class="p-reveal-map"></div>
       <div class="stat-card">
         <div class="label">Location</div>
         <div class="big place" id="pRevealPlace">—</div>

@@ -51,7 +51,10 @@ rooms/KWPF
 ```
 
 Head-to-head differs: `mode: "h2h"`, `hostTeam` (rotates to the winner),
-`teams/tN` gains `{ deviceId, joinedAt }`, and the round is:
+`teams/tN` gains `{ deviceId, joinedAt }`, and the round is below. The TV
+is optional in this mode: every phone renders its own reveal map and shows
+rivals' live pins, so two people can play over the internet with no shared
+screen (the phones adapt copy via `screenAttached` on `screenHeartbeat`).
 
 ```
 round

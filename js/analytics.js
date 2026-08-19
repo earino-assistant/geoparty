@@ -87,6 +87,8 @@ export const EVENT_SCHEMA = Object.freeze({
     winning_score: "int", team_count: "int",
   },
   game_abandoned: { room: "string", mode: "string", rounds_played: "int" },
+  // method: "share" (Web Share sheet) | "copy" (clipboard fallback).
+  invite_shared: { mode: "string", method: "string" },
   consent_given: {},
   consent_denied: {},
   next_game: { mode: "string" },

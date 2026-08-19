@@ -103,6 +103,41 @@ export function roundClosest(round) {
   return last && last.guess ? last.id : null;
 }
 
+// A TV is "attached" while its heartbeat is fresher than this. The phones
+// use it to adapt copy (and the reveal hold) — head-to-head is fully
+// playable with no shared screen at all, e.g. two people over the internet.
+export const SCREEN_STALE_MS = 30_000;
+
+export function screenAttached(state, now) {
+  const beat = state && state.screenHeartbeat;
+  return typeof beat === "number" && now - beat < SCREEN_STALE_MS;
+}
+
+// Rivals' live pins, for this phone's own guess map — the phone-sized
+// version of the TV panels. Pins are public until lock-in (gamesmanship by
+// design: copying costs the time bonus the rival already spent), and a
+// team's pin vanishes at lock-in because lockIn() nulls live/<tid>/pin.
+export function liveRivalPins(round, myTeam) {
+  const live = (round && round.live) || {};
+  return Object.keys(live).sort()
+    .filter((id) => id !== myTeam)
+    .map((id) => ({ id, pin: live[id] && live[id].pin }))
+    .filter((e) => e.pin &&
+      typeof e.pin.lat === "number" && typeof e.pin.lng === "number")
+    .map((e) => ({ id: e.id, lat: e.pin.lat, lng: e.pin.lng }));
+}
+
+// Real guesses for a reveal map, farthest first (the TV's draw order), so
+// the phone reveal builds toward the winner too. Forfeits carry no pin.
+export function revealPins(round) {
+  return revealOrder(round)
+    .filter((r) => r.guess &&
+      typeof r.guess.lat === "number" && typeof r.guess.lng === "number")
+    .map((r) => ({
+      id: r.id, lat: r.guess.lat, lng: r.guess.lng, distanceKm: r.distanceKm,
+    }));
+}
+
 // Small deterministic string hash (fnv-ish) for the tie-break coin flip.
 function hashStr(str) {
   let h = 2166136261;
