@@ -67,6 +67,8 @@ import {
   lockNowLabel,
 } from "./hints.js";
 import { oneShotHint, dismissHintCard } from "./hints-ui.js";
+import { withUtm, partyShareText, foldBestMoment } from "./share.js";
+import { shareResult } from "./share-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -176,6 +178,7 @@ let rivalMarkers = {};     // tid -> live rival pin on MY guess map
 let revealMap = null;      // per-round reveal map (phone-sized TV reveal)
 let revealMapShownFor = null; // round number the reveal map was built for
 
+let myBest = null;         // my team's closest guess — the share card brag (S1)
 let localStage = "explore"; // "explore" (pano) | "map" — this phone's UI mode
 let lastRoundSeen = null;   // round number the UI has been reset for
 let superSureArmed = false; // SUPER SURE toggled on for THIS pin — local only
@@ -317,6 +320,7 @@ function enterRoom(code, teamId) {
   myTeam = teamId;
   room = null;
   sampler = null;
+  myBest = null;
   lastRoundSeen = null;
   autoSubmitted = false;
   sweepDone = false;
@@ -1172,6 +1176,10 @@ function renderReveal() {
     `Round ${round.number} of ${room.settings.roundCount}`;
   $("pRevealPlace").textContent = (round.truth && round.truth.name) || "—";
   const mine = myResult();
+  // S1: fold my result into my team's closest-guess moment for the share
+  // card. Idempotent, so the re-renders this function gets are harmless.
+  myBest = foldBestMoment(
+    myBest, { me: mine }, round.truth && round.truth.name);
   if (mine && mine.guess) {
     $("pRevealDistance").textContent = formatDistance(mine.distanceKm);
     $("pRevealPoints").textContent = `+${adjustedPoints(mine).toLocaleString()}`;
@@ -1348,6 +1356,22 @@ function renderGameOver() {
     : `${winnerName} won — their phone is the host now. Stay here; you'll follow into their next game automatically.`;
 }
 
+// S1: every phone shares its own team's card — closest moment + final
+// total, no team names. The link is the front door, UTM-tagged so rooms
+// created by recipients attribute back to shared cards.
+function shareMyResult() {
+  if (!room || !room.teams[myTeam]) return;
+  shareResult(
+    partyShareText({
+      best: myBest,
+      points: room.teams[myTeam].total || 0,
+      url: withUtm(new URL(".", location.href).href, "h2h"),
+    }),
+    "h2h",
+    toast
+  );
+}
+
 function openNextGameSetup() {
   // Carry the current settings into the setup segs.
   for (const [seg, val] of [
@@ -1457,6 +1481,7 @@ $("btnLockIn").addEventListener("click", () => lockIn(false));
 $("btnCloseRound").addEventListener("click", sweepAndReveal);
 $("btnPNext").addEventListener("click", nextOrFinish);
 $("btnPHome").addEventListener("click", () => leaveToHome());
+$("btnPShareResult").addEventListener("click", shareMyResult);
 $("btnPNextGame").addEventListener("click", openNextGameSetup);
 $("btnNextCreate").addEventListener("click", createNextGame);
 

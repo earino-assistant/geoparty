@@ -15,8 +15,9 @@ implementation (unit-tested in `tests/analytics.test.js`).
   settings control, and the PostHog script loader (injected only after
   accept). Exports `track(event, props)`.
 - Instrumented call sites live in `js/host-ui.js` (couch), `js/player-ui.js`
-  (head-to-head), `js/screen-ui.js` (TV), and `js/landing-ui.js` (the front
-  door).
+  (head-to-head), `js/screen-ui.js` (TV), `js/landing-ui.js` (the front
+  door), `js/daily-ui.js` (the Daily Challenge), and `js/share-ui.js` (the
+  shared result-card glue).
 
 PostHog init (owner-provided, verbatim): key
 `phc_Au8ogwiWbfcWqhbP6iE8ayyT5JSQtambPHFSffykdvkE`, `api_host:
@@ -27,7 +28,8 @@ team names never ride along in `$el_text`.
 
 ## Events
 
-`mode` is `"couch"` or `"h2h"`. `room` is the random 6-letter room code
+`mode` is `"couch"` or `"h2h"` (`result_shared` adds `"daily"`). `room` is
+the random 6-letter room code
 (ephemeral, deleted within 24h — useful for stitching one game's events
 together, identifies nobody). `team_id` is the slot id (`t1`–`t4`), never
 the user-entered team name.
@@ -46,6 +48,9 @@ the user-entered team name.
 | `game_completed` | `room, mode, rounds, winner_team, winning_score, team_count` | host phone | Final round finished (incl. pool-exhaustion end) |
 | `game_abandoned` | `room, mode, rounds_played` | host phone | Host explicitly abandons the room |
 | `invite_shared` | `mode, method` | lobby phone | h2h lobby "Send invite link" used; `method` is `share` (Web Share sheet opened without error) or `copy` (clipboard fallback). The remote-play (no shared TV) recruitment path |
+| `result_shared` | `mode, method` | game-over screen / daily done screen | S1: a post-game result card left the app. `mode` is `couch` \| `h2h` \| `daily`; `method` mirrors `invite_shared`. The card's **text** (score, closest distance, place name) and link never ride on the event — inbound attribution uses the link's UTM tags instead (see KPIs) |
+| `daily_challenge_started` | `day_number` | daily page | S2: "Play Today's Daily" pressed and the seeded run began. `day_number` is the public puzzle index ("Daily #37") — a calendar fact, not an identity |
+| `daily_challenge_completed` | `day_number, score, rounds_played, best_distance_km` | daily page | All five rounds resolved (forfeits included). `rounds_played` counts rounds that landed a pin (0–5); `best_distance_km` is the run's closest guess, absent when every round forfeited. The started→completed gap is mid-run bail-out |
 | `consent_given` | — | consent module | Banner accepted (first event after PostHog init) |
 | `consent_denied` | — | consent module | A previously-consented user revokes. A **first-time** decline sends nothing — PostHog was never loaded, by design |
 | `next_game` | `mode` | host phone | "New game" chosen from the game-over screen |
@@ -71,6 +76,8 @@ Plus PostHog defaults: `$pageview` and (button/link-only) autocapture.
 | **SUPER SURE deployment** (M6) | Share of completed games where a bet was spent: `guess_submitted` with `super_sure` + `super_sure_resolved` counts vs `game_completed`. Judges whether the stakes mechanic gets used at all | `guess_submitted`, `super_sure_resolved`, `game_completed` |
 | **SUPER SURE win rate & EV** (M6) | `super_sure_resolved.outcome` mix (`won` share ≈ does it reward knowledge or just gambling?); mean signed swing = `round_total` for `won`, −`round_total` for `lost`, 0 for `burned` | `super_sure_resolved` |
 | **SUPER SURE timing** (M6) | Distribution of `round_number ÷ rounds` — early confidence plays vs late hail-marys | `super_sure_resolved` |
+| **Share → new rooms** (S1) | The card KPI: **new-room creations from shared links**. Every card link carries `utm_source=share` + `utm_campaign` (`couch` \| `h2h` \| `daily`); PostHog's defaults capture `utm_*` on `$pageview` and as session/person *entry* properties automatically, so no code reads them. Insight: `game_created` (and `daily_challenge_started`) filtered by session entry `utm_source = share`, broken down by `utm_campaign`. `result_shared` counts the top of that funnel (cards sent) | `result_shared`, `game_created`, `$pageview` |
+| **Daily actives & retention** (S2) | The ritual KPI: `daily_challenge_started` unique users per day (daily actives); PostHog Retention on `daily_challenge_started` (does the ritual bring people back?) and on `game_created` (does the daily feed the party game?). Completion rate = `daily_challenge_completed ÷ daily_challenge_started`; `score` / `best_distance_km` distributions calibrate difficulty day over day | `daily_challenge_started`, `daily_challenge_completed`, `game_created` |
 
 ## Adding a new event
 

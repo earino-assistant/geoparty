@@ -181,6 +181,26 @@ button:disabled { opacity: 0.4; cursor: default; }
 .ld-join-row .code-input { background: rgba(28, 28, 34, 0.88); }
 .ld-join-note { color: var(--muted); font-size: 0.95rem; min-height: 1.2em; }
 
+/* S2: the Daily Challenge affordance — always visible under the panels. */
+.ld-daily {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  margin-top: 14px;
+  padding: 13px 16px;
+  background: rgba(28, 28, 34, 0.75);
+  border: 1px solid var(--panel-2);
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: 0.98rem;
+  line-height: 1.35;
+  text-decoration: none;
+}
+.ld-daily:hover { border-color: var(--accent); }
+.ld-daily .art { font-size: 1.5rem; }
+.ld-daily strong { color: var(--accent); }
+
 /* Three steps, pictures over paragraphs. */
 .ld-steps {
   display: flex;
@@ -1162,3 +1182,26 @@ button:disabled { opacity: 0.4; cursor: default; }
 body:has(.action-bar) .consent-settings {
   bottom: calc(84px + env(safe-area-inset-bottom));
 }
+
+/* ---------- Daily Challenge (S2) ---------- */
+
+.daily-date { color: var(--muted); font-size: 0.95rem; margin-top: 4px; }
+.daily-rules {
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.5;
+  margin: 14px 0;
+}
+.daily-rules strong { color: var(--fg); }
+.daily-emoji {
+  font-size: 1.9rem;
+  letter-spacing: 5px;
+  margin-top: 8px;
+}
+.daily-back-link {
+  align-self: center;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 12px 10px;
+}
+.daily-back-link:hover { color: var(--fg); }

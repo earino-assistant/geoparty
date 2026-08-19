@@ -14,13 +14,17 @@ js/h2h.js          Pure head-to-head logic: slots, submissions, winner     ← t
 js/supersure.js    Pure SUPER SURE bet logic: resolution + settlement      ← tested
 js/frontdoor.js    Pure front-door logic: join routing, chooser targets    ← tested
 js/hints.js        Pure education logic: one-shot flags, lock-now estimate ← tested
+js/daily.js        Pure Daily Challenge logic: date seed, run fold, lock   ← tested
+js/share.js        Pure share-artifact logic: UTM links, card text, grid   ← tested
 js/pool.js         Location pool: seeded shuffle + cursor sampler          ← tested
 js/qr.js           Self-contained QR encoder (join/screen URLs)            ← tested
 js/firebase.js     Firebase init + thin typed helpers (the only SDK import)
 js/landing-ui.js   The one front door: hero pano, chooser, code routing
 js/hints-ui.js     One-shot hint overlay renderer (shared by both phones)
+js/share-ui.js     Web Share / clipboard glue for the result card (S1)
 js/host-ui.js      Couch-mode operator phone (DOM + viewer + writes)
 js/player-ui.js    Head-to-head team phone (DOM + viewer + writes)
+js/daily-ui.js     Daily Challenge page: solo date-seeded run, no Firebase
 js/screen-ui.js    TV renderer, couch mode + shared entry/follow logic
 js/screen-h2h.js   TV renderer, head-to-head split panels + reveal
 ```

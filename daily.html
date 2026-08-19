@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>GeoParty — Daily Challenge</title>
+  <link rel="stylesheet" href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css"
+        integrity="sha384-IamMZxz60pSNzUk3cW2nl3uYUdpiDoQpLJrBoAAezEE+QaOYCVA9rfi/8Cx0x15T" crossorigin="anonymous" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+
+  <!-- 1. Intro: today's number, the rules, one button -->
+  <section id="d-intro" class="phase-screen">
+    <div class="host-wrap">
+      <h1><span style="color: var(--accent)">Geo</span>Party <span class="h2h-tag">daily challenge</span></h1>
+      <div class="stat-card">
+        <div class="label">Today</div>
+        <div class="big" id="dDailyNum">#—</div>
+        <div id="dDailyDate" class="daily-date"></div>
+      </div>
+      <p class="daily-rules">
+        Five mystery places — the <strong>same five for everyone</strong>
+        today. 60 seconds each, no moving. Closer and faster = more points.
+        One run per day: make it count, then share your score.
+      </p>
+      <div id="dIntroErr" class="join-err"></div>
+    </div>
+    <div class="action-bar">
+      <a id="dIntroBack" class="daily-back-link" href="index.html">← GeoParty</a>
+      <button id="btnDailyStart" class="btn-primary">Play Today's Daily</button>
+    </div>
+  </section>
+
+  <!-- 2. Round: full-bleed pano, look around (no moving) -->
+  <section id="d-round" class="phase-screen hidden">
+    <div id="dailyViewer" class="viewer-full"></div>
+    <div class="hud">
+      <div class="hud-item" id="dHudRound">Round 1/5</div>
+      <div class="hud-item" id="dHudTimer">1:00</div>
+    </div>
+    <div class="action-bar">
+      <button id="btnDOpenMap" class="btn-primary">Make Guess</button>
+    </div>
+  </section>
+
+  <!-- 3. Guess map: drop the pin, lock it in -->
+  <section id="d-guess" class="phase-screen hidden">
+    <div id="dailyGuessMap" class="map-full"></div>
+    <div class="guess-hint" id="dGuessHint">Tap the map to drop your pin</div>
+    <div class="hud"><div></div><div class="hud-item" id="dGuessTimer"></div></div>
+    <div id="dLockNowHint" class="lock-now-hint"></div>
+    <div class="action-bar">
+      <button id="btnDBackToStreet">Back to Street</button>
+      <button id="btnDLockIn" class="btn-primary" disabled>Lock It In</button>
+    </div>
+  </section>
+
+  <!-- 4. Reveal: where it was, what it paid, running total -->
+  <section id="d-reveal" class="phase-screen hidden">
+    <div class="host-wrap">
+      <h1 id="dRevealHeading">Round 1</h1>
+      <div id="dRevealMap" class="p-reveal-map"></div>
+      <div class="stat-card">
+        <div class="label">Location</div>
+        <div class="big place" id="dRevealPlace">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Your distance</div>
+        <div class="big" id="dRevealDistance">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Your points</div>
+        <div class="big" id="dRevealPoints" style="color: var(--accent)">—</div>
+        <div id="dRevealSpeed" class="time-note"></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Total so far</div>
+        <div class="big" id="dRevealTotal">—</div>
+      </div>
+    </div>
+    <div class="action-bar">
+      <button id="btnDNext" class="btn-primary">Next Round</button>
+    </div>
+  </section>
+
+  <!-- 5. Done: the score, the emoji row, the share card -->
+  <section id="d-done" class="phase-screen hidden">
+    <div class="host-wrap">
+      <h1 id="dDoneTitle">Daily done!</h1>
+      <div class="stat-card">
+        <div class="label">Your score</div>
+        <div class="big" id="dDoneScore" style="color: var(--accent)">—</div>
+        <div id="dDoneEmoji" class="daily-emoji"></div>
+      </div>
+      <div class="share-row">
+        <button id="btnDShare" class="btn-primary">📤 Share your result</button>
+      </div>
+      <p id="dDoneNote" class="waiting-screen-note">
+        Same five spots for everyone today — a fresh five tomorrow.
+      </p>
+      <p class="waiting-screen-note">
+        Want the full party? <a href="index.html">Start a game with friends</a>.
+      </p>
+    </div>
+    <div class="action-bar">
+      <a class="daily-back-link" href="index.html">← GeoParty</a>
+    </div>
+  </section>
+
+  <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"
+          integrity="sha384-1AlAxcgdzKreJ5f2K+t7SW3pEE0ek9u3lUwlZXX+v+FtEk1tWSg6DBVLb3ZKhpB+" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+  <script type="module" src="js/consent.js"></script>
+  <script type="module" src="js/daily-ui.js"></script>
+</body>
+</html>

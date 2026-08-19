@@ -144,6 +144,50 @@ test("sanitizeEvent: invite_shared keeps mode/method, strips everything else", (
   });
 });
 
+test("sanitizeEvent: result_shared keeps mode/method, strips the card itself", () => {
+  // S1: the share card's TEXT (place names!) and link must never ride on
+  // the event — only which card and which sharing path.
+  const out = sanitizeEvent("result_shared", {
+    mode: "daily", method: "copy",
+    text: "GeoParty 🌍 We were 3 km from Kyoto…", // never sent
+    url: "https://example.com/?utm_source=share", place_name: "Kyoto",
+  });
+  assert.deepEqual(out, {
+    event: "result_shared",
+    props: { mode: "daily", method: "copy" },
+  });
+});
+
+test("sanitizeEvent: daily events carry aggregates only", () => {
+  // S2: the run is a date-number and scores — coordinates or place labels
+  // aimed at these events are stripped by the allowlist.
+  const started = sanitizeEvent("daily_challenge_started", {
+    day_number: 37, date: "2026-08-19", device: "d-123",
+  });
+  assert.deepEqual(started, {
+    event: "daily_challenge_started",
+    props: { day_number: 37 },
+  });
+  const done = sanitizeEvent("daily_challenge_completed", {
+    day_number: 37, score: 18420.4, rounds_played: 4,
+    best_distance_km: 3.14159,
+    lat: 35, lng: 135, place_name: "Kyoto, Japan",
+  });
+  assert.deepEqual(done, {
+    event: "daily_challenge_completed",
+    props: {
+      day_number: 37, score: 18420, rounds_played: 4, best_distance_km: 3.1,
+    },
+  });
+});
+
+test("sanitizeEvent: an all-forfeit daily drops the null best distance", () => {
+  const done = sanitizeEvent("daily_challenge_completed", {
+    day_number: 2, score: 0, rounds_played: 0, best_distance_km: null,
+  });
+  assert.deepEqual(done.props, { day_number: 2, score: 0, rounds_played: 0 });
+});
+
 test("sanitizeEvent: guess_submitted.super_sure is strictly boolean", () => {
   const base = { room: "KWPFRT", mode: "h2h", total_score: 3100 };
   assert.equal(

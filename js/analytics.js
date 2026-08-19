@@ -103,6 +103,20 @@ export const EVENT_SCHEMA = Object.freeze({
   game_abandoned: { room: "string", mode: "string", rounds_played: "int" },
   // method: "share" (Web Share sheet) | "copy" (clipboard fallback).
   invite_shared: { mode: "string", method: "string" },
+  // S1 share artifact: a post-game result card left the app. mode adds
+  // "daily" to the usual pair; method mirrors invite_shared. The card's
+  // link is UTM-tagged (utm_source=share) — inbound attribution rides on
+  // PostHog's automatic utm_* capture, not on this event.
+  result_shared: { mode: "string", method: "string" },
+  // S2 Daily Challenge. day_number is the public puzzle index ("Daily #37")
+  // — a calendar fact shared by every player that day, never an identity.
+  daily_challenge_started: { day_number: "int" },
+  // rounds_played counts rounds with a pin (0–5; forfeits excluded);
+  // best_distance_km is the run's closest guess (absent when all forfeit).
+  daily_challenge_completed: {
+    day_number: "int", score: "int", rounds_played: "int",
+    best_distance_km: "float1",
+  },
   consent_given: {},
   consent_denied: {},
   next_game: { mode: "string" },

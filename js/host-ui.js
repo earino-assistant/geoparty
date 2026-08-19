@@ -44,6 +44,8 @@ import {
   lockNowLabel,
 } from "./hints.js";
 import { oneShotHint, dismissHintCard } from "./hints-ui.js";
+import { withUtm, partyShareText, foldBestMoment } from "./share.js";
+import { shareResult } from "./share-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -141,6 +143,7 @@ let room = null;          // full state mirror; host writes, never re-reads
 let roomCode = null;
 let sampler = null;       // PoolSampler for this room
 let currentTruth = null;  // pool entry backing the active round
+let gameBest = null;      // closest guess so far — the share card's brag (S1)
 let connected = true;
 
 let viewer = null;        // MapillaryJS viewer
@@ -249,6 +252,7 @@ async function newGame() {
     room = initialRoomState(collectSettings(), collectTeams(), roomCode);
     sampler = new PoolSampler(pool, roomCode, 0);
     currentTruth = null;
+    gameBest = null;
     writeRoom(roomCode, room).catch((e) =>
       console.warn("Firebase write failed (continuing locally):", e));
     if (prevRoomCode && prevRoomCode !== roomCode) {
@@ -906,6 +910,18 @@ function enterReveal() {
   // line below carries the numbers themselves every round.
   oneShotHint("reveal", HINT_CARDS.reveal);
   const { number, showdown } = room.round;
+  // S1: fold this reveal into the game's closest-guess moment — the share
+  // card's brag line. Solo rounds carry one pin on round.guess/score;
+  // showdowns carry everyone's on round.results. Idempotent on re-entry.
+  gameBest = foldBestMoment(
+    gameBest,
+    showdown
+      ? room.round.results
+      : { solo: {
+          guess: room.round.guess,
+          distanceKm: room.round.score && room.round.score.distanceKm,
+        } },
+    room.round.truth && room.round.truth.name);
   if (revealTracked !== `${roomCode}:${number}`) {
     revealTracked = `${roomCode}:${number}`;
     track("reveal_shown", { room: roomCode, mode: "couch", round_number: number });
@@ -1044,6 +1060,24 @@ function finishGame() {
   $("btnSaveLeaderboard").textContent = "Save to leaderboard";
 }
 
+// S1: the post-game result card — the game's closest moment plus the
+// winning score, never a team name (user-entered text stays out of every
+// outbound channel). The link is UTM-tagged so rooms created by recipients
+// attribute back to shared cards in PostHog.
+function shareGameResult() {
+  if (!room) return;
+  const winner = standings(room.teams)[0];
+  shareResult(
+    partyShareText({
+      best: gameBest,
+      points: winner ? winner.total : 0,
+      url: withUtm(new URL(".", location.href).href, "couch"),
+    }),
+    "couch",
+    toast
+  );
+}
+
 function saveToLeaderboard() {
   const board = lsGet(LS_LEADERBOARD, []);
   const date = new Date().toISOString().slice(0, 10);
@@ -1071,6 +1105,7 @@ function newGameFromOver() {
   room = null;
   roomCode = null;
   currentTruth = null;
+  gameBest = null;
   enterSetup();
 }
 
@@ -1187,6 +1222,7 @@ $("btnMakeGuess").addEventListener("click", openGuessMap);
 $("btnSuperSure").addEventListener("click", toggleSuperSure);
 $("btnConfirmGuess").addEventListener("click", confirmGuess);
 $("btnNextRound").addEventListener("click", nextOrFinish);
+$("btnShareResult").addEventListener("click", shareGameResult);
 $("btnSaveLeaderboard").addEventListener("click", saveToLeaderboard);
 $("btnNewGameOver").addEventListener("click", newGameFromOver);
 
