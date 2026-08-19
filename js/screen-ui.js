@@ -17,7 +17,7 @@ import {
 } from "./game.js";
 
 const $ = (id) => document.getElementById(id);
-const SCREENS = ["s-entry", "s-lobby", "s-round", "s-reveal", "s-gameover"];
+const SCREENS = ["s-entry", "s-lobby", "s-round", "s-guess", "s-reveal", "s-gameover"];
 const TEAM_COLORS = ["var(--team-1)", "var(--team-2)", "var(--team-3)", "var(--team-4)"];
 
 function showScreen(id) {
@@ -36,6 +36,9 @@ let countdownInterval = null;
 let revealMap = null;
 let revealShownForRound = null;
 let confettiDone = false;
+
+let liveMap = null;     // guessing-phase world map (kept across rounds)
+let liveMarker = null;  // the host's in-progress pin, mirrored live
 
 /* ================================================================
  * Room entry
@@ -101,15 +104,18 @@ function render(state) {
   switch (state.phase) {
     case "lobby": renderLobby(state); break;
     case "roundActive": renderRound(state); break;
-    case "guessing": renderRound(state); break; // keep imagery up while host pins
+    case "guessing": renderGuessing(state); break; // live view of the host's pin
     case "reveal": renderReveal(state); break;
     case "gameOver": renderGameOver(state); break;
     default: break;
   }
   if (state.phase !== "reveal") revealShownForRound = null;
   if (state.phase !== "gameOver") confettiDone = false;
-  if (state.phase !== "roundActive" && state.phase !== "guessing") {
-    stopCountdown();
+  if (state.phase !== "roundActive") stopCountdown();
+  if (state.phase !== "guessing" && liveMarker) {
+    // Drop the preview pin so the next round's guess view starts clean.
+    liveMarker.remove();
+    liveMarker = null;
   }
 }
 
@@ -195,21 +201,14 @@ function renderRound(state) {
   } else {
     teamEl.textContent = "";
   }
-  startCountdown(round.endsAt, state.phase);
+  startCountdown(round.endsAt);
 }
 
 // Countdown renders from endsAt minus our own clock (spec §4) — the timer is
 // never ticked through Firebase.
-function startCountdown(endsAt, phase) {
+function startCountdown(endsAt) {
   stopCountdown();
   const el = $("tvCountdown");
-  if (phase === "guessing") {
-    el.textContent = "Guessing…";
-    el.style.fontSize = "6vh";
-    el.classList.remove("low");
-    return;
-  }
-  el.style.fontSize = "";
   if (!endsAt) { el.textContent = ""; return; }
   const tick = () => {
     const left = endsAt - Date.now();
@@ -223,6 +222,62 @@ function startCountdown(endsAt, phase) {
 
 function stopCountdown() {
   if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+}
+
+/* ---------------- Guessing: mirror the host's pin live ---------------- */
+
+// The host streams the in-progress pin to round/liveGuess (throttled ≤4/s);
+// we just reposition a marker. This is a preview of the aim, NOT the
+// confirmed guess — that arrives as round/guess at reveal.
+
+function ensureLiveMap() {
+  if (liveMap) return false;
+  liveMap = L.map("guessLiveMap", {
+    zoomControl: false,
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    boxZoom: false,
+    keyboard: false,
+    touchZoom: false,
+  }).setView([25, 10], 2);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(liveMap);
+  return true;
+}
+
+function renderGuessing(state) {
+  const wasHidden = $("s-guess").classList.contains("hidden");
+  showScreen("s-guess");
+  const created = ensureLiveMap();
+  if (created || wasHidden) {
+    // Leaflet needs a size pass whenever the container becomes visible.
+    setTimeout(() => liveMap.invalidateSize({ pan: false }), 60);
+  }
+
+  const round = state.round || {};
+  $("tvGuessRound").textContent =
+    `Round ${round.number || 1}` +
+    (state.settings ? ` / ${state.settings.roundCount}` : "");
+
+  const lg = round.liveGuess;
+  if (lg && typeof lg.lat === "number" && typeof lg.lng === "number") {
+    $("tvGuessHint").classList.add("hidden");
+    const pos = L.latLng(lg.lat, lg.lng);
+    if (liveMarker) {
+      liveMarker.setLatLng(pos);
+    } else {
+      liveMarker = L.circleMarker(pos, {
+        radius: 14, color: "#fff", weight: 3,
+        fillColor: "#ffcf3f", fillOpacity: 0.9,
+      }).addTo(liveMap);
+    }
+  } else {
+    $("tvGuessHint").classList.remove("hidden");
+    if (liveMarker) { liveMarker.remove(); liveMarker = null; }
+  }
 }
 
 /* ---------------- Reveal: the emotional peak ---------------- */

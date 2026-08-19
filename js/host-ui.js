@@ -552,6 +552,7 @@ async function startRound() {
     endsAt: secs > 0 ? now + secs * 1000 : null,
     pose: { bearing: 0 },
     truth: null,
+    liveGuess: null,
     guess: null,
     score: null,
   };
@@ -598,6 +599,32 @@ function stopTimer() {
  * Guess: Leaflet world map
  * ================================================================ */
 
+// Live pin preview: while the host aims, the TV mirrors the pin in real time
+// so the room can heckle. Same throttle discipline as the pose writer (≤4/s).
+// This is round/liveGuess — separate from round/guess, which is only ever
+// written on confirm, so a half-dragged pin can never leak into scoring.
+let liveGuessTimer = null;
+let liveGuessDirty = false;
+function scheduleLiveGuessWrite() {
+  liveGuessDirty = true;
+  if (liveGuessTimer) return;
+  liveGuessTimer = setTimeout(() => {
+    liveGuessTimer = null;
+    if (!liveGuessDirty || !guessMarker || !room || !room.round ||
+        room.phase !== "guessing") return;
+    liveGuessDirty = false;
+    const g = guessMarker.getLatLng();
+    const liveGuess = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
+    room.round.liveGuess = liveGuess;
+    push({ "round/liveGuess": liveGuess });
+  }, 250);
+}
+
+function cancelLiveGuessWrite() {
+  if (liveGuessTimer) { clearTimeout(liveGuessTimer); liveGuessTimer = null; }
+  liveGuessDirty = false;
+}
+
 function ensureGuessMap() {
   if (guessMap) return;
   guessMap = L.map("guessMap", { worldCopyJump: true, zoomControl: false })
@@ -611,7 +638,11 @@ function ensureGuessMap() {
       guessMarker.setLatLng(e.latlng);
     } else {
       guessMarker = L.marker(e.latlng, { draggable: true }).addTo(guessMap);
+      // "move" fires both while dragging and on setLatLng, so this one
+      // listener keeps the live preview in sync for taps and drags alike.
+      guessMarker.on("move", scheduleLiveGuessWrite);
     }
+    scheduleLiveGuessWrite();
     $("btnConfirmGuess").disabled = false;
   });
 }
@@ -619,7 +650,9 @@ function ensureGuessMap() {
 function openGuessMap() {
   if (!setPhase("guessing")) return;
   stopTimer();
-  push({ phase: "guessing" });
+  cancelLiveGuessWrite();
+  if (room.round) room.round.liveGuess = null;
+  push({ phase: "guessing", "round/liveGuess": null });
   showScreen("h-guess");
   ensureGuessMap();
   if (guessMarker) { guessMarker.remove(); guessMarker = null; }
@@ -632,6 +665,7 @@ function openGuessMap() {
 function confirmGuess() {
   if (!guessMarker || !currentTruth) return;
   if (!setPhase("reveal")) return;
+  cancelLiveGuessWrite(); // no trailing preview write after the phase flips
   const g = guessMarker.getLatLng();
   // `name` rides along so the screen (a pure subscriber) can show the place
   // name at reveal without loading the pool itself. Older pool entries may
@@ -647,11 +681,13 @@ function confirmGuess() {
 
   room.round.truth = truth;
   room.round.guess = guess;
+  room.round.liveGuess = null; // preview served its purpose
   room.round.score = { points, distanceKm };
   room.teams[room.activeTeam].total += points;
 
   push({
     phase: "reveal",
+    "round/liveGuess": null,
     "round/truth": truth,
     "round/guess": guess,
     "round/score": room.round.score,

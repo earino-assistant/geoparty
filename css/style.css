@@ -399,6 +399,37 @@ button:disabled { opacity: 0.4; cursor: default; }
   font-size: 5vh;
 }
 
+/* Screen guessing: full-bleed world map, live preview of the host's pin.
+   Labels sit above Leaflet's panes (tiles 200 … tooltips 700). */
+.guess-live-map {
+  position: absolute;
+  inset: 0;
+}
+#s-guess .tv-hud-corner { z-index: 800; }
+.tv-guess-label {
+  top: 2vh;
+  right: 3vw;
+  font-size: 6vh;
+  color: var(--accent);
+  animation: guess-pulse 1.6s ease-in-out infinite;
+}
+@keyframes guess-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.guess-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4vh;
+  z-index: 800;
+  text-align: center;
+  font-size: 3.5vh;
+  color: var(--muted);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+
 /* Screen reveal: split view — map on top, numbers below. */
 .reveal-split {
   position: absolute;
