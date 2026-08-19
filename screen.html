@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GeoParty — Screen</title>
+  <link rel="stylesheet" href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="connPill" class="conn-pill hidden">reconnecting…</div>
+
+  <!-- Waiting: room code entry -->
+  <section id="s-entry" class="phase-screen">
+    <div class="tv-center room-entry">
+      <h1 class="tv-title"><span class="geo">Geo</span>Party</h1>
+      <p class="tv-sub">Enter the room code from the host's phone</p>
+      <input id="roomInput" maxlength="4" autocomplete="off" autocapitalize="characters"
+             spellcheck="false" placeholder="KWPF" />
+      <div id="entryErr" class="err"></div>
+    </div>
+  </section>
+
+  <!-- Lobby -->
+  <section id="s-lobby" class="phase-screen hidden">
+    <div class="tv-center">
+      <h1 class="tv-title"><span class="geo">Geo</span>Party</h1>
+      <p class="tv-sub">Waiting for the operator…</p>
+      <div id="lobbyTeams" class="tv-teams"></div>
+    </div>
+  </section>
+
+  <!-- Round: full-screen imagery, HUD in corners only -->
+  <section id="s-round" class="phase-screen hidden">
+    <div id="screenViewer" class="viewer-full" style="pointer-events: none"></div>
+    <div id="tvRoundNo" class="tv-hud-corner tv-round-no">Round 1</div>
+    <div id="tvCountdown" class="tv-hud-corner tv-countdown"></div>
+    <div id="tvActiveTeam" class="tv-hud-corner tv-active-team"></div>
+  </section>
+
+  <!-- Reveal: split map + big numbers -->
+  <section id="s-reveal" class="phase-screen hidden">
+    <div class="reveal-split">
+      <div id="revealMap" class="reveal-map"></div>
+      <div class="reveal-stats">
+        <div class="reveal-num">
+          <div class="val" id="tvDistance">—</div>
+          <div class="label">Distance</div>
+        </div>
+        <div class="reveal-num">
+          <div class="val points" id="tvPoints">0</div>
+          <div class="label">Points</div>
+        </div>
+        <div id="tvBoard" class="reveal-board"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Game over: podium + confetti -->
+  <section id="s-gameover" class="phase-screen hidden">
+    <div id="confetti" class="confetti"></div>
+    <div class="tv-center">
+      <h1 class="tv-title">Game over!</h1>
+      <div id="podium" class="podium"></div>
+    </div>
+  </section>
+
+  <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="js/screen-ui.js"></script>
+</body>
+</html>

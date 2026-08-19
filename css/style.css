@@ -1,0 +1,501 @@
+/* GeoParty — shared styles for landing, host controller, and TV screen.
+   Dark (#111), high contrast, system fonts, readable from a couch at 4m. */
+
+:root {
+  --bg: #111;
+  --panel: #1c1c22;
+  --panel-2: #26262e;
+  --fg: #f4f4f6;
+  --muted: #9a9aa6;
+  --accent: #ffcf3f;
+  --good: #4ade80;
+  --bad: #f87171;
+  --team-1: #ffcf3f;
+  --team-2: #4dd6ff;
+  --team-3: #ff6ec7;
+  --team-4: #7dff8a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  background: var(--panel-2);
+  color: var(--fg);
+  padding: 0.7em 1.2em;
+}
+button:disabled { opacity: 0.4; cursor: default; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #111;
+  font-weight: 700;
+}
+
+.hidden { display: none !important; }
+
+/* Phase sections: exactly one visible at a time. */
+.phase-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* ---------- Connection pill & toast ---------- */
+
+.conn-pill {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bad);
+  color: #111;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  z-index: 1000;
+}
+
+.toast {
+  position: fixed;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--fg);
+  color: #111;
+  font-weight: 700;
+  padding: 10px 20px;
+  border-radius: 12px;
+  z-index: 1000;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.toast.show { opacity: 1; }
+
+/* ---------- Landing page ---------- */
+
+.landing {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8vh 24px 24px;
+}
+.landing h1 {
+  font-size: clamp(3rem, 10vw, 5rem);
+  margin: 0 0 0.2em;
+  letter-spacing: -0.02em;
+}
+.landing h1 .geo { color: var(--accent); }
+.landing p { color: var(--muted); font-size: 1.1rem; line-height: 1.55; }
+.landing .links { display: flex; gap: 16px; margin-top: 32px; flex-wrap: wrap; }
+.landing .links a {
+  flex: 1 1 200px;
+  display: block;
+  text-decoration: none;
+  background: var(--panel);
+  color: var(--fg);
+  border-radius: 16px;
+  padding: 20px;
+}
+.landing .links a strong { display: block; font-size: 1.4rem; margin-bottom: 4px; }
+.landing .links a span { color: var(--muted); font-size: 0.95rem; }
+.landing .links a.host strong { color: var(--accent); }
+.landing .links a.screen strong { color: var(--team-2); }
+
+/* ---------- Host controller ---------- */
+
+.host-wrap {
+  padding: 16px;
+  padding-bottom: 96px; /* keep content clear of the bottom action bar */
+  max-width: 560px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.host-wrap h1 { font-size: 1.6rem; margin: 4px 0 12px; }
+.host-wrap h2 { font-size: 1.1rem; color: var(--muted); margin: 20px 0 8px; }
+
+.settings-group { margin-bottom: 18px; }
+.settings-group .label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.seg {
+  display: flex;
+  gap: 6px;
+}
+.seg button {
+  flex: 1;
+  padding: 12px 0;
+  background: var(--panel);
+  font-weight: 600;
+}
+.seg button.sel {
+  background: var(--accent);
+  color: #111;
+}
+
+.team-names input {
+  width: 100%;
+  margin-bottom: 8px;
+  background: var(--panel);
+  border: 1px solid var(--panel-2);
+  border-radius: 10px;
+  color: var(--fg);
+  padding: 12px;
+  font: inherit;
+}
+
+/* Primary action pinned bottom-center for thumb reach (spec §6). */
+.action-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  background: linear-gradient(transparent, rgba(17, 17, 17, 0.92) 40%);
+  z-index: 500;
+}
+.action-bar button {
+  flex: 1;
+  max-width: 420px;
+  padding: 16px 0;
+  font-size: 1.15rem;
+}
+
+.resume-banner {
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.leaderboard-list { list-style: none; margin: 0; padding: 0; }
+.leaderboard-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  margin-bottom: 4px;
+  font-size: 0.95rem;
+}
+.leaderboard-list li .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.leaderboard-list li .pts { color: var(--accent); font-weight: 700; margin-left: 12px; }
+.leaderboard-list .empty { color: var(--muted); justify-content: center; }
+
+/* Host lobby: giant room code + QR. */
+.room-code-huge {
+  font-size: clamp(4rem, 22vw, 8rem);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-align: center;
+  color: var(--accent);
+  margin: 12px 0 4px;
+}
+.screen-url {
+  text-align: center;
+  color: var(--muted);
+  word-break: break-all;
+  font-size: 0.9rem;
+  margin-bottom: 16px;
+}
+.qr-box {
+  display: flex;
+  justify-content: center;
+  margin: 8px 0 16px;
+}
+.qr-box canvas {
+  background: #fff;
+  padding: 12px;
+  border-radius: 12px;
+  image-rendering: pixelated;
+  width: min(60vw, 260px);
+  height: min(60vw, 260px);
+}
+.waiting-screen-note {
+  text-align: center;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.waiting-screen-note.ok { color: var(--good); font-weight: 700; }
+
+/* Host round: full-bleed viewer + overlay HUD. */
+.viewer-full {
+  position: absolute;
+  inset: 0;
+}
+.hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+  pointer-events: none;
+  z-index: 400;
+  font-weight: 800;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+.hud .hud-item {
+  background: rgba(17, 17, 17, 0.65);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 1.05rem;
+}
+
+.map-full {
+  position: absolute;
+  inset: 0;
+  background: #0b0b0f;
+}
+.guess-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 600;
+  background: rgba(17, 17, 17, 0.8);
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* Host reveal / game over cards */
+.stat-card {
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+.stat-card .big {
+  font-size: 2.4rem;
+  font-weight: 800;
+}
+.stat-card .label { color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.totals-list { list-style: none; padding: 0; margin: 0; }
+.totals-list li {
+  display: flex;
+  justify-content: space-between;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.totals-list li.active { outline: 2px solid var(--accent); }
+
+/* ---------- TV screen ---------- */
+
+.tv-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4vh 4vw;
+}
+
+.tv-title {
+  font-size: 9vh;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.tv-title .geo { color: var(--accent); }
+.tv-sub { font-size: 3.5vh; color: var(--muted); margin: 2vh 0 0; }
+
+.room-entry input {
+  margin-top: 4vh;
+  font-size: 8vh;
+  width: 5.2em;
+  text-align: center;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  background: var(--panel);
+  color: var(--fg);
+  border: 2px solid var(--panel-2);
+  border-radius: 16px;
+  padding: 0.2em 0 0.2em 0.3em;
+  font-family: inherit;
+  font-weight: 800;
+}
+.room-entry input:focus { outline: 3px solid var(--accent); }
+.room-entry .err { color: var(--bad); font-size: 2.5vh; margin-top: 2vh; min-height: 3vh; }
+
+.tv-teams {
+  display: flex;
+  gap: 3vw;
+  margin-top: 5vh;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.tv-teams .team-chip {
+  font-size: 4.5vh;
+  font-weight: 800;
+  padding: 1vh 3vw;
+  border-radius: 2vh;
+  background: var(--panel);
+}
+
+/* Screen round: imagery is the show; HUD only in corners. */
+.tv-hud-corner {
+  position: absolute;
+  z-index: 400;
+  font-weight: 800;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+.tv-countdown {
+  top: 2vh;
+  right: 3vw;
+  font-size: 12vh;
+  font-variant-numeric: tabular-nums;
+}
+.tv-countdown.low { color: var(--bad); }
+.tv-round-no {
+  top: 2vh;
+  left: 3vw;
+  font-size: 5vh;
+  color: var(--muted);
+}
+.tv-active-team {
+  bottom: 2vh;
+  left: 3vw;
+  font-size: 5vh;
+}
+
+/* Screen reveal: split view — map on top, numbers below. */
+.reveal-split {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+.reveal-map { flex: 1 1 55%; min-height: 0; }
+.reveal-stats {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  gap: 2vw;
+  padding: 2vh 3vw;
+}
+.reveal-num {
+  text-align: center;
+}
+.reveal-num .val {
+  font-size: 11vh;
+  font-weight: 800;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.reveal-num .val.points { color: var(--accent); }
+.reveal-num .label { font-size: 2.6vh; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+.reveal-board {
+  display: flex;
+  flex-direction: column;
+  gap: 1vh;
+  min-width: 26vw;
+}
+.reveal-board .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 2vw;
+  font-size: 3.6vh;
+  font-weight: 700;
+  background: var(--panel);
+  border-radius: 1.2vh;
+  padding: 0.8vh 1.5vw;
+}
+.reveal-board .row .pts { font-variant-numeric: tabular-nums; }
+
+/* Podium */
+.podium {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3vw;
+  margin-top: 6vh;
+}
+.podium .slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5vh;
+}
+.podium .slot .name { font-size: 4.5vh; font-weight: 800; }
+.podium .slot .score { font-size: 3vh; color: var(--muted); font-variant-numeric: tabular-nums; }
+.podium .slot .bar {
+  width: 18vw;
+  border-radius: 2vh 2vh 0 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 1.5vh;
+  font-size: 5vh;
+  font-weight: 800;
+  color: #111;
+}
+.podium .slot:nth-child(1) .bar { height: 28vh; background: var(--accent); }
+.podium .slot:nth-child(2) .bar { height: 19vh; background: var(--team-2); }
+.podium .slot:nth-child(3) .bar { height: 13vh; background: var(--team-3); }
+.podium .slot:nth-child(4) .bar { height: 9vh; background: var(--team-4); }
+
+/* Cheap CSS-only confetti (spec §6): fixed strips falling on loop. */
+.confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.confetti i {
+  position: absolute;
+  top: -4vh;
+  width: 1.4vh;
+  height: 2.8vh;
+  opacity: 0.9;
+  animation: confetti-fall linear infinite;
+}
+@keyframes confetti-fall {
+  0% { transform: translateY(-5vh) rotate(0deg); }
+  100% { transform: translateY(110vh) rotate(720deg); }
+}
+
+/* Reveal line-draw + count-up hooks (used from JS) */
+.count-up { transition: none; }
+
+/* Leaflet dark-friendly tweaks */
+.leaflet-container { background: #0b0b0f; }
+
+/* Mapillary viewer fills its container */
+.mapillary-viewer, .viewer-full > div { width: 100%; height: 100%; }

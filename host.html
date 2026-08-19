@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>GeoParty — Host</title>
+  <link rel="stylesheet" href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="connPill" class="conn-pill hidden">reconnecting…</div>
+  <div id="toast" class="toast"></div>
+
+  <!-- 1. Setup -->
+  <section id="h-setup" class="phase-screen">
+    <div class="host-wrap">
+      <h1><span style="color: var(--accent)">Geo</span>Party host</h1>
+
+      <div id="resumeBanner" class="resume-banner hidden">
+        <div>
+          <strong>Game in progress</strong>
+          <div style="color: var(--muted); font-size: 0.9rem">
+            Room <span id="resumeCode"></span> — resume as host?
+          </div>
+        </div>
+        <button id="btnResume" class="btn-primary">Resume</button>
+      </div>
+
+      <div class="settings-group">
+        <div class="label">Rounds</div>
+        <div class="seg" id="segRounds" data-value="5">
+          <button data-v="3">3</button>
+          <button data-v="5" class="sel">5</button>
+          <button data-v="10">10</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="label">Seconds per round</div>
+        <div class="seg" id="segSeconds" data-value="120">
+          <button data-v="60">60</button>
+          <button data-v="120" class="sel">120</button>
+          <button data-v="180">180</button>
+          <button data-v="0">No limit</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="label">Movement</div>
+        <div class="seg" id="segMove" data-value="1">
+          <button data-v="1" class="sel">Allowed</button>
+          <button data-v="0">No moving</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="label">Teams</div>
+        <div class="seg" id="segTeams" data-value="1">
+          <button data-v="1" class="sel">1</button>
+          <button data-v="2">2</button>
+          <button data-v="3">3</button>
+          <button data-v="4">4</button>
+        </div>
+        <div class="team-names" id="teamNames" style="margin-top: 10px"></div>
+      </div>
+
+      <h2>All-time top 10</h2>
+      <ul id="leaderboardList" class="leaderboard-list"></ul>
+    </div>
+    <div class="action-bar">
+      <button id="btnNewGame" class="btn-primary">New Game</button>
+    </div>
+  </section>
+
+  <!-- 2. Lobby: room code, QR, waiting for screen -->
+  <section id="h-lobby" class="phase-screen hidden">
+    <div class="host-wrap">
+      <h1>Room</h1>
+      <div id="roomCodeHuge" class="room-code-huge">····</div>
+      <div class="qr-box"><canvas id="qrCanvas"></canvas></div>
+      <div id="screenUrl" class="screen-url"></div>
+      <div id="waitingNote" class="waiting-screen-note">Waiting for a screen to join…</div>
+    </div>
+    <div class="action-bar">
+      <button id="btnAbandon">Abandon</button>
+      <button id="btnStartRound" class="btn-primary" disabled>Start Round</button>
+    </div>
+  </section>
+
+  <!-- 3. Round: full-bleed viewer -->
+  <section id="h-round" class="phase-screen hidden">
+    <div id="hostViewer" class="viewer-full"></div>
+    <div class="hud">
+      <div class="hud-item" id="hudRound">Round 1/5</div>
+      <div class="hud-item" id="hudTeam"></div>
+      <div class="hud-item" id="hudTimer">2:00</div>
+    </div>
+    <div class="action-bar">
+      <button id="btnMakeGuess" class="btn-primary">Make Guess</button>
+    </div>
+  </section>
+
+  <!-- 4. Guess: world map, tap to pin -->
+  <section id="h-guess" class="phase-screen hidden">
+    <div id="guessMap" class="map-full"></div>
+    <div class="guess-hint">Tap the map to drop your pin</div>
+    <div class="action-bar">
+      <button id="btnConfirmGuess" class="btn-primary" disabled>Confirm Guess</button>
+    </div>
+  </section>
+
+  <!-- 5. Reveal -->
+  <section id="h-reveal" class="phase-screen hidden">
+    <div class="host-wrap">
+      <h1 id="revealHeading">Round 1</h1>
+      <div class="stat-card">
+        <div class="label">Distance</div>
+        <div class="big" id="revealDistance">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Points</div>
+        <div class="big" id="revealPoints" style="color: var(--accent)">—</div>
+      </div>
+      <h2>Totals</h2>
+      <ul id="revealTotals" class="totals-list"></ul>
+    </div>
+    <div class="action-bar">
+      <button id="btnNextRound" class="btn-primary">Next Round</button>
+    </div>
+  </section>
+
+  <!-- 6. Game over -->
+  <section id="h-gameover" class="phase-screen hidden">
+    <div class="host-wrap">
+      <h1>Final standings</h1>
+      <ul id="finalTotals" class="totals-list"></ul>
+    </div>
+    <div class="action-bar">
+      <button id="btnSaveLeaderboard">Save to leaderboard</button>
+      <button id="btnNewGameOver" class="btn-primary">New Game</button>
+    </div>
+  </section>
+
+  <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="js/host-ui.js"></script>
+</body>
+</html>
