@@ -25,6 +25,10 @@ import {
   isValidRoomCode,
   haversineKm,
   scoreForDistance,
+  bonusWindowMs,
+  timeBonus,
+  formatSeconds,
+  resultRowText,
   formatDistance,
   formatCountdown,
   teamIds,
@@ -703,12 +707,23 @@ function lockIn(auto = false) {
   const distanceKm = guess
     ? haversineKm(truth.lat, truth.lng, guess.lat, guess.lng)
     : null;
-  const points = guess ? scoreForDistance(distanceKm) : 0;
+  // Speed clock: round start to this lock-in, on this phone's clock (the
+  // same clock the countdown already trusts). Clamped ≥0 against skew.
+  const submittedAt = Date.now();
+  const elapsedMs = Math.max(0, submittedAt - (room.round.startedAt || submittedAt));
+  const distancePoints = guess ? scoreForDistance(distanceKm) : 0;
+  const speedBonus = guess
+    ? timeBonus(distancePoints, elapsedMs, bonusWindowMs(room.settings.roundSeconds))
+    : 0;
+  const points = distancePoints + speedBonus;
   const result = {
     guess,
     distanceKm,
     points,
-    submittedAt: Date.now(),
+    distancePoints,
+    timeBonus: speedBonus,
+    elapsedMs: guess ? elapsedMs : null,
+    submittedAt,
     forfeited: guess ? null : true,
   };
   cancelLiveWrite();
@@ -777,6 +792,7 @@ function sweepAndReveal(force) {
   for (const id of pending) {
     patch[`round/results/${id}`] = {
       guess: null, distanceKm: null, points: 0,
+      distancePoints: 0, timeBonus: 0, elapsedMs: null,
       submittedAt: Date.now(), forfeited: true,
     };
     patch[`round/live/${id}/stage`] = "locked";
@@ -859,6 +875,23 @@ function renderReveal() {
     $("pRevealDistance").textContent = "no pin";
     $("pRevealPoints").textContent = "+0";
   }
+  // Speed line under the points card (injected — HTML untouched).
+  let speedEl = $("pRevealSpeed");
+  if (!speedEl) {
+    speedEl = document.createElement("div");
+    speedEl.id = "pRevealSpeed";
+    speedEl.className = "time-note";
+    $("pRevealPoints").closest(".stat-card").appendChild(speedEl);
+  }
+  if (mine && mine.guess && typeof mine.elapsedMs === "number") {
+    speedEl.textContent =
+      `${mine.distancePoints.toLocaleString()} distance` +
+      ` + ⚡${mine.timeBonus.toLocaleString()} speed` +
+      ` · answered in ${formatSeconds(mine.elapsedMs)}`;
+    speedEl.classList.toggle("zero", !mine.timeBonus);
+  } else {
+    speedEl.textContent = "";
+  }
 
   // This round, closest first (reveal order reversed).
   const list = $("pRoundResults");
@@ -870,9 +903,7 @@ function renderReveal() {
     name.textContent = (i === 0 && r.guess ? "👑 " : "") + room.teams[r.id].name;
     name.style.color = teamHex(room.teams, r.id);
     const val = document.createElement("span");
-    val.textContent = r.guess
-      ? `${formatDistance(r.distanceKm)} · +${r.points.toLocaleString()}`
-      : "no pin · +0";
+    val.textContent = resultRowText(r);
     li.append(name, val);
     list.appendChild(li);
   });

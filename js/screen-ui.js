@@ -12,6 +12,8 @@ import {
   isValidRoomCode,
   formatDistance,
   formatCountdown,
+  formatSeconds,
+  resultRowText,
   teamIds,
   standings,
   showdownResults,
@@ -570,10 +572,12 @@ function renderReveal(state) {
         .bindTooltip("Answer", { permanent: true, direction: "top" });
       placeEl.classList.add("show");
       countUpPoints(round.score.points);
+      showSpeedNote(round.score); // speed lands with the score count-up
     }
   };
   $("tvDistance").textContent = formatDistance(round.score.distanceKm);
   $("tvPoints").textContent = "0";
+  ensureSpeedNote().textContent = "";
   requestAnimationFrame(step);
 }
 
@@ -688,8 +692,7 @@ function renderShowdownReveal(state, round) {
       name.style.color = color;
       const val = document.createElement("span");
       val.className = "pts";
-      val.textContent =
-        `${formatDistance(r.distanceKm)} · +${r.points.toLocaleString()}`;
+      val.textContent = resultRowText(r);
       row.append(name, val);
       rows[id] = row;
       boardEl.appendChild(row);
@@ -698,6 +701,31 @@ function renderShowdownReveal(state, round) {
     requestAnimationFrame(step);
   };
   drawNext(0);
+}
+
+// Speed line under the points tile (injected — HTML untouched): the
+// "answered in 23s (⚡+400)" beat of the reveal.
+function ensureSpeedNote() {
+  let note = $("tvSpeedNote");
+  if (!note) {
+    note = document.createElement("div");
+    note.id = "tvSpeedNote";
+    note.className = "time-note";
+    $("tvPoints").closest(".reveal-num").appendChild(note);
+  }
+  return note;
+}
+
+function showSpeedNote(score) {
+  const note = ensureSpeedNote();
+  if (typeof score.elapsedMs === "number") {
+    note.textContent =
+      `answered in ${formatSeconds(score.elapsedMs)}` +
+      ` (⚡+${(score.timeBonus || 0).toLocaleString()})`;
+    note.classList.toggle("zero", !score.timeBonus);
+  } else {
+    note.textContent = "";
+  }
 }
 
 function countUpPoints(points) {

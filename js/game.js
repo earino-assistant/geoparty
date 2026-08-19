@@ -48,6 +48,50 @@ export function scoreForDistance(km) {
   return Math.round(5000 * Math.exp(-km / 1492));
 }
 
+/* Time bonus: speed is a skill. Every guess earns a bonus on top of its
+ * distance score, scaled by BOTH speed and accuracy — up to +20% of the
+ * distance score (+1000 on a perfect pin). Accuracy-scaling matters:
+ * instantly slamming a random pin earns ~nothing, instantly recognizing
+ * the place earns the full bonus, and in head-to-head copying a rival's
+ * visible pin costs the time they already spent placing it.
+ * The clock: full bonus through the first TIME_GRACE_MS (time to look
+ * around and physically drop a pin), then a straight slide to zero at the
+ * round's time limit. No-limit rounds use a fixed window instead, so speed
+ * still pays but a leisurely round simply scores on distance alone. */
+export const TIME_BONUS_MAX = 1000;
+export const TIME_GRACE_MS = 10_000;
+export const NO_LIMIT_BONUS_WINDOW_MS = 90_000;
+
+export function bonusWindowMs(roundSeconds) {
+  return roundSeconds > 0 ? roundSeconds * 1000 : NO_LIMIT_BONUS_WINDOW_MS;
+}
+
+export function timeBonus(distancePoints, elapsedMs, windowMs) {
+  const span = Math.max(1000, windowMs - TIME_GRACE_MS);
+  const late = Math.max(0, elapsedMs - TIME_GRACE_MS);
+  const speed = Math.max(0, 1 - late / span);
+  return Math.round(TIME_BONUS_MAX * (distancePoints / 5000) * speed);
+}
+
+// "23s" under a minute, "1m 04s" above — the reveal's speed lines.
+export function formatSeconds(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+// One per-team reveal row: distance · speed · total. Results written
+// before the time bonus existed (no elapsedMs) fall back to the old form.
+export function resultRowText(r) {
+  if (!r.guess) return "no pin · +0";
+  const total = `+${r.points.toLocaleString()}`;
+  if (typeof r.elapsedMs === "number" && typeof r.timeBonus === "number") {
+    return `${formatDistance(r.distanceKm)} · ⚡${formatSeconds(r.elapsedMs)}` +
+      ` +${r.timeBonus.toLocaleString()} · ${total}`;
+  }
+  return `${formatDistance(r.distanceKm)} · ${total}`;
+}
+
 // One decimal under 100km, integer km above (spec §8).
 export function formatDistance(km) {
   if (km < 100) return `${km.toFixed(1)} km`;

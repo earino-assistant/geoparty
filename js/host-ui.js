@@ -15,6 +15,10 @@ import {
   makeRoomCode,
   haversineKm,
   scoreForDistance,
+  bonusWindowMs,
+  timeBonus,
+  formatSeconds,
+  resultRowText,
   formatDistance,
   formatCountdown,
   teamForRound,
@@ -395,6 +399,9 @@ async function startRound() {
     number,
     imageId: entry.image_id,
     startedAt: now,
+    // Speed clock anchor: equals startedAt for solo rounds; showdown
+    // handoffs reset it so each team's time bonus reflects its own turn.
+    turnStartedAt: now,
     endsAt: secs > 0 ? now + secs * 1000 : null,
     pose: { bearing: 0 },
     truth: null,
@@ -604,10 +611,21 @@ function confirmGuess() {
   const g = guessMarker.getLatLng();
   const guess = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
   const distanceKm = haversineKm(currentTruth.lat, currentTruth.lng, guess.lat, guess.lng);
-  const points = scoreForDistance(distanceKm);
+  const distancePoints = scoreForDistance(distanceKm);
+  // Speed clock: round start (or this team's showdown turn start) to this
+  // confirm tap. turnStartedAt may be absent on rounds started pre-update.
+  const submittedAt = Date.now();
+  const elapsedMs = Math.max(
+    0, submittedAt - (room.round.turnStartedAt || room.round.startedAt));
+  const speedBonus =
+    timeBonus(distancePoints, elapsedMs, bonusWindowMs(room.settings.roundSeconds));
+  const points = distancePoints + speedBonus;
 
   if (room.round.showdown) {
-    confirmShowdownGuess(guess, distanceKm, points);
+    confirmShowdownGuess({
+      guess, distanceKm, points, distancePoints,
+      timeBonus: speedBonus, elapsedMs, submittedAt,
+    });
     return;
   }
 
@@ -627,7 +645,10 @@ function confirmGuess() {
   room.round.guess = guess;
   room.round.liveGuess = null; // preview served its purpose
   room.round.liveView = null;
-  room.round.score = { points, distanceKm };
+  room.round.score = {
+    points, distancePoints, timeBonus: speedBonus,
+    elapsedMs, submittedAt, distanceKm,
+  };
   room.teams[room.activeTeam].total += points;
 
   push({
@@ -645,23 +666,26 @@ function confirmGuess() {
 // One showdown turn locked in. Middle teams: bank the result, pass the
 // phone, stay in the guessing phase. Last team: flip to reveal with the
 // truth so every pin lands on the TV at once.
-function confirmShowdownGuess(guess, distanceKm, points) {
+function confirmShowdownGuess(result) {
   const team = room.activeTeam;
   const order = room.round.order || [];
-  const result = { guess, distanceKm, points };
 
   room.round.results = room.round.results || {};
   room.round.results[team] = result;
-  room.teams[team].total += points;
+  room.teams[team].total += result.points;
   room.round.liveGuess = null;
   cancelLiveGuessWrite();
 
   const next = order[order.indexOf(team) + 1];
   if (next) {
     room.activeTeam = next;
+    // The next team's speed clock starts at the phone handoff, not at
+    // round start — otherwise going later in the order would cost points.
+    room.round.turnStartedAt = Date.now();
     push({
       activeTeam: next,
       "round/liveGuess": null,
+      "round/turnStartedAt": room.round.turnStartedAt,
       [`round/results/${team}`]: result,
       [`teams/${team}/total`]: room.teams[team].total,
     });
@@ -730,16 +754,32 @@ function enterReveal() {
       const name = document.createElement("span");
       name.textContent = (i === 0 ? "👑 " : "") + room.teams[r.id].name;
       const val = document.createElement("span");
-      val.textContent =
-        `${formatDistance(r.distanceKm)} · +${r.points.toLocaleString()}`;
+      val.textContent = resultRowText(r);
       li.append(name, val);
       list.appendChild(li);
     });
   } else {
     if (list) list.classList.add("hidden");
-    const { points, distanceKm } = room.round.score;
-    $("revealDistance").textContent = formatDistance(distanceKm);
-    $("revealPoints").textContent = points.toLocaleString();
+    const score = room.round.score;
+    $("revealDistance").textContent = formatDistance(score.distanceKm);
+    $("revealPoints").textContent = score.points.toLocaleString();
+    // Speed line under the points card (injected — HTML untouched).
+    let speedEl = $("hostRevealSpeed");
+    if (!speedEl) {
+      speedEl = document.createElement("div");
+      speedEl.id = "hostRevealSpeed";
+      speedEl.className = "time-note";
+      ptsCard.appendChild(speedEl);
+    }
+    if (typeof score.elapsedMs === "number") {
+      speedEl.textContent =
+        `${score.distancePoints.toLocaleString()} distance` +
+        ` + ⚡${score.timeBonus.toLocaleString()} speed` +
+        ` · answered in ${formatSeconds(score.elapsedMs)}`;
+      speedEl.classList.toggle("zero", !score.timeBonus);
+    } else {
+      speedEl.textContent = "";
+    }
   }
   renderTotals($("revealTotals"));
   $("btnNextRound").textContent =

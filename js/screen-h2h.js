@@ -5,7 +5,7 @@
 // heartbeat, as always).
 
 import { MAPILLARY_TOKEN } from "../config.js";
-import { formatDistance, formatCountdown, teamIds, standings } from "./game.js";
+import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
 
 const $ = (id) => document.getElementById(id);
@@ -485,9 +485,7 @@ function runRevealAnimation(state, round) {
     name.style.color = teamHex(state.teams, r.id);
     const val = document.createElement("span");
     val.className = "pts";
-    val.textContent = r.guess
-      ? `${formatDistance(r.distanceKm)} · +${r.points.toLocaleString()}`
-      : "no pin · +0";
+    val.textContent = resultRowText(r);
     row.append(name, val);
     rows[r.id] = row;
     boardEl.appendChild(row);
