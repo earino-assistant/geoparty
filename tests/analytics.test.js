@@ -176,6 +176,24 @@ test("sanitizeEvent: super_sure_resolved keeps its aggregates, strips the rest",
   });
 });
 
+test("sanitizeEvent: party_choice keeps only the chooser value", () => {
+  const out = sanitizeEvent("party_choice", {
+    choice: "phones",
+    // Nothing else may ride along from the landing:
+    room_code: "KWPFRT", team_name: "The Atlas Cats", lat: 1, lng: 2,
+    url: "https://example.com/?room=KWPFRT",
+  });
+  assert.deepEqual(out, { event: "party_choice", props: { choice: "phones" } });
+});
+
+test("sanitizeEvent: front_door_join keeps only the routed mode", () => {
+  const out = sanitizeEvent("front_door_join", {
+    mode: "couch",
+    room: "KWPFRT", code: "KWPFRT", lat: 48.85, lng: 2.35, deviceId: "d-1",
+  });
+  assert.deepEqual(out, { event: "front_door_join", props: { mode: "couch" } });
+});
+
 test("sanitizeEvent: wrong-typed props are stripped, not coerced", () => {
   const out = sanitizeEvent("game_created", {
     mode: 5, num_teams: "two", num_rounds: 5, round_seconds: 120,

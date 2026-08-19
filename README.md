@@ -35,7 +35,11 @@ for the next game.
   whatever state it receives. It writes nothing except its own
   `screenHeartbeat` every 10 seconds. Reach the TV via Chrome tab casting, a
   smart TV browser, or a Fire Stick — it's just a URL.
-- **`index.html`** — landing page linking both.
+- **`index.html`** — the one front door: a hero landing with a single
+  "Start a party" CTA (the host picks *"Everyone on their own phone"* or
+  *"One phone + the TV"*) and one code-entry join path that reads the
+  room's mode and routes to the right page automatically. The TV is an
+  in-lobby / footer "Add a TV" affordance, not a top-level choice.
 
 Scoring is GeoGuessr-style exponential decay: `round(5000 * exp(-d / 1492))`
 with `d` the haversine great-circle distance in km. Perfect pin is 5000;

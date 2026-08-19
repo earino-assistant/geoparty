@@ -60,6 +60,13 @@ import {
   adjustedPoints,
   superSureLabel,
 } from "./supersure.js";
+import {
+  HINT_CARDS,
+  guessMapHintLines,
+  lockNowEstimate,
+  lockNowLabel,
+} from "./hints.js";
+import { oneShotHint, dismissHintCard } from "./hints-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -81,6 +88,7 @@ const teamHex = (teams, id) =>
 let shownScreen = null;
 function showScreen(id) {
   shownScreen = id;
+  dismissHintCard(); // a hint never outlives the moment it teaches
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
 }
 
@@ -483,8 +491,8 @@ function renderLobby() {
     note.textContent = "TV connected ✓";
     note.classList.add("ok");
   } else {
-    note.textContent = "No TV needed — playing in one room? " +
-      `Optional big screen: open ${note.dataset.screenUrl || "screen.html"} and enter ${roomCode}`;
+    note.textContent = "No TV needed — every phone shows the reveal. " +
+      `Add a TV (optional): open ${note.dataset.screenUrl || "screen.html"} and enter ${roomCode}`;
     note.classList.remove("ok");
   }
 
@@ -560,6 +568,9 @@ async function startRound() {
     // The host phone validates imagery before committing the round, same
     // dead-image skip as couch mode — everyone else just follows imageId.
     showScreen("p-round");
+    // The host phone shows the pano screen before the state echoes back,
+    // so renderRoundActive's screen-change guard won't fire this for it.
+    oneShotHint("pano", HINT_CARDS.pano);
     if (!viewer) makeViewer();
     let entry = sampler.peek();
     let loaded = false;
@@ -634,6 +645,7 @@ function renderRoundActive() {
     clearRivalPins();
     if (guessMap) guessMap.setView([25, 10], 2);
     $("btnLockIn").disabled = true;
+    $("lockNowHint").textContent = "";
     startTick();
   }
 
@@ -652,6 +664,8 @@ function renderRoundActive() {
   } else {
     if (shownScreen !== "p-round") {
       showScreen("p-round");
+      // First pano ever on this device: teach the loop's first move (M5).
+      oneShotHint("pano", HINT_CARDS.pano);
       if (viewer) viewer.resize();
     }
     if (!viewer) makeViewer();
@@ -724,10 +738,34 @@ function ensureGuessMap() {
     } else {
       guessMarker = L.marker(e.latlng, { draggable: true }).addTo(guessMap);
       guessMarker.on("move", scheduleLiveWrite);
+      guessMarker.on("move", updateLockNowHint);
     }
     scheduleLiveWrite();
     $("btnLockIn").disabled = false;
+    updateLockNowHint();
   });
+}
+
+// M3: the live "if you locked in now" pill. Truth rides in the round, so
+// the phone can price its own pin locally — nothing leaves the device.
+// Refreshed by the 250 ms ticker (the bonus decays with time), on pin
+// moves, and on SUPER SURE toggles (armed = show the doubled stakes).
+function updateLockNowHint() {
+  const el = $("lockNowHint");
+  if (!room || room.phase !== "roundActive" || !room.round ||
+      localStage !== "map" || !guessMarker || myResult()) {
+    el.textContent = "";
+    return;
+  }
+  const truth = room.round.truth;
+  if (!truth || typeof truth.lat !== "number") { el.textContent = ""; return; }
+  const g = guessMarker.getLatLng();
+  const km = haversineKm(
+    truth.lat, truth.lng, g.lat, L.Util.wrapNum(g.lng, [-180, 180], true));
+  const elapsed = Math.max(0, Date.now() - (room.round.startedAt || Date.now()));
+  const est = lockNowEstimate(km, elapsed, room.settings.roundSeconds);
+  el.textContent = lockNowLabel(est, superSureArmed);
+  el.classList.toggle("armed", superSureArmed);
 }
 
 // Live rival pins, in team colors, on this phone's own guess map — the
@@ -771,6 +809,13 @@ function openGuessMapScreen() {
     ? "Drag to adjust, then lock it in"
     : "Tap the map to drop your pin — rivals can see it move";
   renderSuperSureToggle();
+  // First guess map ever: the scoring one-liner, the rival-pins warning,
+  // and the SUPER SURE stakes — at the moment they matter (M5 + M3).
+  oneShotHint("guessmap", {
+    title: "Drop your pin",
+    lines: guessMapHintLines("h2h", superSureAvailable(room.teams, myTeam)),
+  });
+  updateLockNowHint();
   setTimeout(() => guessMap.invalidateSize(), 50);
   updateRivalPins();
   scheduleLiveWrite();
@@ -785,6 +830,7 @@ function toggleSuperSure() {
   if (!room || myResult() || !superSureAvailable(room.teams, myTeam)) return;
   superSureArmed = !superSureArmed;
   renderSuperSureToggle();
+  updateLockNowHint(); // the pill flips to the bet's doubled stakes
   toast(superSureArmed
     ? "SUPER SURE armed: closest pin wins ×2 — anyone closer and you get 0"
     : "SUPER SURE disarmed — bet saved for later");
@@ -1042,6 +1088,7 @@ function stopTick() {
 
 function tick() {
   if (!room || room.phase !== "roundActive" || !room.round) return;
+  updateLockNowHint(); // the speed bonus decays in real time
   const endsAt = room.round.endsAt;
   const timerEl = $("pHudTimer");
   const mapTimerEl = $("pGuessTimer"); // timer stays visible on the map too
@@ -1095,6 +1142,9 @@ function renderReveal() {
   }
 
   showScreen("p-reveal");
+  // First reveal ever: label the breakdown once (M5); the injected speed
+  // line below carries the numbers themselves every round.
+  oneShotHint("reveal", HINT_CARDS.reveal);
   renderRevealMap(round);
   // Host phone only, once per round — mirrors round_started's cardinality
   // so the funnel counts rounds, not phones.
@@ -1421,11 +1471,14 @@ onConnectionChange((isConnected) => {
 });
 
 // QR deep-link: player.html?room=CODE prefills the code; the joiner only
-// types a team name. That's the whole join flow.
-const urlCode = (new URLSearchParams(location.search).get("room") || "")
-  .toUpperCase();
+// types a team name. That's the whole join flow. The landing's chooser
+// arrives with ?create=1 instead — a party starter, not a joiner.
+const urlParams = new URLSearchParams(location.search);
+const urlCode = (urlParams.get("room") || "").toUpperCase();
 if (isValidRoomCode(urlCode)) {
   $("joinCode").value = urlCode;
+  $("myTeamName").focus();
+} else if (urlParams.get("create") === "1") {
   $("myTeamName").focus();
 }
 

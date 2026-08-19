@@ -4,46 +4,85 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GeoParty</title>
+  <link rel="stylesheet" href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css"
+        integrity="sha384-IamMZxz60pSNzUk3cW2nl3uYUdpiDoQpLJrBoAAezEE+QaOYCVA9rfi/8Cx0x15T" crossorigin="anonymous" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+  <!-- Hero backdrop: a slowly-drifting street-level pano (landing-ui.js);
+       degrades to the plain dark gradient offline / without JS. -->
+  <div id="heroPano" class="hero-pano" aria-hidden="true"></div>
+  <div class="hero-scrim" aria-hidden="true"></div>
+
   <main class="landing">
-    <h1><span class="geo">Geo</span>Party</h1>
-    <p>
-      A Jackbox-style geoguessing party game. Drop a pin on the world map,
-      watch the reveal, score by distance. No accounts, no installs, no
-      server. Two ways to play:
-    </p>
-    <p>
-      <strong style="color: var(--fg)">Couch mode:</strong> one person drives
-      street-level imagery from their phone while everyone else watches the TV
-      and shouts suggestions. Open the <em>host</em> page on a phone, the
-      <em>screen</em> page on the TV, enter the room code (or scan the QR).
-    </p>
-    <p>
-      <strong style="color: var(--fg)">Head-to-head:</strong> every team plays
-      on its own phone — same location, everyone explores and guesses at once,
-      rival pins in plain sight, then all the pins reveal together. The
-      winning team's phone becomes the host for the next game. Play around
-      one table with a TV showing live panels, or entirely over the
-      internet — no shared screen needed. The first phone creates the room,
-      the rest scan its QR or tap the invite link.
-    </p>
-    <div class="links">
-      <a class="host" href="host.html">
-        <strong>Host</strong>
-        <span>Couch mode — one phone drives, the couch shouts.</span>
-      </a>
-      <a class="host" href="player.html">
-        <strong>Head-to-Head</strong>
-        <span>Every team on its own phone — same room or over the internet.</span>
-      </a>
-      <a class="screen" href="screen.html">
-        <strong>Screen</strong>
-        <span>TV display for both modes — the view everyone watches.</span>
-      </a>
-    </div>
+    <header class="ld-hero">
+      <h1><span class="geo">Geo</span>Party</h1>
+      <p class="ld-tagline">Guess where in the world you are. Phones in, pins down.</p>
+
+      <!-- Above the fold: exactly one primary and one secondary CTA. -->
+      <div id="ld-cta" class="ld-panel">
+        <button id="btnStartParty" class="btn-primary ld-cta-main">Start a party</button>
+        <button id="btnHaveCode" class="ld-cta-sub">Have a code? Join</button>
+      </div>
+
+      <!-- "Start a party": pick the experience, never a page (M1). -->
+      <div id="ld-choose" class="ld-panel hidden">
+        <a id="choicePhones" class="ld-choice" href="player.html?create=1">
+          <span class="art" aria-hidden="true">📱📱</span>
+          <strong>Everyone on their own phone</strong>
+          <span>Same spot, same clock — rival pins in plain sight.</span>
+        </a>
+        <a id="choiceTv" class="ld-choice" href="host.html">
+          <span class="art" aria-hidden="true">📱📺</span>
+          <strong>One phone + the TV</strong>
+          <span>One phone drives, everyone shouts directions.</span>
+        </a>
+        <button id="btnChooseBack" class="ld-back">← Back</button>
+      </div>
+
+      <!-- One join path: the code routes itself to the right experience. -->
+      <div id="ld-join" class="ld-panel hidden">
+        <div class="join-row ld-join-row">
+          <input id="ldCode" maxlength="6" placeholder="CODE" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" class="code-input" />
+          <button id="btnLdJoin" class="btn-primary">Join</button>
+        </div>
+        <div id="ldJoinErr" class="join-err"></div>
+        <div id="ldJoinNote" class="ld-join-note"></div>
+        <button id="btnJoinBack" class="ld-back">← Back</button>
+      </div>
+    </header>
+
+    <!-- Three steps, pictures over paragraphs, ≤6 words each. -->
+    <section class="ld-steps" aria-label="How it works">
+      <div class="ld-step">
+        <div class="art" aria-hidden="true">📱</div>
+        <div>One phone starts a party</div>
+      </div>
+      <div class="ld-step-arrow" aria-hidden="true">→</div>
+      <div class="ld-step">
+        <div class="art" aria-hidden="true">🤳</div>
+        <div>Friends join — QR or link</div>
+      </div>
+      <div class="ld-step-arrow" aria-hidden="true">→</div>
+      <div class="ld-step">
+        <div class="art" aria-hidden="true">📺</div>
+        <div>Add a TV. Optional.</div>
+      </div>
+    </section>
+
+    <footer class="ld-footer">
+      <a href="screen.html">Add a TV</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/earino-assistant/geoparty/blob/main/PRIVACY.md">Privacy</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/earino-assistant/geoparty">GitHub</a>
+    </footer>
   </main>
+
+  <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"
+          integrity="sha384-1AlAxcgdzKreJ5f2K+t7SW3pEE0ek9u3lUwlZXX+v+FtEk1tWSg6DBVLb3ZKhpB+" crossorigin="anonymous"></script>
   <script type="module" src="js/consent.js"></script>
+  <script type="module" src="js/landing-ui.js"></script>
 </body>
 </html>

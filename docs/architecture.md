@@ -12,9 +12,13 @@ config.js          Public client credentials (Firebase, Mapillary)
 js/game.js         Pure couch-mode logic: scoring, phases, turn schedule   ← tested
 js/h2h.js          Pure head-to-head logic: slots, submissions, winner     ← tested
 js/supersure.js    Pure SUPER SURE bet logic: resolution + settlement      ← tested
+js/frontdoor.js    Pure front-door logic: join routing, chooser targets    ← tested
+js/hints.js        Pure education logic: one-shot flags, lock-now estimate ← tested
 js/pool.js         Location pool: seeded shuffle + cursor sampler          ← tested
 js/qr.js           Self-contained QR encoder (join/screen URLs)            ← tested
 js/firebase.js     Firebase init + thin typed helpers (the only SDK import)
+js/landing-ui.js   The one front door: hero pano, chooser, code routing
+js/hints-ui.js     One-shot hint overlay renderer (shared by both phones)
 js/host-ui.js      Couch-mode operator phone (DOM + viewer + writes)
 js/player-ui.js    Head-to-head team phone (DOM + viewer + writes)
 js/screen-ui.js    TV renderer, couch mode + shared entry/follow logic

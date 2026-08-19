@@ -15,7 +15,8 @@ implementation (unit-tested in `tests/analytics.test.js`).
   settings control, and the PostHog script loader (injected only after
   accept). Exports `track(event, props)`.
 - Instrumented call sites live in `js/host-ui.js` (couch), `js/player-ui.js`
-  (head-to-head), and `js/screen-ui.js` (TV).
+  (head-to-head), `js/screen-ui.js` (TV), and `js/landing-ui.js` (the front
+  door).
 
 PostHog init (owner-provided, verbatim): key
 `phc_Au8ogwiWbfcWqhbP6iE8ayyT5JSQtambPHFSffykdvkE`, `api_host:
@@ -33,6 +34,8 @@ the user-entered team name.
 
 | Event | Properties | Fired from | When |
 |---|---|---|---|
+| `party_choice` | `choice` | landing page | "Start a party" chooser picked an experience: `phones` (everyone on their own phone → h2h) or `tv` (one phone + the TV → couch). Fires before any room exists — the gap to `game_created` is chooser→setup drop-off |
+| `front_door_join` | `mode` | landing page | A room code entered at the landing (or a `?room=` link into it) was routed to its experience — `h2h` to the player page, `couch` to the screen page. Offline fallback routes count as `h2h` |
 | `game_created` | `mode, num_teams, num_rounds, round_seconds` | host phone | Room created (couch setup, h2h create, h2h next-game) |
 | `team_joined` | `mode, team_count` | joining phone | h2h only: a phone claims a team slot (creator counts as team 1). Couch teams are configured on one phone — see `game_created.num_teams` |
 | `screen_joined` | `room, mode` | TV | The screen page attaches to a room |
@@ -58,6 +61,7 @@ Plus PostHog defaults: `$pageview` and (button/link-only) autocapture.
 | **Average Guess Distance** (accuracy) | Mean/median of `guess_submitted.distance_km`; break down by `mode` or `round_number`-joined data to see learning curves | `guess_submitted` |
 | **Average Time-to-Guess** (speed) | Mean/median of `guess_submitted.time_seconds` (round start → pin locked); `time_bonus` shows how often speed actually pays | `guess_submitted` |
 | **Mode Adoption** | `game_created` broken down by `mode` (couch vs head-to-head); `screen_joined` by `mode` shows how often a TV is attached | `game_created`, `screen_joined` |
+| **Front-door conversion** (M1/M4) | Funnel landing `$pageview → party_choice → game_created` — did the one-CTA landing raise entry into the game? `party_choice.choice` mix is the leading indicator of Mode Adoption; `front_door_join` counts joiners using the unified code entry instead of a deep link | `party_choice`, `front_door_join`, `game_created` |
 | **Rounds per game** | Average of `game_completed.rounds` (finished games) or count of `round_started` per `room` | `game_completed`, `round_started` |
 | **Teams per game** | Average of `game_completed.team_count`; `team_joined.team_count` shows the h2h lobby fill curve | `game_completed`, `team_joined` |
 | **Average session length** | PostHog's built-in session duration (Web analytics / Sessions) — no custom event needed | `$pageview` / autocapture |

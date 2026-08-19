@@ -90,34 +90,132 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 .toast.show { opacity: 1; }
 
-/* ---------- Landing page ---------- */
+/* ---------- Landing page (M4): hero over a drifting pano ---------- */
+
+.hero-pano {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.4s ease-out;
+}
+.hero-pano.live { opacity: 1; }
+.hero-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(17, 17, 17, 0.5),
+    rgba(17, 17, 17, 0.78) 60%,
+    var(--bg)
+  );
+}
 
 .landing {
+  position: relative;
+  z-index: 2;
   max-width: 640px;
   margin: 0 auto;
-  padding: 8vh 24px 24px;
+  padding: 0 24px 24px;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
 }
 .landing h1 {
   font-size: clamp(3rem, 10vw, 5rem);
-  margin: 0 0 0.2em;
+  margin: 0 0 0.15em;
   letter-spacing: -0.02em;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.7);
 }
 .landing h1 .geo { color: var(--accent); }
-.landing p { color: var(--muted); font-size: 1.1rem; line-height: 1.55; }
-.landing .links { display: flex; gap: 16px; margin-top: 32px; flex-wrap: wrap; }
-.landing .links a {
-  flex: 1 1 200px;
+
+.ld-hero {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 76svh;
+}
+.ld-tagline {
+  color: var(--fg);
+  font-size: clamp(1.15rem, 4vw, 1.4rem);
+  font-weight: 600;
+  line-height: 1.45;
+  margin: 0 0 28px;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8);
+}
+
+.ld-panel { display: flex; flex-direction: column; gap: 12px; max-width: 420px; }
+.ld-cta-main { padding: 18px 0; font-size: 1.3rem; border-radius: 14px; }
+.ld-cta-sub {
+  background: rgba(28, 28, 34, 0.75);
+  border: 1px solid var(--panel-2);
+  padding: 14px 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.ld-back {
+  background: none;
+  color: var(--muted);
+  padding: 8px 0;
+  align-self: flex-start;
+}
+
+/* The chooser: two experiences, never pages. First card is the default. */
+.ld-choice {
   display: block;
   text-decoration: none;
-  background: var(--panel);
+  background: rgba(28, 28, 34, 0.88);
   color: var(--fg);
+  border: 1px solid var(--panel-2);
   border-radius: 16px;
-  padding: 20px;
+  padding: 16px 18px;
 }
-.landing .links a strong { display: block; font-size: 1.4rem; margin-bottom: 4px; }
-.landing .links a span { color: var(--muted); font-size: 0.95rem; }
-.landing .links a.host strong { color: var(--accent); }
-.landing .links a.screen strong { color: var(--team-2); }
+.ld-choice:first-child { border-color: var(--accent); }
+.ld-choice .art { display: block; font-size: 1.6rem; margin-bottom: 4px; }
+.ld-choice strong { display: block; font-size: 1.2rem; margin-bottom: 2px; color: var(--accent); }
+.ld-choice span:last-child { color: var(--muted); font-size: 0.95rem; }
+
+.ld-join-row .code-input { background: rgba(28, 28, 34, 0.88); }
+.ld-join-note { color: var(--muted); font-size: 0.95rem; min-height: 1.2em; }
+
+/* Three steps, pictures over paragraphs. */
+.ld-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 28px 0 20px;
+}
+.ld-step {
+  flex: 0 1 150px;
+  text-align: center;
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+.ld-step .art { font-size: 2.2rem; margin-bottom: 6px; }
+.ld-step-arrow { color: var(--muted); font-size: 1.4rem; }
+@media (max-width: 480px) {
+  .ld-step-arrow { display: none; }
+  .ld-steps { gap: 10px; }
+  .ld-step { flex: 1 1 30%; }
+}
+
+.ld-footer {
+  text-align: center;
+  color: var(--muted);
+  padding: 8px 0 16px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+.ld-footer a { color: var(--muted); }
+.ld-footer a:hover { color: var(--fg); }
 
 /* ---------- Host controller ---------- */
 
@@ -384,6 +482,78 @@ button:disabled { opacity: 0.4; cursor: default; }
   color: #111;
   font-weight: 800;
   border: none;
+}
+
+/* ---------- First-time hints (M5): one-shot overlay cards ---------- */
+
+/* Bottom sheet above the action bar; never covers the pano/map it teaches.
+   Sits below the consent banner (3000) and above everything in-game. */
+.hint-card {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(96px + env(safe-area-inset-bottom));
+  z-index: 2500;
+  max-width: 440px;
+  margin: 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.hint-card p {
+  margin: 0 0 8px;
+  color: var(--fg);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.hint-title {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.hint-dismiss { width: 100%; padding: 10px 0; }
+/* Interstitial variant (showdown): centered card over a scrim. */
+.hint-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 2400;
+  background: rgba(5, 5, 8, 0.7);
+}
+.hint-card.center {
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: center;
+}
+
+/* ---------- "If you locked in now" pill (M3) ---------- */
+
+/* Floats above the SUPER SURE toggle on the guess map; shows the points a
+   lock-in this instant would bank (doubled stakes while a bet is armed). */
+.lock-now-hint {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(134px + env(safe-area-inset-bottom));
+  z-index: 600;
+  background: rgba(17, 17, 17, 0.85);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--fg);
+  pointer-events: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.lock-now-hint:empty { display: none; }
+.lock-now-hint.armed {
+  color: #111;
+  background: var(--accent);
+  box-shadow: 0 0 18px rgba(255, 207, 63, 0.6);
 }
 .totals-list { list-style: none; padding: 0; margin: 0; }
 .totals-list li {

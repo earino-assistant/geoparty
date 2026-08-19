@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>GeoParty — Head-to-Head</title>
+  <title>GeoParty — Everyone on their own phone</title>
   <link rel="stylesheet" href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css"
         integrity="sha384-IamMZxz60pSNzUk3cW2nl3uYUdpiDoQpLJrBoAAezEE+QaOYCVA9rfi/8Cx0x15T" crossorigin="anonymous" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -17,7 +17,7 @@
   <!-- 1. Home: join a room, or start a new head-to-head game -->
   <section id="p-home" class="phase-screen">
     <div class="host-wrap">
-      <h1><span style="color: var(--accent)">Geo</span>Party <span class="h2h-tag">head-to-head</span></h1>
+      <h1><span style="color: var(--accent)">Geo</span>Party <span class="h2h-tag">everyone on their own phone</span></h1>
 
       <div id="pResumeBanner" class="resume-banner hidden">
         <div>
@@ -119,6 +119,8 @@
     <div id="playerGuessMap" class="map-full"></div>
     <div class="guess-hint" id="pGuessHint">Tap the map to drop your pin</div>
     <div class="hud"><div></div><div class="hud-item" id="pGuessTimer"></div></div>
+    <!-- M3: live "if you locked in now" points while aiming -->
+    <div id="lockNowHint" class="lock-now-hint"></div>
     <!-- SUPER SURE: once-per-game double-or-nothing, armed locally only -->
     <button id="btnSuperSure" class="super-sure-toggle">🔥 SUPER SURE</button>
     <div class="action-bar">

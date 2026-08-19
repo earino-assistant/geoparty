@@ -71,6 +71,11 @@ export function setConsent(storage, value) {
  * ================================================================ */
 
 export const EVENT_SCHEMA = Object.freeze({
+  // M1 one front door: which experience the "Start a party" chooser picked
+  // ("phones" | "tv"), and a code routed through the landing's single join
+  // path ("h2h" | "couch") — both fired from the landing page.
+  party_choice: { choice: "string" },
+  front_door_join: { mode: "string" },
   game_created: {
     mode: "string", num_teams: "int", num_rounds: "int", round_seconds: "int",
   },

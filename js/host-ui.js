@@ -37,6 +37,13 @@ import {
   adjustedPoints,
   superSureLabel,
 } from "./supersure.js";
+import {
+  HINT_CARDS,
+  guessMapHintLines,
+  lockNowEstimate,
+  lockNowLabel,
+} from "./hints.js";
+import { oneShotHint, dismissHintCard } from "./hints-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -59,6 +66,7 @@ const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function showScreen(id) {
+  dismissHintCard(); // a hint never outlives the moment it teaches
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
 }
 
@@ -293,16 +301,16 @@ function enterLobby() {
 function updateLobbyReadiness() {
   const note = $("waitingNote");
   if (heartbeatSeen) {
-    note.textContent = "Screen connected — ready when you are.";
+    note.textContent = "TV connected — ready when you are.";
     note.classList.add("ok");
     $("btnStartRound").disabled = false;
   } else if (!connected) {
     // Degraded single-screen mode (spec §12): the party survives offline.
-    note.textContent = "Offline — you can play in single-screen mode.";
+    note.textContent = "Offline — you can play on this phone alone.";
     note.classList.remove("ok");
     $("btnStartRound").disabled = false;
   } else {
-    note.textContent = "Waiting for a screen to join…";
+    note.textContent = "Add the TV: open the link above on it (the QR points there too)…";
     note.classList.remove("ok");
     $("btnStartRound").disabled = true;
   }
@@ -315,6 +323,7 @@ async function abandonGame() {
     rounds_played: room && room.round ? room.round.number : 0,
   });
   stopTimer();
+  stopLockNowTicker();
   if (unsubHeartbeat) { unsubHeartbeat(); unsubHeartbeat = null; }
   try { await deleteRoom(roomCode); } catch (e) { console.warn(e); }
   localStorage.removeItem(LS_ACTIVE);
@@ -449,6 +458,13 @@ async function startRound() {
 
   $("hudRound").textContent = `Round ${number}/${room.settings.roundCount}`;
   $("hudTeam").textContent = roundTeamLabel();
+  // First-time education (M5): the showdown gets its one-rule interstitial;
+  // an ordinary first pano teaches the loop's first move. One shot each.
+  if (showdown) {
+    oneShotHint("showdown", HINT_CARDS.showdown);
+  } else {
+    oneShotHint("pano", HINT_CARDS.pano);
+  }
   startTimer();
 }
 
@@ -562,10 +578,47 @@ function ensureGuessMap() {
       // "move" fires both while dragging and on setLatLng, so this one
       // listener keeps the live preview in sync for taps and drags alike.
       guessMarker.on("move", scheduleLiveGuessWrite);
+      guessMarker.on("move", updateLockNowHint);
     }
     scheduleLiveGuessWrite();
     $("btnConfirmGuess").disabled = false;
+    updateLockNowHint();
   });
+}
+
+// M3: the live "if you locked in now" pill. The host phone already holds
+// the truth (currentTruth), so pricing the aimed pin is free and local.
+// The round timer stops when the map opens, so the pill runs its own
+// half-second ticker while the guessing phase lasts (the speed bonus keeps
+// decaying on the confirm clock).
+let lockNowTimer = null;
+function updateLockNowHint() {
+  const el = $("lockNowHint");
+  if (!room || room.phase !== "guessing" || !room.round ||
+      !guessMarker || !currentTruth) {
+    el.textContent = "";
+    return;
+  }
+  const g = guessMarker.getLatLng();
+  const km = haversineKm(currentTruth.lat, currentTruth.lng,
+    g.lat, L.Util.wrapNum(g.lng, [-180, 180], true));
+  const elapsed = Math.max(0, Date.now() -
+    (room.round.turnStartedAt || room.round.startedAt || Date.now()));
+  const est = lockNowEstimate(km, elapsed, room.settings.roundSeconds);
+  el.textContent = lockNowLabel(est, superSureArmed);
+  el.classList.toggle("armed", superSureArmed);
+}
+
+function startLockNowTicker() {
+  stopLockNowTicker();
+  lockNowTimer = setInterval(updateLockNowHint, 500);
+  updateLockNowHint();
+}
+
+function stopLockNowTicker() {
+  if (lockNowTimer) { clearInterval(lockNowTimer); lockNowTimer = null; }
+  const el = $("lockNowHint");
+  if (el) el.textContent = "";
 }
 
 // The static "drop your pin" hint doubles as the whose-turn banner: solo
@@ -625,6 +678,14 @@ function openGuessMap() {
   updateGuessHint();
   superSureArmed = false;
   renderSuperSureToggle();
+  // First guess map ever on this device: the scoring one-liner and the
+  // SUPER SURE stakes, at the moment they matter (M5 + M3).
+  oneShotHint("guessmap", {
+    title: "Drop your pin",
+    lines: guessMapHintLines(
+      "couch", superSureAvailable(room.teams, room.activeTeam)),
+  });
+  startLockNowTicker();
   // Leaflet needs a size pass after the container becomes visible.
   setTimeout(() => guessMap.invalidateSize(), 50);
 }
@@ -638,6 +699,7 @@ function toggleSuperSure() {
   if (!room || !superSureAvailable(room.teams, room.activeTeam)) return;
   superSureArmed = !superSureArmed;
   renderSuperSureToggle();
+  updateLockNowHint(); // the pill flips to the bet's doubled stakes
   toast(superSureArmed
     ? "SUPER SURE armed: closest pin wins ×2 — anyone closer and you get 0"
     : "SUPER SURE disarmed — bet saved for later");
@@ -838,7 +900,11 @@ function confirmShowdownGuess(result) {
 
 let revealTracked = null; // "<room>:<round>" — resume re-enters the reveal
 function enterReveal() {
+  stopLockNowTicker();
   showScreen("h-reveal");
+  // First reveal ever: label the breakdown once (M5); the injected speed
+  // line below carries the numbers themselves every round.
+  oneShotHint("reveal", HINT_CARDS.reveal);
   const { number, showdown } = room.round;
   if (revealTracked !== `${roomCode}:${number}`) {
     revealTracked = `${roomCode}:${number}`;
@@ -1084,6 +1150,7 @@ async function resumeGame(code, state) {
       renderPlacedPins(); // mid-showdown resume: restore locked-in pins
       updateGuessHint();
       renderSuperSureToggle(); // armed state is local; a refresh disarms
+      startLockNowTicker();
       setTimeout(() => guessMap.invalidateSize(), 50);
       break;
     case "reveal":

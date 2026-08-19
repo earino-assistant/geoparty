@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>GeoParty — Host</title>
+  <title>GeoParty — One phone + the TV</title>
   <link rel="stylesheet" href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css"
         integrity="sha384-IamMZxz60pSNzUk3cW2nl3uYUdpiDoQpLJrBoAAezEE+QaOYCVA9rfi/8Cx0x15T" crossorigin="anonymous" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -17,7 +17,7 @@
   <!-- 1. Setup -->
   <section id="h-setup" class="phase-screen">
     <div class="host-wrap">
-      <h1><span style="color: var(--accent)">Geo</span>Party host</h1>
+      <h1><span style="color: var(--accent)">Geo</span>Party <span class="h2h-tag">one phone + the TV</span></h1>
 
       <div id="resumeBanner" class="resume-banner hidden">
         <div>
@@ -107,6 +107,8 @@
   <section id="h-guess" class="phase-screen hidden">
     <div id="guessMap" class="map-full"></div>
     <div class="guess-hint">Tap the map to drop your pin</div>
+    <!-- M3: live "if you locked in now" points while aiming -->
+    <div id="lockNowHint" class="lock-now-hint"></div>
     <!-- SUPER SURE: the active team's once-per-game double-or-nothing -->
     <button id="btnSuperSure" class="super-sure-toggle">🔥 SUPER SURE</button>
     <div class="action-bar">
