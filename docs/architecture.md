@@ -28,7 +28,7 @@ it from the UI file, so it stays testable.
 
 ## RTDB data model
 
-Everything lives under `rooms/{CODE}` (4 letters, no I/O). Couch mode:
+Everything lives under `rooms/{CODE}` (6 letters, no I/O). Couch mode:
 
 ```
 rooms/KWPF

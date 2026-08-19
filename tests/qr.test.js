@@ -25,12 +25,12 @@ test("qrEncode: null when the text exceeds version 5", () => {
 });
 
 test("qrEncode: deterministic", () => {
-  const url = "https://example.github.io/geoparty/screen.html?room=KWPF";
+  const url = "https://example.github.io/geoparty/screen.html?room=KWPFRT";
   assert.deepEqual(qrEncode(url), qrEncode(url));
 });
 
 test("qrEncode: finder patterns stamped in all three corners", () => {
-  const m = qrEncode("https://example.com/?room=KWPF");
+  const m = qrEncode("https://example.com/?room=KWPFRT");
   const size = m.length;
   const checkFinder = (top, left) => {
     for (let r = 0; r < 7; r++) {
@@ -74,7 +74,7 @@ test("drawQr: paints on a canvas-like surface; hides when text is too long", () 
   });
 
   const canvas = makeStubCanvas();
-  drawQr(canvas, "https://example.com/?room=KWPF");
+  drawQr(canvas, "https://example.com/?room=KWPFRT");
   assert.ok(canvas.width > 0 && canvas.width === canvas.height);
   assert.ok(fills > 1, "expected background + modules to be painted");
   assert.notEqual(canvas.style.display, "none");

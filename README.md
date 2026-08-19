@@ -47,7 +47,7 @@ with `d` the haversine great-circle distance in km. Perfect pin is 5000;
    (60/120/180s or no limit), movement mode ("no moving" locks navigation but
    allows look-around), and 1–4 teams. Tap **New Game**.
 2. Open `screen.html` on the TV (or cast a laptop tab showing it). Enter the
-   4-letter room code — or scan the QR from the host's phone, which encodes
+   6-letter room code — or scan the QR from the host's phone, which encodes
    `screen.html?room=CODE` so no typing is needed.
 3. When the host shows "Screen connected", start the round. Pan (and move, if
    allowed) around the pano; the TV mirrors you with a slight lag.
@@ -113,7 +113,7 @@ publish:
       "$roomCode": {
         ".read": true,
         ".write": "!data.exists() || data.child('createdAt').val() > (now - 86400000) || newData.val() == null",
-        ".validate": "$roomCode.matches(/^[A-HJ-NP-Z]{4}$/)",
+        ".validate": "$roomCode.matches(/^[A-HJ-NP-Z]{6}$/)",
         "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" }
       }
     }

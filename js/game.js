@@ -16,19 +16,19 @@ export function canTransition(from, to) {
   return (TRANSITIONS[from] || []).includes(to);
 }
 
-// Room codes: 4 uppercase letters, no I or O (spec §4).
+// Room codes: 6 uppercase letters, no I or O (spec §4).
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 export function makeRoomCode() {
   let code = "";
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
   }
   return code;
 }
 
 export function isValidRoomCode(code) {
-  return /^[A-HJ-NP-Z]{4}$/.test(code);
+  return /^[A-HJ-NP-Z]{6}$/.test(code);
 }
 
 // Great-circle distance in km, haversine (spec §8).

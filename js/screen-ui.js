@@ -816,7 +816,7 @@ input.addEventListener("input", () => {
   const code = input.value.toUpperCase().replace(/[^A-HJ-NP-Z]/g, "");
   input.value = code;
   $("entryErr").textContent = "";
-  if (code.length === 4 && isValidRoomCode(code)) {
+  if (code.length === 6 && isValidRoomCode(code)) {
     followedCodes = new Set(); // manual entry starts a fresh follow chain
     joinRoom(code);
   }

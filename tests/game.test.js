@@ -132,16 +132,16 @@ test("bonusWindowMs: configured round length, with a no-limit fallback", () => {
 
 /* ---------------- room codes ---------------- */
 
-test("room codes: 4 letters, never I or O, always self-valid", () => {
+test("room codes: 6 letters, never I or O, always self-valid", () => {
   for (let i = 0; i < 500; i++) {
     const code = makeRoomCode();
-    assert.match(code, /^[A-HJ-NP-Z]{4}$/);
+    assert.match(code, /^[A-HJ-NP-Z]{6}$/);
     assert.ok(isValidRoomCode(code));
   }
 });
 
 test("isValidRoomCode rejects bad shapes", () => {
-  for (const bad of ["", "ABC", "ABCDE", "abcd", "AB1D", "ABIO", "A CD", null, undefined]) {
+  for (const bad of ["", "ABCDE", "ABCD", "ABCDEFG", "abcdef", "AB1DEF", "ABIOEF", "A CDEF", null, undefined]) {
     assert.equal(isValidRoomCode(bad), false, `accepted ${bad}`);
   }
 });

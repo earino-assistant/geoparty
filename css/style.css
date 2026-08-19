@@ -215,7 +215,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 /* Host lobby: giant room code + QR. */
 .room-code-huge {
-  font-size: clamp(4rem, 22vw, 8rem);
+  font-size: clamp(3rem, 15vw, 8rem);
   font-weight: 800;
   letter-spacing: 0.12em;
   text-align: center;
@@ -353,7 +353,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .room-entry input {
   margin-top: 4vh;
   font-size: 8vh;
-  width: 5.2em;
+  width: 7.5em;
   text-align: center;
   letter-spacing: 0.3em;
   text-transform: uppercase;
