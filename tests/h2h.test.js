@@ -23,6 +23,7 @@ import {
   screenAttached,
   liveRivalPins,
   revealPins,
+  revealAceKm,
   shouldReanchorViewer,
   panoMoved,
 } from "../js/h2h.js";
@@ -215,6 +216,66 @@ test("liveRivalPins: stable team-id order for consistent map layering", () => {
     },
   };
   assert.deepEqual(liveRivalPins(round, "t1").map((p) => p.id), ["t2", "t3"]);
+});
+
+// R4: the Blind Duel gate. In a 🔒 blind-twist round every device suppresses
+// rival live pins — the phone's own guess map must never leak a rival's aim,
+// exactly as the TV panels don't. This test fails if the guard is removed:
+// without it, the two real rival pins below would come through.
+test("liveRivalPins: a Blind Duel round returns NO rival pins (fails if the guard is removed)", () => {
+  const round = {
+    twist: { id: "blind" },
+    live: {
+      t1: { stage: "map", pin: { lat: 10, lng: 20 } },   // me
+      t2: { stage: "map", pin: { lat: -5, lng: 100 } },  // rival, real pin
+      t3: { stage: "map", pin: { lat: 44, lng: -70 } },  // rival, real pin
+    },
+  };
+  // The identical round without the twist DOES surface the rivals — proving the
+  // pins are otherwise valid and it is the blind guard doing the suppression.
+  const unblind = { ...round, twist: null };
+  assert.deepEqual(liveRivalPins(unblind, "t1").map((p) => p.id), ["t2", "t3"]);
+  // With the Blind Duel twist, nothing leaks.
+  assert.deepEqual(liveRivalPins(round, "t1"), []);
+});
+
+/* ---------------- revealAceKm (R3 — the TV ACE burst gate) ---------------- */
+
+// R3 (C2): the ACE burst on the h2h reveal + couch Final Showdown cascades
+// rides the CLOSEST pin landing. revealAceKm returns that minimum distance so
+// the renderer prices the sub-1km medal; nothing here touches points.
+test("revealAceKm: the closest (minimum) pin distance drives the ACE burst", () => {
+  const round = {
+    results: {
+      t1: { guess: { lat: 1, lng: 1 }, distanceKm: 0.4 },  // an ACE (< 1 km)
+      t2: { guess: { lat: 2, lng: 2 }, distanceKm: 812 },
+      t3: { guess: { lat: 3, lng: 3 }, distanceKm: 30 },
+    },
+  };
+  assert.equal(revealAceKm(round), 0.4);
+});
+
+test("revealAceKm: no sub-1km pin → the minimum, which the renderer reads as no ACE", () => {
+  const round = {
+    results: {
+      t1: { guess: { lat: 1, lng: 1 }, distanceKm: 12 },
+      t2: { guess: { lat: 2, lng: 2 }, distanceKm: 3 },
+    },
+  };
+  assert.equal(revealAceKm(round), 3);   // medalForDistance(3).ace === false
+});
+
+test("revealAceKm: forfeits are skipped; an all-forfeit round returns null", () => {
+  const round = {
+    results: {
+      t1: { guess: null, distanceKm: null },   // forfeit
+      t2: { guess: { lat: 2, lng: 2 }, distanceKm: 0.7 },
+    },
+  };
+  assert.equal(revealAceKm(round), 0.7);
+  assert.equal(revealAceKm({ results: { t1: { distanceKm: null } } }), null);
+  assert.equal(revealAceKm({}), null);
+  assert.equal(revealAceKm(null), null);
 });
 
 test("revealPins: real guesses only, farthest first (the reveal draw order)", () => {

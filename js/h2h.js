@@ -130,6 +130,23 @@ export function liveRivalPins(round, myTeam) {
     .map((e) => ({ id: e.id, lat: e.pin.lat, lng: e.pin.lng }));
 }
 
+// The closest (minimum-distance) real pin of a multi-team round — the pin an
+// ACE burst rides on the TV reveal cascade (spec §3.4: "the TV shows the ACE
+// burst when the closest pin lands"). If the closest pin is sub-1km the round
+// has an ACE, because nothing is closer; if it isn't, no pin aced. Returns the
+// km (or null when nobody pinned) so the renderer prices the medal + label.
+// Ceremony only — this never touches points. Used by the h2h reveal and the
+// couch Final Showdown cascade alike (R3/C2).
+export function revealAceKm(round) {
+  const results = (round && round.results) || {};
+  let min = null;
+  for (const id of Object.keys(results)) {
+    const km = results[id] && results[id].distanceKm;
+    if (typeof km === "number" && (min === null || km < min)) min = km;
+  }
+  return min;
+}
+
 // Real guesses for a reveal map, farthest first (the TV's draw order), so
 // the phone reveal builds toward the winner too. Forfeits carry no pin.
 // SUPER SURE status rides along: this is a REVEAL-ONLY surface (the bet is

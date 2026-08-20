@@ -48,6 +48,7 @@ import {
 import {
   parseGhostFragment, decodeGhost, ghostExpired, poolMatches, poolCheck,
   buildGhostPayload, duelVerdict, ghostScores, runHasPins,
+  dailyEntryRoute, duelFoldPlan,
 } from "./ghost.js";
 import { shareResult } from "./share-ui.js";
 import {
@@ -204,7 +205,42 @@ let lastTickSecond = null;
  * Start
  * ================================================================ */
 
+// R1: instantVerdict is async and idempotent, but must run at most once even
+// when the boot AND a "Take the challenge" tap that raced its load both route
+// to it — a second run would re-render the verdict and re-enter the fold path.
+let instantVerdictStarted = false;
+
+// The saved completed run for THIS run's current mode/day, re-read live (mode
+// can flip to hard mid-session). The replay lock reads from this.
+function savedResultForRun() {
+  return loadDailyResult(localStorage, runKey,
+    mode === "hard" ? DAILY_RESULT_HARD_KEY : DAILY_RESULT_KEY);
+}
+
+// Route a completed board to its no-replay surface: the duel verdict (a valid
+// ghost) or the plain done screen. Never starts a fresh round.
+function resolveSavedRun(saved) {
+  if (isDuel && ghost && ghost.ok) {
+    if (instantVerdictStarted) return;
+    instantVerdictStarted = true;
+    instantVerdict(saved);
+  } else {
+    renderDone(saved, true, { streakCount: records.streak.count });
+  }
+}
+
 async function startChallenge() {
+  // R1: re-check the replay lock BEFORE anything async. A completed board for
+  // this day+mode must never replay — not even when this tap raced the boot's
+  // instant-verdict load, during which the intro/"Take the challenge" button
+  // was briefly live. Same rule the boot used, so the answer is identical.
+  const savedNow = savedResultForRun();
+  if (dailyEntryRoute({
+    hasSaved: !!savedNow, isExhibition, isDuel, ghostOk: !!(ghost && ghost.ok),
+  }) !== "play") {
+    resolveSavedRun(savedNow);
+    return;
+  }
   $("btnDailyStart").disabled = true;
   $("dIntroErr").textContent = "";
   try {
@@ -588,6 +624,14 @@ async function finishRun() {
   destroyViewer();
   playSound("fanfare");
 
+  // R1 idempotency: a duel whose day+mode is already resolved (an earlier
+  // instant-verdict, or a replay that raced the boot guard) folds NOTHING
+  // again — no duplicate W/L, ACE/PB fold, saved-run overwrite, verdict/
+  // completed event, or dishonest return link. The verdict still renders.
+  const plan = duelFoldPlan({
+    isDuel, isExhibition, alreadyResolved: duelAlreadyResolved(runDayNum, mode),
+  });
+
   // The duel verdict (recipient's device), computed once at the end.
   let verdict = null;
   if (isDuel) {
@@ -595,12 +639,14 @@ async function finishRun() {
     const ghostPoints = run.rounds.map((_, i) =>
       (ghostRoundResults[i] || { points: 0 }).points);
     verdict = duelVerdict(yourPoints, ghostPoints);
-    track("ghost_duel_completed", {
-      day_number: runDayNum,
-      outcome: verdict.outcome,
-      margin: verdict.margin,
-      hard: mode === "hard",
-    });
+    if (plan.emitDuel) {
+      track("ghost_duel_completed", {
+        day_number: runDayNum,
+        outcome: verdict.outcome,
+        margin: verdict.margin,
+        hard: mode === "hard",
+      });
+    }
   }
 
   // Records + replay lock — exhibitions save NOTHING (§3.5.2 case 6).
@@ -609,14 +655,14 @@ async function finishRun() {
   let pb = false;
   const aces = run.rounds.filter(
     (r) => typeof r.distanceKm === "number" && r.distanceKm < 1).length;
-  if (!isExhibition) {
+  if (plan.foldRecords) {
     saveDailyResult(localStorage, run);
     const applied = applyDailyResult(records, run, { day: runDayNum, key: runKey });
     Object.assign(records, applied.records);
     streakCount = applied.streak;
     graceUsed = applied.graceUsed;
     pb = applied.pb;
-    if (isDuel) {
+    if (plan.foldDuel) {
       const dueled = applyDuelResult(records, verdict.outcome === "won");
       Object.assign(records, dueled.records);
       // Mark this day+mode resolved so re-tapping the link later (which routes
@@ -626,17 +672,19 @@ async function finishRun() {
     saveRecords(localStorage, records);
   }
 
-  track("daily_challenge_completed", {
-    day_number: runDayNum,
-    score: run.score,
-    rounds_played: guessedRounds(run),
-    best_distance_km: bestDailyDistance(run),
-    hard: mode === "hard",
-    vs_ghost: isDuel,
-    streak: mode === "hard" ? records.streak.count : streakCount,
-    pb,
-    aces,
-  });
+  if (plan.emitCompleted) {
+    track("daily_challenge_completed", {
+      day_number: runDayNum,
+      score: run.score,
+      rounds_played: guessedRounds(run),
+      best_distance_km: bestDailyDistance(run),
+      hard: mode === "hard",
+      vs_ghost: isDuel,
+      streak: mode === "hard" ? records.streak.count : streakCount,
+      pb,
+      aces,
+    });
+  }
 
   renderDone(run, false, { verdict, streakCount, graceUsed, pb, aces });
 }
@@ -939,8 +987,7 @@ if (ghostLinkReason === "malformed" || ghostLinkReason === "version" ||
 renderIntro();
 
 // Replay lock: a saved run for THIS run's mode/day already exists.
-const savedForRun = loadDailyResult(localStorage, runKey,
-  mode === "hard" ? DAILY_RESULT_HARD_KEY : DAILY_RESULT_KEY);
+const savedForRun = savedResultForRun();
 
 if (ghostLinkReason === "malformed") {
   toast("That challenge link got damaged in transit — today's Daily is right here.");
@@ -950,16 +997,23 @@ if (ghostLinkReason === "malformed") {
   toast("This challenge expired — the Daily is a fresh five every day.");
 }
 
-if (savedForRun && !isExhibition && isDuel && ghost && ghost.ok) {
+const bootRoute = dailyEntryRoute({
+  hasSaved: !!savedForRun, isExhibition, isDuel, ghostOk: !!(ghost && ghost.ok),
+});
+if (bootRoute === "instant-verdict") {
   // C3 (spec §3.5.2 case 5): the recipient already completed this board today,
   // so their saved run IS their side of the duel — skip gameplay straight to
-  // the verdict, no replay. Async (needs the day's truths to recompute the
-  // ghost's scores). The "Send your verdict" done screen offers the return
-  // challenge (renderDone → wireShare).
-  instantVerdict(savedForRun);
-} else if (savedForRun && !isExhibition) {
+  // the verdict, no replay. The recompute is async (needs the day's truths);
+  // R1: until it resolves, neutralize the intro so a "Take the challenge" tap
+  // can't start a replay of the board we already completed — startChallenge
+  // re-checks the same lock, and this button is disabled meanwhile too.
+  showScreen("d-intro");
+  $("btnDailyStart").disabled = true;
+  $("btnDailyStart").textContent = "Loading your duel…";
+  resolveSavedRun(savedForRun);
+} else if (bootRoute === "done") {
   // Already played this board today, no usable duel — the plain done screen.
-  renderDone(savedForRun, true, { streakCount: records.streak.count });
+  resolveSavedRun(savedForRun);
 } else {
   showScreen("d-intro");
 }

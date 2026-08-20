@@ -6,9 +6,9 @@
 
 import { createViewer } from "./viewer-ui.js";
 import { scrubErrorMessage } from "./imagery.js";
-import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
-import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
-import { twistHudTag, twistHidesRivalPins } from "./twist.js";
+import { formatCountdown, formatDistance, resultRowText, teamIds, standings } from "./game.js";
+import { submittedCount, submitRank, revealOrder, roundClosest, revealAceKm } from "./h2h.js";
+import { twistHudTag, twistHidesRivalPins, twistCardForRound } from "./twist.js";
 import { tallyLineText } from "./night.js";
 import { revealDecoys } from "./decoy.js";
 import {
@@ -19,7 +19,8 @@ import {
 import { superSureLabel } from "./supersure.js";
 import { phoneJoinLine } from "./tvlink.js";
 import { countdownTick, motionDuration, animFraction } from "./fx.js";
-import { playSound, prefersReducedMotion } from "./fx-ui.js";
+import { playSound, prefersReducedMotion, stampFlash } from "./fx-ui.js";
+import { medalForDistance } from "./records.js";
 
 const $ = (id) => document.getElementById(id);
 const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
@@ -48,6 +49,34 @@ let revealMap = null;
 let revealShownFor = null;   // `${createdAt}:${round}` — animate once
 let countInterval = null;
 let countTicked = null;      // S4: last 3-2-1 second the TV ticked for
+let twistCardShownFor = null;   // C1/R2: round number the h2h TV twist card fired for
+let twistCardEl = null;
+let twistCardTimer = null;
+
+// R2 (C1): the full-screen twist interstitial on the h2h TV — the same
+// `.twist-card-overlay` ritual family (card flip + scrim + S4 sting) the couch
+// TV, host phone, 3-2-1 and Showdown card use, once per round, auto-dismissing
+// in ~2.5s. Blind Duel shows its card here like any other twist. Reduced motion
+// collapses the flip to a fade via the overlay's CSS — no JS branch needed.
+function showTvTwistCard(card) {
+  playSound("sting");
+  if (!twistCardEl) {
+    twistCardEl = document.createElement("div");
+    twistCardEl.className = "twist-card-overlay";
+    document.body.appendChild(twistCardEl);
+  }
+  twistCardEl.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "twist-card-title";
+  title.textContent = card.card;
+  const rule = document.createElement("div");
+  rule.className = "twist-card-rule";
+  rule.textContent = card.rule;
+  twistCardEl.append(title, rule);
+  twistCardEl.classList.remove("hidden");
+  clearTimeout(twistCardTimer);
+  twistCardTimer = setTimeout(() => twistCardEl.classList.add("hidden"), 2500);
+}
 
 function panelStatus(p, text) {
   if (p.statusEl.textContent !== text) p.statusEl.textContent = text;
@@ -84,6 +113,9 @@ export function disposeH2H() {
   stopAdvanceNote();
   if (revealMap) { try { revealMap.remove(); } catch { /* gone */ } revealMap = null; }
   revealShownFor = null;
+  twistCardShownFor = null;
+  if (twistCardEl) twistCardEl.classList.add("hidden");
+  clearTimeout(twistCardTimer);
   const note = $("tvNextHost");
   if (note) note.classList.add("hidden");
 }
@@ -335,6 +367,13 @@ function renderLive(state, showScreen) {
     `Round ${round.number || 1}` +
     (state.settings ? ` / ${state.settings.roundCount}` : "") +
     (round.twist ? ` · ${twistHudTag(round.twist.id)}` : "");   // G2
+  // R2 (C1): the twist ritual is a full-screen card flip on the h2h TV too, not
+  // just the HUD tag — once per round (Blind Duel included), reduced-motion → fade.
+  const twistCard = twistCardForRound(round, twistCardShownFor);
+  if (twistCard) {
+    twistCardShownFor = twistCard.roundNumber;
+    showTvTwistCard(twistCard);
+  }
   startTimer(round.endsAt);
 
   const n = submittedCount(round);
@@ -598,6 +637,11 @@ function runRevealAnimation(state, round) {
       rows[closestId].firstChild.textContent =
         `👑 ${state.teams[closestId].name}`;
     }
+    // R3 (C2): the ACE burst rides the closest pin landing in the farthest-first
+    // cascade — fires only when the closest pin is a sub-1km ACE. Ceremony only,
+    // no points change; reduced-motion collapses the stamp via CSS.
+    const aceKm = revealAceKm(round);
+    if (medalForDistance(aceKm).ace) stampFlash(`🎯 ACE — ${formatDistance(aceKm)}`);
   };
 
   const DRAW_MS = motionDuration(800, prefersReducedMotion());

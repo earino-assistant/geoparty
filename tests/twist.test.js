@@ -21,6 +21,7 @@ import {
   twistedRoundScore,
   TWIST_DECK,
   twistCard,
+  twistCardForRound,
 } from "../js/twist.js";
 import { scoreForDistance } from "../js/game.js";
 import { adjustedPoints } from "../js/supersure.js";
@@ -185,4 +186,42 @@ test("deck card copy is consistent and Long Haul makes no expert-spot claim", ()
   assert.doesNotMatch(lh.rule.toLowerCase(), /expert/,
     "Long Haul must not claim an expert spot (sampler deferred)");
   assert.match(lh.rule.toLowerCase(), /gentler curve/);
+});
+
+/* ---------------- twistCardForRound (R2 — the TV/host interstitial gate) ---------------- */
+
+// R2 (C1): the full-screen twist card must fire on the h2h TV too (not the HUD
+// tag alone), once per round, for EVERY twist — Blind Duel included.
+test("twistCardForRound: returns the card for a twisted round, once per round", () => {
+  const round = { number: 3, twist: { id: "blitz" } };
+  const shown = twistCardForRound(round, null);
+  assert.ok(shown);
+  assert.equal(shown.id, "blitz");
+  assert.equal(shown.card, "⚡ BLITZ");
+  assert.equal(shown.rule, "20-second clock · round ×1.5");
+  assert.equal(shown.roundNumber, 3);
+  // Already fired for this round number → no repeat (state echoes are frequent).
+  assert.equal(twistCardForRound(round, 3), null);
+});
+
+test("twistCardForRound: Blind Duel gets its full-screen card on the h2h TV", () => {
+  const shown = twistCardForRound({ number: 2, twist: { id: "blind" } }, null);
+  assert.ok(shown, "Blind Duel must not be HUD-only on the TV");
+  assert.equal(shown.id, "blind");
+  assert.equal(shown.card, "🔒 BLIND DUEL");
+  assert.equal(shown.rule, "Rival pins are hidden");
+});
+
+test("twistCardForRound: no twist / malformed round → null (no ritual)", () => {
+  assert.equal(twistCardForRound({ number: 4 }, null), null);
+  assert.equal(twistCardForRound({ number: 4, twist: null }, null), null);
+  assert.equal(twistCardForRound({ number: 4, twist: { id: "nope" } }, null), null);
+  assert.equal(twistCardForRound(null, null), null);
+});
+
+test("twistCardForRound: a new round after one shown fires again", () => {
+  // Round 2 fired (shownFor = 2); round 3 is a different twist → fires.
+  const r3 = twistCardForRound({ number: 3, twist: { id: "frozen" } }, 2);
+  assert.ok(r3);
+  assert.equal(r3.roundNumber, 3);
 });

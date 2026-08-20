@@ -28,6 +28,7 @@ import {
   advanceTarget,
   countdownText,
 } from "./autoadvance.js";
+import { revealAceKm } from "./h2h.js";
 import {
   defaultNight, bumpNight, champion, gameWinner,
   tallyLineText, championText,
@@ -834,6 +835,11 @@ function renderShowdownReveal(state, round) {
       row.classList.add("closest");
       row.firstChild.textContent = `👑 ${state.teams[closestId].name}`;
     }
+    // R3 (C2): the ACE burst rides the closest pin landing in the Final Showdown
+    // cascade too — fires only when the closest pin is a sub-1km ACE. Ceremony
+    // only, no points change; reduced-motion collapses the stamp via CSS.
+    const aceKm = revealAceKm(round);
+    if (medalForDistance(aceKm).ace) stampFlash(`🎯 ACE — ${formatDistance(aceKm)}`);
   };
 
   const DRAW_MS = motionDuration(800, prefersReducedMotion());

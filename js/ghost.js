@@ -267,6 +267,40 @@ export function duelVerdict(yourPoints, ghostPoints) {
 }
 
 /* ================================================================
+ * Boot / start routing + fold idempotency (R1). Pure so the daily-ui boot
+ * sequencer AND the "Take the challenge" tap can consult the SAME rule — a
+ * completed board for this day+mode can never be replayed, not at boot and
+ * not via a tap that races the async instant-verdict load.
+ * ================================================================ */
+
+// Where a Daily boot (or a start attempt) routes given whether a completed
+// run for THIS run's day+mode already exists. Identical logic at both sites is
+// the guarantee: the tap re-checks and gets the same answer the boot did, so
+// it resolves to the verdict / plain done instead of starting a fresh replay.
+export function dailyEntryRoute({ hasSaved, isExhibition, isDuel, ghostOk }) {
+  if (hasSaved && !isExhibition) {
+    return isDuel && ghostOk ? "instant-verdict" : "done";
+  }
+  return "play";
+}
+
+// finishRun's fold plan. A duel whose day+mode is ALREADY resolved (an earlier
+// instant-verdict, or a replay that somehow raced the boot guard) folds NOTHING
+// again — no duplicate W/L, ACE, PB, saved-run overwrite, or verdict/completed
+// event. An exhibition folds no records but still reports (it changed nothing
+// on this device by design). A first play folds everything. The verdict itself
+// is always computed by the caller for the done screen regardless of this plan.
+export function duelFoldPlan({ isDuel, isExhibition, alreadyResolved }) {
+  const duelDone = !!(isDuel && alreadyResolved);
+  return {
+    foldRecords: !isExhibition && !duelDone,
+    foldDuel: !!isDuel && !isExhibition && !duelDone,
+    emitDuel: !!isDuel && !duelDone,
+    emitCompleted: !duelDone,
+  };
+}
+
+/* ================================================================
  * Fragment plumbing (the transport). The fragment is parsed then STRIPPED by
  * the UI before analytics init (§3.5.6); these are the pure string helpers.
  * ================================================================ */

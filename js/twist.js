@@ -49,6 +49,18 @@ export function twistRevealTag(id) {
   return t ? t.revealTag : "";
 }
 
+// The full-screen twist interstitial to show for a round, or null when there
+// is no twist or the card already fired for this round number (`shownForRound`
+// is the caller's once-per-round memory). Blind Duel is a twist like any other
+// — its card shows on the h2h TV too, not just the HUD tag (R2). Pure so the
+// couch and h2h TV renderers gate the ritual identically.
+export function twistCardForRound(round, shownForRound) {
+  const id = round && round.twist && round.twist.id;
+  if (!id || round.number === shownForRound) return null;
+  const card = twistCard(id);
+  return card ? { id, card: card.card, rule: card.rule, roundNumber: round.number } : null;
+}
+
 /* ================================================================
  * Eligibility (spec §3.2). A twist is eligible for a round when its mode
  * matches and its lever is meaningful; the caller passes the room facts.

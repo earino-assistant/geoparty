@@ -946,11 +946,15 @@ never corrupt each other and the v1 code path is untouched.
 ```
 rooms/CODE
   settings.twists       "off" | "occasional" | "chaos"   (absent = off)
-  lhCursor              int — Long Haul sampler position (host-resume, like poolCursor)
   night                 { v: 1, games: int, crowns: { tN: int } }
   teams/tN/decoyUsed    round number (sibling of superSureUsed)
   round/twist           { id }        written with round start, same writer
   round/results/tN/decoy{ lat, lng }  written in the team's own lock-in patch
+  # lhCursor            DEFERRED — NOT WRITTEN in this release. It is part of the
+  #                     deferred expert-tier Long Haul sampler (§3.2 "Long Haul
+  #                     location supply", §12), which is not built: Long Haul is
+  #                     purely the gentler scoring curve on the normal location.
+  #                     Listed here only to reserve the future field name.
 ```
 
 **Write ownership / race treatment** (extends the architecture table; no
@@ -958,7 +962,8 @@ new contention classes):
 
 | Path | Writer | Race posture |
 |---|---|---|
-| `round/twist`, `lhCursor` | the round starter (host / hostTeam) | single writer, rides the round-start patch |
+| `round/twist` | the round starter (host / hostTeam) | single writer, rides the round-start patch |
+| `lhCursor` | *(DEFERRED — not written this release; see §3.2, §12)* | would be the round starter, riding the round-start patch, when the expert-tier sampler is built |
 | `teams/tN/decoyUsed`, `round/results/tN/decoy` | team tN's phone | own-subtree, disjoint by construction |
 | `night` (couch) | host phone | sole authority |
 | `night` (h2h) | next-room creator | written into the new room before the `nextRoom` pointer on the same connection — the same ordering guarantee the pointer already relies on |
@@ -1145,7 +1150,7 @@ moved.
 | **P3** | **G6 Hard Mode** (+ hard duels) | hard slot + unlock flow + `setMoveAllowed` viewer lever + star share + hard flag in codec | S–M | hard runs score on 30 s window; hard link forces hard rules; streak untouched by hard |
 | **P4** | **G4 ACE + medals** | `medalForDistance` + 🎯 grid + stamp/TV burst + captions + ace counters | S | grid/caption tests; both-ACE-and-SUPER-SURE reveal on device |
 | **P5** | **G3 Crown Night** | `night.js` + couch/h2h carry + tally/champion surfaces + masks + `night_champion` | S–M | fold tests; a 3-game two-phone night reaches a champion; TV + no-TV |
-| **P6** | **G2 Twist rounds** | `twist.js` + setting + round-start write + card/HUD/reveal treatment + `lhCursor` + viewer lever reuse + event props | M | determinism/eligibility suites; each twist played on device in both modes; resume mid-twist-round |
+| **P6** | **G2 Twist rounds** | `twist.js` + setting + round-start write + card/HUD/reveal treatment + viewer lever reuse + event props (Long Haul ships as the gentler curve only; its dedicated `lhCursor` expert sampler is DEFERRED — §3.2, §12) | M | determinism/eligibility suites; each twist played on device in both modes; resume mid-twist-round |
 | **P7** | **G7 Decoy Pin** | `decoy.js` + chip/sheet + live-feed switch + reveal exposure + carry reset + `decoy` prop | M | hidden-in-play tests; two-phone bluff session; blind-twist exclusion |
 
 Ordering rationale — the sequence is intentionally owner-prioritized:
@@ -1316,11 +1321,18 @@ user-visible work):**
   h2h guess into device-local `closest` (context `"party"`) and the ACE
   counters; wired in `player-ui.js#lockIn`, gated on a real pin. Couch (shared
   host phone) never folds. Local-only — no analytics.
-- **TV twist interstitial (C1):** full-screen `.twist-card-overlay` ritual on the
-  TV, once per round, reduced-motion → fade (CSS).
+- **TV twist interstitial (C1):** the full-screen `.twist-card-overlay` ritual
+  fires once per round on **both** the couch TV (`screen-ui.js`) **and** the h2h
+  TV (`screen-h2h.js`) — Blind Duel included — not the HUD tag alone; the host
+  phone shows its own card. Gated by the pure `twist.js#twistCardForRound` so all
+  three surfaces decide identically; reduced-motion → fade (CSS).
 - **Party ACE (C2):** medal caption on the h2h reveal result line, an ACE stamp
-  on the acing phone and an ACE burst on the TV reveal, and a 🎯 ACE tag on the
-  party share card. Reduced-motion via the existing stamp CSS; no new PII.
+  on the acing phone, and an ACE burst on the TV reveal that fires in **every**
+  farthest-first cascade — the couch solo reveal, the couch Final Showdown, and
+  the h2h reveal — when the closest pin lands sub-1km (gated by the pure
+  `h2h.js#revealAceKm`), plus a 🎯 ACE tag on the party share card. The burst is
+  ceremony only — it changes no points — and reduced-motion collapses it to the
+  static stamp via the existing CSS; no new PII.
 - **Ghost already-played instant verdict (C3):** an already-completed matching
   daily/mode resolves straight to the duel verdict (recomputing the ghost's
   scores on-device), emits `ghost_duel_completed`, and the done screen's
@@ -1336,6 +1348,32 @@ user-visible work):**
   night tally renders in both h2h lobbies (game ≥ 2); the daily ACE counter line
   ("Nth ace this month") renders on the done screen; `BLITZ_MULTIPLIER = 1.5` and
   the deck card copy are pinned by tests.
+
+**Final gap-fix pass (R1–R5).** A closing review found the C1/C2 TV work above
+was only half-wired and the ghost already-played path (C3) had a boot race; all
+five are now closed and the prose above reflects the completed behavior:
+
+- **R1 — Ghost already-played race / idempotency:** the boot instant-verdict
+  and the "Take the challenge" tap now route through the pure
+  `ghost.js#dailyEntryRoute`, so a completed board can never be replayed (the
+  intro button is disabled + re-checks the lock during the async load), and
+  `finishRun` folds through `ghost.js#duelFoldPlan`, so an already-resolved duel
+  re-folds nothing (no duplicate W/L, ACE/PB, saved-run overwrite, verdict/
+  completed event, or return link). Deterministic race + fold tests in
+  `tests/ghost-duel-race.test.js`.
+- **R2 — h2h TV twist interstitial:** the full-screen card ritual (Blind Duel
+  included, reduced-motion → fade) now fires on the h2h TV, not just the HUD tag.
+- **R3 — Party ACE burst:** the burst now fires in the h2h reveal and couch Final
+  Showdown cascades too (was couch-solo only), gated by `h2h.js#revealAceKm`.
+- **R4 — Blind Duel phone gate:** a focused test asserts `liveRivalPins` returns
+  no rival pins in a blind-twist round (and fails if the guard is removed).
+- **R5 — lhCursor doc truth:** the RTDB, write-ownership, and P6 tables no longer
+  present `lhCursor` as current state/writer/built output; the expert-tier
+  sampler stays the ONLY labelled deferral (§3.2, below).
+
+*Manual device proof still required (TV glue is not unit-testable):* the h2h TV
+twist card flip + reduced-motion fade, and the ACE burst landing on the closest
+pin in both the h2h and couch-showdown reveal cascades.
 
 **One honest divergence from the copy above (C5 — better UX, documented, not
 silent):** the grace-bridge line *"Missed a day — your streak survived. 🔥 N"*
