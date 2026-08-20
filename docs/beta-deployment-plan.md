@@ -1,199 +1,261 @@
 # Beta / preview deployment plan — one candidate, one artifact, zero vendors
 
-Status: **approved design, not yet implemented.** Companion to
-`docs/field-observability-plan.md` §11 (release stamping), which this plan
-subsumes and extends — the Pages workflow described there and the one
-described here are the **same workflow**.
+Status: **amended spec (v2, 2026-08-20) — awaiting owner approval, then
+Opus implements.** This version **supersedes the original plan text of
+commit `0f28562` in full**; where any earlier revision, quotation, or
+derived note contradicts this document, this document wins. The amendment
+exists because the EM review (P2-2,
+`docs/engineering-manager-review-v0.3.md:206–224`) found the original's
+"verified current state" stale: `.github/workflows/pages.yml` had already
+landed in the plan's own parent commit, so implementing the original
+literally would have authored a *second* Pages deploy workflow and produced
+dueling deploys, with `/beta/` flapping between live and 404.
+
+Companion docs: `docs/field-observability-plan.md` §11 (release stamping —
+now **implemented** as `pages.yml`; this plan extends that same file),
+`docs/analytics.md` (super-property catalog), `README.md:140–158`
+(published Firebase rules).
 
 ---
 
-## 1. Executive recommendation
+## 0. What this amendment changes (delta vs. `0f28562`)
+
+Corrections of stale facts:
+
+- `pages.yml` **exists and is live** (landed with `c7f7369`); root
+  `release.json` is stamped and consumed by `js/consent.js:119–133`. The
+  original claimed neither existed.
+- The shipped workflow pins `actions/deploy-pages@v4`
+  (`pages.yml:82`), not v5 as the original asserted (EM P3-10). This plan
+  keeps **v4 as shipped**; version bumps are a separate chore, not part of
+  the beta work.
+- Tags: `v0.3.0` **exists at `28d2b5b`** (alongside `v0.1.0-couch`,
+  `v0.2.0-h2h`). The original's "tags are optional/stale" framing is
+  replaced by §10's tag policy.
+
+Corrections of design traps the EM review identified in the original:
+
+1. **One workflow, extended in place.** The plan now modifies
+   `.github/workflows/pages.yml` itself. No `deploy-pages.yml` is ever
+   created; §8 adds a static test asserting exactly one deploy workflow.
+2. **`channelFromPath` gains a protocol guard.** The original's
+   path-only match would classify a `file://` dev checkout living in a
+   directory named `beta/` as the beta channel, contradicting its own
+   "file:// → production" claim. §5.1 fixes the signature.
+3. **`deployment_channel` registers synchronously at init**, not inside
+   the async `release.json` fetch — otherwise early events pass production
+   KPI filters. §5.5.
+4. **`RELEASE_PROPS` must be extended.** `register()` sanitizes against
+   the frozen allowlist at `js/analytics.js:419–422`; without adding
+   `deployment_channel` there, a naive implementation registers nothing.
+   §5.5.
+5. **Immutable-SHA checkouts** and the resulting loss of the
+   "re-run an old green run" rollback path are now explicit (§6.3, §6.7 —
+   the trade the EM asked the plan to state,
+   `engineering-manager-review-v0.3.md:419–425`).
+6. **An owner walkthrough for publishing the Firebase rules** (§7) —
+   the plan's single manual-step-or-nothing-works dependency — with
+   sequencing that avoids a live-but-broken beta window.
+
+Everything else — the options analysis, the isolation design, the
+"what NOT to build" list — is retained with re-verified citations.
+
+---
+
+## 1. Executive recommendation (unchanged in substance)
 
 **Serve production and one beta candidate from a single GitHub Pages
-deployment, assembled in GitHub Actions from two branches:**
+deployment, assembled by the existing `pages.yml` from two branches:**
 
 - `main` → `https://earino-assistant.github.io/geoparty/` (production)
 - `beta` → `https://earino-assistant.github.io/geoparty/beta/` (the one
   candidate)
 
-One workflow checks out both branches, runs the existing test suite on
-each, copies them into `_site/` and `_site/beta/`, stamps a `release.json`
-into each folder, and publishes with the first-party
-`actions/upload-pages-artifact` + `actions/deploy-pages`. No third-party
-actions, no second host, no second Firebase/PostHog project, no build
-step in the dev loop — the repo still runs from a plain checkout.
+The one shipped workflow gains: a `beta` push trigger, a resolve step that
+pins both branch tips to immutable SHAs, a second checkout + test run in
+an isolated directory, an assembly step that nests the beta tree under
+`_site/beta/`, and per-channel `release.json` stamps. Still one artifact,
+one deploy job, first-party actions only, no build step in the dev loop.
 
-Why this is the happy path:
+Why this stays the happy path:
 
-- **It is the officially supported shape.** GitHub Pages allows exactly
-  one site per repo and (verified Aug 2026) has **no native PR-preview
-  feature** — but an Actions-deployed artifact is just a directory tree,
-  and nothing stops that tree containing `beta/` assembled from a second
-  ref. This is the only way to get a second URL out of GitHub Pages using
-  only first-party tooling.
-- **The observability plan already requires the workflow.** §11 of the
-  field-observability plan switches Pages from branch-deploy to the
-  Actions flow to stamp `release.json`. Beta support is ~15 extra lines
-  in that same workflow, not a second system.
-- **Promotion is a git fast-forward** (`beta` → `main`) of the exact
-  verified commit. There is no build, so "promote without rebuilding
-  different source" holds by construction: the promoted tree is
-  byte-identical; only the stamp (`release.json`, beta markers) differs.
-- **Rollback is a branch operation** — revert on `main`, force-push on
-  `beta`. State never lives anywhere except the two branch tips.
+- **It is the officially supported shape.** One Pages site per repo, no
+  native PR-preview feature — but an Actions artifact is just a directory
+  tree, and nothing stops it containing `/beta/` from a second ref.
+- **The deploy workflow already exists and is proven** (EM: "deploy path:
+  ready"). Beta support is an extension of a live, reviewed workflow, not
+  a new system.
+- **Promotion is a git fast-forward** of the exact verified SHA: no build
+  means the promoted tree is byte-identical to what was verified; only
+  the stamps (`release.json`, beta markers) differ.
+- **Rollback is a branch operation** — `git revert` on `main`, force-push
+  on `beta`. State never lives anywhere except the two branch tips.
 - **Beta is testable end-to-end on real devices** at a real HTTPS URL:
-  phones scan the beta host's QR (all links are derived from
-  `location.href`, so beta pages generate beta links), the TV-typeable
-  address becomes `earino-assistant.github.io/geoparty/beta`, and PWA
-  install works with its own scope and identity (§5.3).
+  QR/share/TV links derive from the current page (§5.4), and the relative
+  manifest yields a distinct PWA install under `/beta/` (§5.3).
 
-Firm choices this plan commits to (details in §5):
+Firm choices (details in §5–§7):
 
 | Question | Decision |
 |---|---|
 | Beta URL | `/geoparty/beta/` on the existing Pages site |
+| Workflow | Extend `.github/workflows/pages.yml` in place; never a second deploy workflow |
 | Candidate count | Exactly one (`beta` branch tip). No PR previews. |
-| Firebase isolation | Separate RTDB namespace `rooms-beta/`, chosen client-side by a pure path-derived channel function |
-| PostHog | **Same project**, `deployment_channel` super property, KPI insights filter it out |
-| Session replay for beta | On, same staged policy as production |
-| Promotion | `git push origin origin/beta:main` (fast-forward only) |
+| Firebase isolation | Separate RTDB subtree `rooms-beta/`, chosen client-side by one pure channel function |
+| PostHog | Same project; post-consent `deployment_channel` super property; KPI insights exclude beta |
+| Session replay for beta | On, identical policy and masking as production |
+| Promotion | `git push origin origin/beta:main` (fast-forward only, owner-approved) |
 | Prod rollback | `git revert` + push (never force-push `main`) |
-| External hosts | None |
+| External hosts / second projects | None |
 
 ---
 
-## 2. Verified current state (inspected 2026-08-20)
+## 2. Verified current state (re-inspected 2026-08-20 at `84924b8`)
 
-Repo / site facts this design rests on:
+Facts inspected in the working tree today:
 
-- **Pages today deploys from the `main` branch** (there is no deploy
-  workflow in `.github/workflows/` — only `ci.yml` — and the site is
-  live). The observability plan's switch to Actions deploys is pending.
-- **Production is live** at `https://earino-assistant.github.io/geoparty/`
-  with `cache-control: max-age=600` (Fastly CDN, 10-minute TTL, not
-  configurable). `release.json` returns 404 (not yet shipped). The
-  account root `https://earino-assistant.github.io/` is itself 404 —
-  there is **no user site**, so we cannot control an origin-root
-  `robots.txt`; beta de-indexing must be a per-page `<meta>` tag.
+- **`pages.yml` is the one deploy workflow.** Triggers: push to `main` +
+  `workflow_dispatch` (`pages.yml:12–15`); least-privilege permissions
+  (`:19–22`); concurrency `group: pages`, `cancel-in-progress: false`
+  (`:25–27`); build job runs `npm run check` + `npm test`
+  (`:41–45`), stamps `release.json` via inline `node -e` with
+  `{commit, short, deployed_at, run, env:"pages"}` (`:52–65`), uploads the
+  repo root as the artifact (`:69–71`), deploys with
+  `configure-pages@v5` + `deploy-pages@v4` (`:67`, `:82`).
+  `release.json` is gitignored (`.gitignore:1–4`) — it can never be
+  committed.
+- **`ci.yml` is the PR gate**: push-to-main + `pull_request`, same
+  check/test pair. It does not deploy; it stays untouched.
+- **`js/consent.js:119–133`** fetches `release.json` with a **relative**
+  path and registers `release`/`commit`/`deployed_at`; absent file →
+  `release: "dev"`. Under `/geoparty/beta/`, the same code fetches
+  `/geoparty/beta/release.json` with zero changes.
+- **`js/analytics.js`**: `register()` (lines 600–610) sanitizes against
+  the frozen `RELEASE_PROPS` allowlist
+  (`release`/`commit`/`deployed_at`, lines 419–422); the registered bag
+  is buffered and applied **before** the queued events flush after the
+  PostHog script loads (lines 522–530). `BANNED_KEY_RE`
+  (line 427) does not match `deployment_channel`. `POSTHOG_INIT_OPTIONS`
+  is owner-provided and deliberately mutable — this plan does not touch
+  it.
+- **`js/firebase.js:20–22`** — `roomRef()` is the single choke point:
+  every room read/write/subscribe/transaction helper in the module routes
+  through it; the only other `ref()` use is `.info/connected`
+  (line 76). The string `rooms/` appears nowhere else in `js/` (grepped).
+- **Published Firebase rules** (`README.md:144–158`): allowlist only
+  `rooms/$roomCode`, 6-letter code regex `^[A-HJ-NP-Z]{6}$`, open read,
+  24 h write window, `createdAt` +5 min skew tolerance, delete allowed
+  (`newData.val() == null`). Top-level `.read/.write: false` — so
+  `rooms-beta/` is **denied today**; adding its block cannot loosen
+  anything retroactively.
+- **Room codes are 6 letters in every mode** — couch and h2h share
+  `isRoomCode` (`js/game.js:33`); there is no 4-letter code anywhere.
+  (4-letter paths matter only as the *negative* case when validating
+  rules, §7.3.)
+- **No root-absolute URLs.** A grep across all HTML/JS/CSS for
+  `src="/`, `href="/`, `url(/`, `from "/`, `import("/`, `fetch("/` found
+  zero hits. All runtime links derive from the current page:
+  `screenLink()`/`siteAddress()` build from `baseHref`
+  (`js/tvlink.js:26–43`; `host-ui.js:384` passes `location.href`),
+  `withUtm()` wraps a caller-supplied href (`js/share.js:19–23`),
+  `joinHref` is relative (`js/frontdoor.js`). The only absolute URLs are
+  the OpenGraph/Twitter meta tags pointing at production
+  (`index.html:18–19`, `host.html:18–19`, `player.html:19`) — accepted
+  as-is (§5.4).
+- **The manifest is fully relative** (`manifest.webmanifest`): `id`,
+  `start_url`, `scope` all `"./"`, relative icon paths. Served from
+  `/beta/` it defines a distinct PWA automatically.
 - **No service worker exists.** `js/pwa.js` is pure standalone-display
-  detection; nothing registers a SW, nothing caches. This removes the
-  entire SW-scope/stale-cache class of beta problems — keep it that way
-  (§9).
-- **The manifest is fully relative**: `id: "./"`, `start_url: "./"`,
-  `scope: "./"`, relative icon paths. Served from `/geoparty/beta/`, it
-  automatically defines a *distinct* PWA (different id, different scope)
-  with zero changes.
-- **Every runtime URL is derived from the current page**: `screenLink()`
-  and `siteAddress()` in `js/tvlink.js` build from `baseHref`,
-  `withUtm()` wraps the given href, QR codes encode `screenLink`
-  output, `joinHref` is relative. A grep found **no root-absolute
-  (`/...`) asset or link paths** in HTML/JS/CSS. A copy of the tree under
-  `/beta/` is therefore self-contained: beta QR codes, share links, TV
-  links, and module imports all stay inside `/beta/`.
-- **The only absolute URLs are OpenGraph/Twitter meta tags** pointing at
-  production. Fine for beta (they only matter to link scrapers; a
-  private-ish beta URL shared in chat will show production card art —
-  accepted, §5.4).
-- **Firebase**: RTDB rooms live at `rooms/$code` (`js/firebase.js
-  roomRef()`); README rules allowlist only `rooms/` with
-  `$roomCode.matches(/^[A-HJ-NP-Z]{6}$/)`, open read, 24 h write window.
-  Rules are a manual console paste. Threat model is drive-by vandalism,
-  not adversaries.
-- **PostHog**: EU host, consent-gated via `js/consent.js` →
-  `js/analytics.js`; `EVENT_SCHEMA` is a hard allowlist; §11 of the
-  observability plan will `posthog.register()` release super properties
-  after init.
-- **CI** (`ci.yml`): `npm run check` + `npm test` on push-to-main and
-  PRs. No dependencies, node 22.
+  detection; nothing registers a SW. This stays load-bearing (§12).
+- **RTDB REST endpoint** (for the console-independent rules validation in
+  §7.3): `databaseURL` in `config.js` is
+  `https://geoparty-9ffe7-default-rtdb.europe-west1.firebasedatabase.app`
+  (a public client identifier, by design).
 
-GitHub platform facts (verified against current official docs, Aug 2026):
-
-- One Pages site per repo; project sites at `/<repo>/`. **No native
-  per-PR preview deployments exist** (only an internal alpha in
-  `actions/deploy-pages`; nothing shipped publicly through 2026).
-- Actions-based Pages publishing is GA. Current first-party versions:
-  `actions/checkout@v4`, `actions/upload-pages-artifact@v3`,
-  `actions/deploy-pages@v5`. Deploy job needs `pages: write` +
-  `id-token: write` and should target the auto-created `github-pages`
-  environment; `deploy-pages` outputs `page_url`.
-- The artifact is a single tar (≤ ~1 GB supported; **no symlinks**);
-  each deploy **replaces the whole site**. The 10-builds/hour soft limit
-  applies only to branch builds, **not** Actions deploys.
-- Official concurrency pattern: `group: "pages"`,
-  `cancel-in-progress: false`.
-- **Custom HTTP headers are still not supported** on Pages — no
-  `X-Robots-Tag`, no cache-control tuning. 10-minute edge cache is fixed.
-- Free personal accounts get environments (and protection rules) on
-  public repos; not needed here beyond the default `github-pages` one.
+Platform facts carried from the original plan (checked against official
+docs Aug 2026, **not re-verifiable from this checkout**): one Pages site
+per repo; no native PR previews; the artifact is a single tar (no
+symlinks) and each deploy replaces the whole site; Actions deploys are
+exempt from the 10-builds/hour branch limit; custom HTTP headers
+(`X-Robots-Tag`, cache-control) are not supported — the ~10-minute Fastly
+edge TTL is fixed; the account root `https://earino-assistant.github.io/`
+serves no user site, so beta de-indexing must be per-page `<meta>` tags.
+Additionally (GitHub documented behavior): for `push`-triggered runs the
+workflow file is read **from the pushed ref** (§6.6), branch *deletion*
+does not trigger push workflows, and a concurrency group holds at most
+one pending run — a newer pending run supersedes an older pending one,
+while `cancel-in-progress: false` protects the run that is already
+deploying.
 
 ---
 
-## 3. Options matrix
+## 3. Options matrix (retained; option A re-scoped to the real workflow)
 
 | Option | Simplicity | Safety | Cost | Maintenance | Promotion | Rollback | Verdict |
 |---|---|---|---|---|---|---|---|
-| **A. One Actions artifact: `main` → `/`, `beta` branch → `/beta/`** | One workflow, first-party actions only | Prod bytes are a pure function of `main`; both refs tested pre-deploy | $0 | One workflow + one branch to understand | `git` fast-forward of the verified SHA | Branch ops; prod never force-pushed | **Recommended** |
-| B. Commit a `beta/` folder into `main` (keep branch-deploy) | No workflow change | Copy drift; beta commits pollute `main` history; easy to ship beta to prod by accident | $0 | Manual copy/sync every iteration — exactly the long-lived sync step to avoid | Copy files over themselves | Revert a copy commit | Rejected |
-| C. `gh-pages` publish branch (peaceiris-style) | Extra generated branch | Third-party action or hand-rolled push; generated history | $0 | Diverging generated branch to garbage-collect | Re-publish | Re-publish older | Rejected — option A does the same with zero extra branches |
-| D. PR-preview folders (`rossjrw/pr-preview-action` etc.) | Third-party action, comment bots | Unbounded preview count — explicitly not wanted; previews share the prod origin | $0 | Stale-preview cleanup | N/A (previews aren't candidates) | N/A | Rejected — no official path exists, and the product wants **one** candidate |
-| E. Cloudflare Pages / Netlify for previews | Second vendor, second origin, second deploy pipeline | Good (auto `noindex`, headers, access control) | $0 tier | Second dashboard, second auth, config drift vs Pages | Cross-vendor (verify on CF, ship on Pages) — verified bytes ≠ shipped origin | Two systems | Rejected — materially *less* simple, and cross-origin verify weakens "promote the exact verified thing" |
-| F. Second repo (`geoparty-beta`) with its own Pages site | Two repos | Full isolation | $0 | Permanent repo-sync machinery | Cross-repo push | Two histories | Rejected |
+| **A. Extend the shipped `pages.yml`: `main` → `/`, `beta` branch → `/beta/`, one artifact** | Extends a live, reviewed workflow | Prod bytes are a pure function of `main`; both refs tested pre-deploy; single deploy job → no dueling deploys possible | $0 | One workflow + one branch to understand | `git` fast-forward of the verified SHA | Branch ops; prod never force-pushed | **Recommended** |
+| B. Commit a `beta/` folder into `main` | No workflow change | Copy drift; beta commits pollute `main`; easy to ship beta to prod by accident | $0 | Manual copy/sync every iteration | Copy files over themselves | Revert a copy commit | Rejected |
+| C. `gh-pages` publish branch | Extra generated branch | Third-party action or hand-rolled push | $0 | Diverging generated branch | Re-publish | Re-publish older | Rejected — A does the same with zero extra branches |
+| D. PR-preview folders (third-party actions) | Comment bots, unbounded previews | Previews share the prod origin | $0 | Stale-preview cleanup | N/A | N/A | Rejected — product wants **one** candidate |
+| E. Cloudflare Pages / Netlify previews | Second vendor, second origin | Good headers/auth | $0 tier | Second dashboard, config drift | Cross-vendor: verified bytes ≠ shipped origin | Two systems | Rejected — weakens "promote the exact verified thing" |
+| F. Second repo with its own Pages site | Two repos | Full isolation | $0 | Permanent repo-sync machinery | Cross-repo push | Two histories | Rejected |
 
-Only option A satisfies all of: official/first-party, one candidate, one
-vendor, promotion = moving a ref, and verify-what-you-ship on the same
-origin. Option E is the fallback if GitHub Pages itself ever becomes the
-constraint (e.g. a future need for auth-gated previews or custom
-headers) — revisit then, not now.
+The post-`pages.yml` reality *strengthens* option A: the risky part of the
+original A (authoring a deploy workflow from scratch) is already done,
+reviewed, and live. What remains is an incremental, testable extension of
+that file. The original A's one hazard — accidentally becoming two
+workflows — is retired by making "extend in place" a stated invariant with
+a static test (§8.2). Option E remains the fallback only if Pages itself
+becomes the constraint (auth-gated previews, custom headers).
 
 ---
 
-## 4. Architecture and URL / branch / environment model
+## 4. Architecture and URL / branch model
 
 ```
-  git branches                    GitHub Actions                GitHub Pages (one site)
-  ────────────                    ──────────────                ───────────────────────
-  main ──────────┐                deploy-pages.yml              https://earino-assistant.github.io/geoparty/
-   (production)  │  push to       ┌─────────────────────┐        ├── index.html … (from main)
-                 ├─ main or ────▶ │ build:              │        ├── release.json   channel=production
-  beta ──────────┘  beta          │  checkout main→prod/ │        └── beta/          (from beta, if branch exists)
-   (the one                       │  checkout beta→beta/ │             ├── index.html …
-    candidate;                    │  npm check+test ×2   │             ├── release.json  channel=beta
-    force-push                    │  assemble _site/     │             └── manifest      name "GeoParty Beta"
-    freely)                       │  stamp release.json  │
-                                  │ deploy:              │       Firebase RTDB (one project)
-                                  │  environment:        │        ├── rooms/       ← prod + dev clients
-                                  │   github-pages       │        └── rooms-beta/  ← /beta/ clients
-                                  │  deploy-pages@v5     │
-                                  └─────────────────────┘       PostHog (one project)
-                                                                  every event: deployment_channel =
-                                                                  production | beta  (super property)
+  git branches                   GitHub Actions                 GitHub Pages (one site)
+  ────────────                   ──────────────                 ───────────────────────
+  main ──────────┐               pages.yml (extended)           https://earino-assistant.github.io/geoparty/
+   (production)  │  push to      ┌──────────────────────┐        ├── index.html … (main tip)
+                 ├─ main or ───▶ │ build:               │        ├── release.json  channel=production
+  beta ──────────┘  beta         │  resolve SHAs (once) │        └── beta/         (beta tip, if branch exists)
+   (the one                      │  checkout prod/ beta/│             ├── index.html …
+    candidate;                   │  check+test ×2       │             ├── release.json  channel=beta
+    force-push                   │  assemble _site/     │             └── manifest      name "GeoParty Beta"
+    freely)                      │  stamp + beta markers│
+                                 │ deploy: (unchanged)  │       Firebase RTDB (one project)
+                                 │  deploy-pages@v4     │        ├── rooms/       ← prod + dev clients
+                                 └──────────────────────┘        └── rooms-beta/  ← /beta/ clients
+
+                                                                PostHog (one project)
+                                                                 every consented event:
+                                                                 deployment_channel = production | beta
 ```
 
-Model rules — small enough to hold in one head:
+Model rules:
 
-- **Site content is a pure function of two branch tips.** `/geoparty/` ≡
-  tree of `main`; `/geoparty/beta/` ≡ tree of `beta`. No other state
-  exists. A deploy triggered by either branch republishes both (the
-  artifact replaces the whole site) — but unchanged `main` reproduces
-  byte-identical production, so beta pushes never change production
-  behavior.
-- **`beta` is disposable.** It is the one candidate slot: create it to
-  open a beta, force-push it to iterate, delete it to close the beta
-  (the workflow then publishes an artifact without `/beta/`, and the
-  URL 404s). It carries no history obligations.
-- **`main` is sacred.** Never force-pushed; rollback is `git revert`.
-- **Channel identity is derived from the URL path**, in one pure
-  function (§5.1) — never from config files, never stamped into JS.
-- **Environments**: the single auto-managed `github-pages` environment,
-  with `deploy-pages`' `page_url` wired to `environment.url` so the repo
-  Deployments tab is the deploy history. No protection rules (single
-  owner; the protection is that both refs must pass tests in `build`).
-  A separate "beta" GitHub environment would be theater — both channels
-  ship in one deployment by design.
-- **Tags**: optional, not load-bearing. On promotion the owner may tag
-  `prod-YYYYMMDD` on the promoted SHA for human history; `release.json`
-  (commit + timestamp, queryable at both URLs) is the runtime source of
-  truth, and the Deployments tab is the audit trail.
+- **Site content is a pure function of the two branch tips.** Every run
+  resolves both tips once, tests both trees, and publishes both. A deploy
+  triggered by either branch republishes the whole site — but an
+  unchanged `main` reproduces a byte-identical production tree (only
+  `release.json`'s `deployed_at`/`run` metadata fields refresh, §6.4).
+- **`beta` is disposable**: create it to open a beta, force-push to
+  iterate, delete it to close the slot (plus one `workflow_dispatch` —
+  branch deletion doesn't trigger push workflows).
+- **`main` is sacred**: never force-pushed; rollback is `git revert`.
+- **Channel identity is derived from the URL**, in one pure function
+  (§5.1). `release.json` is *metadata* about a deploy (SHA, timestamp,
+  channel label for humans and dashboards) — it is **never** the channel
+  identity: it is fetched async, can be absent (dev), and nothing
+  behavioral may branch on it.
+- **Environments**: the single auto-managed `github-pages` environment;
+  the Deployments tab is the deploy history. A separate "beta"
+  environment would be theater — both channels ship in one deployment by
+  design.
+- **Tags**: promoted release trains get `v0.x.y` tags (the existing
+  series: `v0.1.0-couch`, `v0.2.0-h2h`, `v0.3.0` = `28d2b5b`). Tags are
+  human history; `release.json` + the Deployments tab are the runtime
+  audit trail. (EM P3-11 asked for exactly this.)
 
 ---
 
@@ -201,187 +263,212 @@ Model rules — small enough to hold in one head:
 
 ### 5.1 One pure channel function (`js/channel.js`)
 
-New pure module, unit-tested, no DOM/network:
+New pure module, no DOM/network, unit-tested:
 
 ```js
 // channel.js — which deployment channel is this page running in?
-// The path is the identity: /beta/ anywhere in the directory chain
-// means the beta channel. Everything channel-dependent (Firebase
-// namespace, PostHog deployment_channel) derives from this ONE function.
-export function channelFromPath(pathname) {
+// The URL is the identity: an http(s) page whose path contains the
+// /beta/ directory is the beta channel; everything else — including
+// every file:// dev checkout, whatever its filesystem path contains —
+// is production. Everything channel-dependent (Firebase namespace,
+// PostHog deployment_channel) derives from this ONE function.
+export function channelFromPath(pathname, protocol) {
+  if (protocol !== "http:" && protocol !== "https:") return "production";
   return /\/beta\//.test(pathname + "/") ? "beta" : "production";
 }
 
-export function roomsRoot(pathname) {
-  return channelFromPath(pathname) === "beta" ? "rooms-beta" : "rooms";
+export function roomsRoot(pathname, protocol) {
+  return channelFromPath(pathname, protocol) === "beta"
+    ? "rooms-beta" : "rooms";
 }
 ```
 
-Tests: `/geoparty/` → production; `/geoparty/beta/` and
-`/geoparty/beta/player.html` → beta; `/geoparty/betamax.html` →
-production (the trailing-slash normalization plus `/beta/` match makes
-`/geoparty/beta` the directory, not a prefix match); `file://` dev paths
-→ production (dev keeps today's behavior exactly). Synchronous and
-infallible — usable at Firebase-connection time, unlike `release.json`
-(which is fetched async and is *metadata*, not identity: §5.5).
+Call sites pass `location.pathname, location.protocol`. The `protocol`
+parameter is the EM-mandated deviation from the original single-argument
+sketch: without it, a dev checkout under a directory named `beta/`
+(`file:///home/e/beta/geoparty/index.html`) would silently talk to
+`rooms-beta/` (`engineering-manager-review-v0.3.md:215–218`). The guard
+mirrors the existing precedent in `siteAddress()`
+(`js/tvlink.js:37–39`). Still one function, still pure, still synchronous
+and infallible — usable at Firebase-connection time, unlike the async
+`release.json`.
+
+Test matrix (§8.1): `/geoparty/` → production; `/geoparty/beta/` and
+`/geoparty/beta/player.html` → beta; `/geoparty/beta` (no trailing
+slash) → beta; `/geoparty/betamax.html` → production (the appended `/`
+plus the `/beta/` directory match defeats prefix false-positives);
+`file://` anything — including paths containing `/beta/` — → production;
+`http://localhost/beta/index.html` → beta (serving an assembled artifact
+locally behaves like beta, which is correct).
 
 ### 5.2 Firebase: hard namespace isolation
 
-**Decision: beta clients use `rooms-beta/$code`; production and dev
-checkouts keep `rooms/$code`.** `js/firebase.js` `roomRef()` takes its
-root from `roomsRoot(location.pathname)`.
+**Beta clients use `rooms-beta/$code`; production and every dev checkout
+keep `rooms/$code`.** Integration point: `js/firebase.js:20–22` —
+`roomRef()` takes its root from `roomsRoot(location.pathname,
+location.protocol)`, computed once at module scope. That one line is the
+entire client-side change: all room operations (read/write/update/delete/
+subscribe/transaction/heartbeat) verifiably route through `roomRef()`
+(§2), so there is no second place to miss.
 
-Resolutions to the required questions:
+Design consequences (retained from v1, all still valid):
 
-- **Schema compatibility / drift.** This is the real risk (a beta that
-  changes room-state shape must never feed a production phone). Hard
-  namespace separation makes it structurally impossible — no
-  version-negotiation protocol needed in either client.
-- **Room-code collisions.** Non-issue: the namespaces are disjoint
-  subtrees, so the same 6-letter code can exist in both without contact.
-  Within a channel, collision odds are unchanged from today.
-- **Prod phone joins a beta room (or vice versa).** Only possible by
-  hand-typing a code from the other channel's TV into the wrong site —
-  QR and share links always carry the channel-correct URL. The typed
-  code hits the other namespace and behaves exactly like a mistyped
-  code: the existing "check the TV or the invite" not-found path. No new
-  UI, no crash mode, symmetric in both directions.
-- **Security rules.** Mirror the existing `rooms` block verbatim as a
-  `rooms-beta` sibling (same regex, same 24 h write window, same
-  `createdAt` skew validation) in the one-time console paste (§10).
-  Same threat model, same deliberate permissiveness. Bonus: future
-  rule *changes* can be trialed on the `rooms-beta` block against real
-  beta traffic without touching the production block — the rules are
-  per-subtree even though the database is shared.
-- **Cleanup.** The existing 24 h room-expiry write rule applies to both
-  subtrees; beta rooms age out like production rooms. No new jobs.
+- **Schema drift is structurally impossible** across channels — a beta
+  that changes room-state shape can never feed a production phone. No
+  version-negotiation protocol in either client.
+- **Room-code collisions** are a non-issue: disjoint subtrees.
+- **Cross-channel joins fail safe as room-not-found.** QR and share
+  links always carry channel-correct URLs (§5.4), so the only cross-over
+  is hand-typing a code from the other channel's TV into the wrong site.
+  That lookup hits the other namespace, finds nothing, and lands in the
+  existing "check the TV or the invite" not-found path — symmetric,
+  no new UI, no crash mode.
+- **Rules** mirror the existing `rooms` block verbatim as a `rooms-beta`
+  sibling (§7). Same threat model, same deliberate permissiveness; the
+  24 h expiry write rule ages beta rooms out identically. Bonus: future
+  rule changes can be trialed on the `rooms-beta` block against real
+  beta traffic before touching the production block.
+- If the rules paste hasn't happened, beta writes are **rejected, not
+  misrouted** — fails closed into the known fire-and-forget failure
+  shape (host plays on, nobody can join). §7.4's sequencing exists to
+  keep that window at zero.
 
-Rejected alternative: a `channel` field inside each room plus a
-join-time compatibility check. More code in both clients, needs shipping
-a forward-compat check to production *first*, and still lets a beta
-client touch production data if the check has a bug. The namespace is
-simpler and fails closed.
+### 5.3 PWA / manifest / no service worker (verified unchanged)
 
-### 5.3 PWA / manifest / service worker under `/beta/`
+- The fully-relative manifest (§2) makes a `/beta/` install a **separate
+  PWA** with its own `id` and scope, unable to navigate onto production
+  pages in-app, with zero repo changes.
+- So the two home-screen icons are distinguishable, the workflow's beta
+  stamp rewrites the beta copy's manifest: `"name": "GeoParty Beta"`,
+  `"short_name": "GeoParty β"`. CI-artifact-only; the repo manifest stays
+  canonical. Unlike v1's `sed`, the stamp is a node script that
+  **fails the build** if the expected manifest shape is gone (§6.5) —
+  fail-loud beats v1's silent cosmetic degradation.
+- **No service worker exists and none is added.** No cross-channel cache
+  poisoning is possible; "did I get the new beta?" is answered by
+  `release.json`, not a SW update dance. (If one is ever proposed,
+  Pages' inability to set `Service-Worker-Allowed` hard-caps a
+  `/beta/sw.js` to `/beta/` scope — but SWs remain out of scope and
+  discouraged, §12.)
 
-- The relative manifest already yields a **separate installed app** for
-  beta: `id` and `scope` resolve against the manifest URL, so a beta
-  install is scoped to `/geoparty/beta/` and cannot navigate onto
-  production pages in-app, and vice versa. Verified: no `start_url`,
-  `scope`, or icon path in `manifest.webmanifest` is absolute.
-- So the two installs don't look identical on a home screen, the beta
-  **stamp step** (CI-only, §6) rewrites the beta copy's manifest:
-  `"name": "GeoParty Beta"`, `"short_name": "GeoParty β"`. Nothing is
-  committed; the repo manifest stays canonical.
-- **No service worker exists and none is added by this plan.** That is a
-  feature: no cross-channel cache poisoning is possible, and "did I get
-  the new beta?" is answered by the 10-minute Pages CDN TTL plus
-  `release.json`, not by a SW update dance. If a SW is ever introduced,
-  its file placement gives the split for free (Pages can't set
-  `Service-Worker-Allowed`, so a SW at `/geoparty/beta/sw.js` is
-  hard-capped to `/beta/` scope) — but that is out of scope and
-  discouraged (§9).
+### 5.4 Paths, links, QR, OG, indexing (verified against code, §2)
 
-### 5.4 Paths, links, QR, OG, indexing
-
-- **Asset cross-loading: structurally impossible.** All imports, hrefs,
-  and CSS URLs are relative (verified §2); `/beta/` pages resolve every
-  asset under `/beta/`. The only cross-channel references are the
-  absolute `og:url` / `og:image` meta tags in beta pages, which point at
-  production. **Accepted as-is**: they're read only by link-unfurling
-  scrapers, beta links aren't meant to be shared publicly, and
-  production card art on an accidentally shared beta link is the
-  *correct* face anyway. Not worth a rewrite step.
-- **QR / TV / share links** are generated from `location.href` at
-  runtime, so the beta host's QR opens the beta player page, the beta
-  TV-typeable address reads `earino-assistant.github.io/geoparty/beta`,
-  and share cards from a beta game carry beta URLs (UTM-tagged as
-  usual; they land as `deployment_channel=beta` traffic and are filtered
-  out of KPIs — §5.5).
-- **Indexing**: no `X-Robots-Tag` and no origin-root `robots.txt` are
-  possible on Pages (§2), so the stamp step injects
-  `<meta name="robots" content="noindex">` into each beta `*.html`
-  `<head>`. Nothing links to `/beta/` from production, so this is a
-  belt on an already-unlinked suspender. The URL is "private-ish", not
-  private: acceptable because the site holds no secrets, the DB is
-  open-by-design within its rules, and the worst case is a stranger
-  playing the beta.
-- **CDN caching**: both channels share the fixed 10-minute edge TTL.
-  The verify flow (§7) therefore starts by fetching
-  `beta/release.json` with `cache: no-store` semantics (`curl` or the
-  in-page release stamp) and comparing `short` to the pushed SHA —
-  never by eyeballing UI differences through a possibly-stale cache.
+- **Asset/import cross-loading: structurally impossible** — zero
+  root-absolute URLs in the tree (grep, §2); every `/beta/` page resolves
+  every asset, module import, and navigation under `/beta/`.
+- **QR / TV / share links stay in-channel**: `screenLink(location.href,…)`
+  (`host-ui.js:384`), `siteAddress()` yields
+  `earino-assistant.github.io/geoparty/beta` on beta pages, `withUtm()`
+  wraps page-derived hrefs, `joinHref` is relative. Beta share links land
+  as `deployment_channel=beta` traffic and are excluded from KPIs (§5.5).
+- **`release.json` self-selects**: the relative fetch in
+  `consent.js:119` resolves per-channel with no code change.
+- **OG/Twitter meta tags** in beta pages point at production absolute
+  URLs — accepted as-is: read only by link scrapers, and production card
+  art on an accidentally shared beta link is the correct face anyway.
+- **Indexing**: Pages supports neither `X-Robots-Tag` nor an origin-root
+  `robots.txt` we control (§2), so the workflow injects
+  `<meta name="robots" content="noindex">` into each beta page's `<head>`
+  (fail-loud, §6.5). Nothing links to `/beta/`; the URL is private-ish,
+  not private — acceptable: no secrets, DB open-by-design, worst case a
+  stranger plays the beta.
+- **Replay masking checklist**: `/beta/` serves the *same pages* with the
+  same `data-ph-mask` and `blockSelector` coverage — no new screens, no
+  checklist change. (Any future beta-only screen goes through the normal
+  `docs/replay-mask-checklist.md` rule.)
 
 ### 5.5 PostHog: same project, `deployment_channel` super property
 
-**Decision: one PostHog project.** A second project would double
-dashboards, alerts, and API keys, split the replay quota, and drift —
-for an audience of one owner. Instead:
+**One PostHog project** (a second would split replay quota, double
+dashboards/alerts, and drift — for an audience of one owner). The channel
+rides as a post-consent super property. Three EM-identified traps are now
+design requirements:
 
-- `release.json` gains a `channel` field, and the §11 register glue
-  (consent.js, post-init only) registers
-  `posthog.register({ release, commit, deployed_at, deployment_channel })`
-  where `deployment_channel` comes from `channelFromPath()` (the path is
-  identity; `release.json`'s `channel` is cross-check metadata). Every
-  event, exception, `$web_vitals`, and replay is thereby
-  channel-stamped. Dev checkouts register `release: "dev"`,
-  `deployment_channel: "production"` — unchanged dev semantics, and dev
-  noise is already excluded by `release`.
-- Super properties ride outside `EVENT_SCHEMA` (they're registered on
-  the PostHog client, not passed through `track()`) — same mechanism §11
-  already established for `release`. Documented in `docs/analytics.md`
-  alongside the release properties. They are aggregates by construction
-  (two fixed strings, a SHA, a timestamp): no privacy surface.
-- **KPI hygiene**: every KPI insight/dashboard panel adds the filter
-  `deployment_channel is not "beta"` (which also matches historical
-  events that predate the property). Additionally, set PostHog's
-  project-level **"filter out internal and test users"** default filter
-  to `deployment_channel = beta`, so *new* insights exclude beta by
-  default and beta data is one toggle away when wanted. Beta analysis
-  happens by flipping that toggle or filtering `= beta` — no separate
-  project needed.
-- **Session replay / error tracking for beta: on, identical policy.**
-  Beta sessions are the owner's own devices and consent-gated like
-  everything else; replays of beta bugs are precisely the point of the
-  observability work, and `deployment_channel` + `release` on the
-  exception events keep beta issues distinguishable in the issues list.
-  No config fork between channels — one less thing to drift.
+1. **Extend the allowlist.** `RELEASE_PROPS` (`js/analytics.js:419–422`)
+   gains `deployment_channel: "string"`. Without this, `register()`
+   silently strips the key and nothing is stamped
+   (`engineering-manager-review-v0.3.md:219–222`). `BANNED_KEY_RE` does
+   not match it (verified).
+2. **Register synchronously, in both consent paths — never inside the
+   `release.json` fetch.** Required outcome: `deployment_channel` (from
+   `channelFromPath(location.pathname, location.protocol)`) must be in
+   the analytics `registered` buffer **before the PostHog script finishes
+   loading**, for (a) a returning accepted visitor (the
+   `analytics.init()` path) and (b) a first-time accept (the banner's
+   accept handler). The buffer mechanics at `js/analytics.js:522–530`
+   then guarantee every queued `track()` event flushes *after* the super
+   property is applied. Note `register()` is consent-gated
+   (`analytics.js:604–605`) — a module-load-time call alone covers only
+   returning visitors; the accept path needs its own synchronous call.
+   The exact call placement in `consent.js` is Opus's, the ordering
+   outcome and its tests (§8.1) are not negotiable.
+3. **Channel registration is independent of `release.json`.** Dev
+   checkouts (no `release.json`) register
+   `deployment_channel: "production"` + `release: "dev"` — dev noise
+   stays excluded by `release`, exactly as today.
 
-### 5.6 No secrets
+Residual timing risk, stated honestly: PostHog-internal events fired
+during `posthog.init()` itself (the session's first `$pageview`, with the
+owner-provided `defaults: "2026-05-30"`) may be captured before any
+`register()` call can land, because this codebase loads the bundle and
+inits in one step (`consent.js:50–57`) and the init options are
+owner-frozen (no `loaded` callback may be added). Worst case is ≤ 1
+unstamped event per beta session, from the owner's own devices. B3
+verifies empirically whether the first `$pageview` carries the property;
+the backstop below covers it either way. All `EVENT_SCHEMA` events are
+immune (they pass through the queue, which flushes after `register`).
 
-Unchanged: the artifact contains only what the repo already publishes
-(Mapillary/Firebase/PostHog embeddable client keys, by design). The
-workflow needs no repository secrets at all — `GITHUB_TOKEN` with the
-declared permissions covers checkout and Pages deploy. Anything that
-would need a secret is out of scope by definition.
+**KPI filtering strategy (owner console work, B3):**
+
+- Project setting **"Filter out internal and test users"**: add the
+  condition `deployment_channel = beta`, plus the backstop
+  `$current_url contains /beta/` (an OR group), and enable
+  filter-by-default for new insights. `$current_url` is already captured
+  today on every consented event — using it as a filter adds **no new
+  capture surface**.
+- **Every existing KPI insight/dashboard panel** (the catalog in
+  `docs/analytics.md`) adds `deployment_channel does not equal beta` —
+  events *without* the property (all history, plus production traffic)
+  pass this filter, so no historical data is lost. Traffic/pageview-based
+  insights add the `$current_url does not contain /beta/` backstop to
+  cover the init-time `$pageview` residual.
+- **Beta analysis** filters `deployment_channel = beta` (or
+  `$current_url contains /beta/` for the residual): events, `$exception`
+  issues, `$web_vitals`, and session replays are all super-property
+  stamped, so beta remains fully queryable in the same project.
+- Session replay for beta: **on, identical policy and masking** — beta
+  replays are the point of the observability work; `deployment_channel`
+  + `release` keep beta issues distinguishable. No config fork.
+
+Privacy: the new super property is one of two fixed strings — an
+aggregate by construction. Consent gating, masking, the diagnostic
+one-shot, and the banner flow are untouched. Super properties ride
+outside `EVENT_SCHEMA` by the same mechanism `release` already uses;
+`docs/analytics.md:109–112` gains the `deployment_channel` row (B2). No
+new event is added — a dedicated event would duplicate the super property
+(justification per the repo instrumentation rule).
+
+### 5.6 No secrets (unchanged)
+
+The artifact contains only what the repo already publishes (embeddable
+Mapillary/Firebase/PostHog client keys). The workflow needs no repository
+secrets; `GITHUB_TOKEN` with the declared permissions covers everything.
 
 ---
 
-## 6. GitHub Actions workflow design
+## 6. Workflow: extending `.github/workflows/pages.yml`
 
-One new workflow, `.github/workflows/deploy-pages.yml`. The existing
-`ci.yml` stays untouched (it remains the PR gate); the deploy workflow
-runs the same checks itself so a deploy can never outrun a red suite.
+**Invariant: this repo has exactly one Pages deploy workflow, and it is
+`pages.yml`, edited in place.** Never author `deploy-pages.yml` or any
+second workflow that touches Pages — two workflows sharing (or worse, not
+sharing) the `pages` concurrency group is precisely the
+last-finisher-wins `/beta/` flapping hazard the EM review flagged. §8.2
+adds a static test for this invariant. `ci.yml` stays untouched as the PR
+gate.
 
-- **Triggers**: `push` to `main` or `beta`; `workflow_dispatch` with an
-  `include_beta` boolean (default true) — the escape hatch that ships a
-  prod-only artifact if the beta branch is broken/abandoned mid-hotfix.
-- **Jobs**: `build` (checkout both refs, test both, assemble, stamp,
-  upload) → `deploy` (`deploy-pages` into the `github-pages`
-  environment). Least-privilege permissions per job.
-- **Concurrency**: the official Pages pattern — serialize deploys, never
-  cancel an in-flight production deploy.
-- **Failure semantics**: any red check on *either* ref fails the run
-  before upload; the live site keeps serving the previous deployment.
-  A broken `beta` therefore blocks deploys until the owner either fixes
-  it, force-pushes it elsewhere, deletes it, or dispatches with
-  `include_beta: false` — four one-liners, all explicit (§7).
-
-Representative YAML (versions per current starter workflow):
+### 6.1 Triggers
 
 ```yaml
-name: Deploy Pages (production + beta)
-
 on:
   push:
     branches: [main, beta]
@@ -391,319 +478,590 @@ on:
         description: "Include /beta/ from the beta branch"
         type: boolean
         default: true
+```
 
-permissions:
-  contents: read
+- **Pull requests never deploy** — `ci.yml` (`pull_request` trigger)
+  remains the only PR automation. `pages.yml` gets no `pull_request`
+  trigger.
+- **`workflow_dispatch`** is the manual lever: routine re-deploys, the
+  post-branch-deletion re-publish, and the `include_beta: false`
+  emergency hatch that ships a production-only artifact while `beta` is
+  broken (`inputs.include_beta` evaluates empty → not-`false` on push
+  events, so pushes always include beta when the branch exists).
 
+### 6.2 Concurrency — what happens when main and beta change together
+
+Keep the shipped block verbatim (`pages.yml:25–27`):
+
+```yaml
 concurrency:
-  group: "pages"            # official pattern: one deploy at a time,
-  cancel-in-progress: false # never cancel an in-flight deploy
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Check out production (main)
-        uses: actions/checkout@v4
-        with: { ref: main, path: prod }
-
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-
-      - name: Detect beta branch
-        id: beta
-        env:
-          INCLUDE_BETA: ${{ inputs.include_beta != false }}
-        run: |
-          if [ "$INCLUDE_BETA" = "true" ] && \
-             git ls-remote --exit-code --heads \
-               "https://github.com/${{ github.repository }}" beta >/dev/null; then
-            echo "exists=true"  >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Check out beta
-        if: steps.beta.outputs.exists == 'true'
-        uses: actions/checkout@v4
-        with: { ref: beta, path: beta }
-
-      - name: Checks — production
-        working-directory: prod
-        run: npm run check && npm test
-
-      - name: Checks — beta
-        if: steps.beta.outputs.exists == 'true'
-        working-directory: beta
-        run: npm run check && npm test
-
-      - name: Assemble site
-        run: |
-          stamp () {  # stamp <checkout-dir> <channel> <ref>
-            sha=$(git -C "$1" rev-parse HEAD)
-            printf '{"commit":"%s","short":"%s","deployed_at":"%s","run":"%s","channel":"%s","ref":"%s"}\n' \
-              "$sha" "${sha:0:7}" "$(date -u +%FT%TZ)" \
-              "${{ github.run_id }}" "$2" "$3"
-          }
-          rsync -a --exclude .git --exclude .github prod/ _site/
-          stamp prod production main > _site/release.json
-          if [ "${{ steps.beta.outputs.exists }}" = "true" ]; then
-            rsync -a --exclude .git --exclude .github beta/ _site/beta/
-            stamp beta beta beta > _site/beta/release.json
-            # Beta identity: distinct PWA name, and noindex (Pages
-            # cannot set X-Robots-Tag; meta tag is the only mechanism).
-            sed -i 's/"name": "GeoParty"/"name": "GeoParty Beta"/;
-                    s/"short_name": "GeoParty"/"short_name": "GeoParty β"/' \
-              _site/beta/manifest.webmanifest
-            find _site/beta -maxdepth 1 -name '*.html' -exec \
-              sed -i 's|</title>|</title>\n  <meta name="robots" content="noindex" />|' {} +
-          fi
-
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: _site }
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write      # to deploy to Pages
-      id-token: write   # to verify the deployment source
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5
+  group: pages
+  cancel-in-progress: false
 ```
 
-Notes for the implementer:
+Semantics (GitHub-documented): at most one run of the group executes at a
+time; an executing deploy is never cancelled; at most one further run
+waits as *pending*, and a newer pending run supersedes (cancels) an older
+pending one. Combined with §6.3's tip resolution this gives convergence:
 
-- `prod` is always checked out from `refs/heads/main` (not
-  `github.sha`), so every run — whichever branch triggered it — deploys
-  the *current* branch tips. Deterministic and re-run-safe; rollback is
-  a branch operation, never a workflow re-run.
-- `rsync -a` copies (no symlinks — the Pages artifact forbids them; the
-  repo has none). Excluding only `.git`/`.github` preserves exact parity
-  with today's branch-deploy (which already publishes `docs/`, `tests/`,
-  `tools/` — all public content).
-- The stamp `printf` is the whole "build step". It never enters the dev
-  loop; a checkout still runs from `file://` with `release.json` simply
-  absent → `release: "dev"`, exactly as the observability plan specifies.
-- The `sed` edits touch only the CI-assembled beta copy. Repo files are
-  never modified. If the manifest/`</title>` shapes drift, the beta stamp
-  degrades to a no-op (identical PWA name, no noindex) — cosmetic, not
-  breaking; the phase-B0 acceptance check (§8) catches it.
-- One-time settings change (owner, §10): repo **Settings → Pages →
-  Source: GitHub Actions**. Flip it first — the live site keeps serving
-  the last branch-build until the first Actions deploy replaces it.
+- Push to `main` and push to `beta` seconds apart → run 1 executes
+  (resolving *both* current tips at its start — possibly already
+  including the second push), run 2 waits, then executes and resolves
+  both tips again. **The final deploy always reflects both current branch
+  tips**; intermediate states are at worst one-run stale, never mixed.
+- A burst of N pushes collapses to at most the running deploy plus one
+  pending run — no queue buildup, no lost final state.
 
----
+### 6.3 Immutable SHA resolution and isolated dual checkouts
 
-## 7. Day-to-day operations
+First build step, before any checkout:
 
-All flows are plain git against two well-known branches. (`gh` shown
-where it's the natural tool; the Actions tab works for all of it too.)
-
-**Open / update the beta** (from any candidate commit):
-
-```sh
-git push origin <candidate-sha>:refs/heads/beta   # create or move
-git push -f origin my-feature:refs/heads/beta     # iterate: force-push freely
+```yaml
+- name: Resolve branch tips (pinned for the rest of the run)
+  id: refs
+  env:
+    INCLUDE_BETA: ${{ inputs.include_beta != false }}
+  run: |
+    heads=$(git ls-remote "https://github.com/${{ github.repository }}" \
+              refs/heads/main refs/heads/beta)
+    main_sha=$(printf '%s\n' "$heads" | awk '$2=="refs/heads/main"{print $1}')
+    beta_sha=$(printf '%s\n' "$heads" | awk '$2=="refs/heads/beta"{print $1}')
+    test -n "$main_sha"   # main must exist
+    [ "$INCLUDE_BETA" = "true" ] || beta_sha=""
+    echo "main=$main_sha" >> "$GITHUB_OUTPUT"
+    echo "beta=$beta_sha" >> "$GITHUB_OUTPUT"
 ```
 
-→ workflow runs (~1–2 min), then up to 10 min CDN cache.
+Then two checkouts into **isolated directories**, pinned to those SHAs —
+`actions/checkout@v4` with `ref: <sha>` and `path: prod` /
+`path: beta-tree`; the beta checkout is skipped when
+`steps.refs.outputs.beta == ''`. Both `npm run check` + `npm test` runs
+execute with `working-directory` set per tree (one `setup-node`, node 22,
+zero deps — no install step, no cross-contamination possible between the
+trees).
 
-**Verify the beta:**
+Why resolve-then-pin instead of `github.sha` / branch-name checkouts:
 
-```sh
-curl -s https://earino-assistant.github.io/geoparty/beta/release.json
-# → {"short":"<must match the pushed sha>","channel":"beta",...}
-```
+- One atomic `ls-remote` gives both tips at a single instant; checkout,
+  tests, and the `release.json` stamps all use **the same SHA** — the
+  stamp can never disagree with the deployed tree (no
+  check-then-fetch race).
+- Uniform across all three trigger shapes (push-main, push-beta,
+  dispatch) — no per-trigger special-casing.
+- Deterministic within a run, convergent across runs: any run deploys
+  the branch-tip state as of its own start, so the latest run always
+  wins with the latest state.
 
-Then the owner checklist on real hardware:
-1. Phone A opens `/geoparty/beta/`, hosts a couch game; **confirm the
-   room appears under `rooms-beta/` in the Firebase console** (proves
-   the namespace + rules are live — do this on the first-ever beta).
-2. Phone B scans the QR → lands on a `/beta/` URL, joins, plays a round.
-3. TV path: scan/type — the typeable address shows
-   `…/geoparty/beta`; screen attaches.
-4. Consent-accept on one device → PostHog Activity shows events with
-   `deployment_channel=beta` and `release` = the beta SHA.
-5. Production spot-check: open `/geoparty/` — `release.json` still
-   shows the `main` SHA; a prod room lands in `rooms/`.
+**Stated trade (EM asked for this,
+`engineering-manager-review-v0.3.md:419–425`):** under the shipped
+workflow, *re-running an old green run* redeployed that old `github.sha`
+— an undocumented-but-real fast rollback path. Under tip resolution, a
+re-run redeploys **current** tips, so that path is gone. Production
+rollback is the documented branch operation (`git revert` + push,
+~2 min workflow + ≤10 min CDN) — one rollback story, no hidden second
+one.
 
-**Promote the exact verified commit:**
+### 6.4 What deploys when
+
+| Event | Root (`/geoparty/`) | `/geoparty/beta/` |
+|---|---|---|
+| Push to `main` | new `main` tip | current `beta` tip, republished |
+| Push to `beta` | current `main` tip, **byte-identical** app tree (only `release.json`'s `deployed_at`/`run` refresh — the `release` super property is the SHA, so production attribution is unaffected) | new `beta` tip |
+| Both change near-simultaneously | converges to both tips (§6.2) | converges |
+| Dispatch, `include_beta: false` | `main` tip | **absent** → 404 |
+| `beta` branch does not exist | `main` tip | absent → 404 |
+| `beta` branch deleted | unchanged until the next run — deletion triggers nothing; run one dispatch to publish the beta-less artifact | then 404 |
+
+**Bootstrapping:** the extended workflow merges to `main` *before* any
+`beta` branch exists. Its first run resolves `beta_sha=""`, skips every
+beta step, and publishes an artifact identical to today's plus
+`channel`/`ref` fields in `release.json` — production provably unaffected
+before beta ever exists (B0 acceptance, §9).
+
+### 6.5 Assembly and per-channel release stamping
+
+- `rsync -a --exclude .git --exclude .github prod/ _site/`, and (when
+  beta exists) `… beta-tree/ _site/beta/`. Same exclusions as the
+  artifact ships today (the shipped workflow uploads the repo root;
+  `docs/`, `tests/`, `tools/` are already public content — parity kept).
+  The artifact upload switches from `path: .` to `path: _site`.
+- **Release stamps** extend the shipped `node -e` stamp
+  (`pages.yml:52–65`), one per channel, each from its **own pinned SHA**:
+
+  - `_site/release.json`:
+    `{commit: <main sha>, short, deployed_at, run, env: "pages", channel: "production", ref: "main"}`
+  - `_site/beta/release.json`: same shape with the beta SHA,
+    `channel: "beta"`, `ref: "beta"`.
+
+  Existing keys are preserved (`consent.js` reads only
+  `short`/`commit`/`deployed_at` — verified, so the two new keys are
+  additive metadata). `channel` in the file is a human/dashboard
+  cross-check; runtime identity remains `channelFromPath` (§4).
+- **Beta markers, fail-loud** (replacing v1's silent-degrade `sed`): a
+  node script that (a) parses `_site/beta/manifest.webmanifest`, asserts
+  `name === "GeoParty"`, rewrites `name`/`short_name` to the Beta
+  variants; (b) inserts `<meta name="robots" content="noindex" />` into
+  each top-level `_site/beta/*.html` `<head>`, asserting the insertion
+  anchor exists in every file. Any assertion failure **fails the build**
+  (nothing deploys, previous site keeps serving) — drift is surfaced at
+  the moment it happens instead of shipping a cosmetic no-op.
+- The `deploy` job stays exactly as shipped (`pages.yml:73–82`):
+  `configure-pages@v5` in build, `upload-pages-artifact@v3`,
+  `deploy-pages@v4`, `github-pages` environment, least-privilege
+  permissions. **One artifact, one deploy step, per run.**
+
+### 6.6 The workflow-file-per-ref subtlety
+
+GitHub runs the workflow file **from the pushed ref**. Two consequences:
+
+- A `beta` branch cut from a pre-B0 commit contains the old
+  main-only `pages.yml` — pushing it triggers **nothing** (its `on:` has
+  no `beta`), and `/beta/` silently never appears. Rule: **beta
+  candidates must contain B0's workflow** — in practice, always branch
+  candidates from current `main` (the normal flow) or rebase onto it.
+- A candidate that *modifies* `pages.yml` will run its modified version
+  on push-to-beta. Workflow edits therefore go through the same
+  Fable-review + owner-approval gate as any change *before* being pushed
+  to `beta` (§10) — which is already the project's process for every
+  change.
+
+### 6.7 Promotion and rollback (mechanics; policy in §10)
+
+**Promote** the exact verified SHA — fast-forward only:
 
 ```sh
 git fetch origin
-git push origin origin/beta:main    # fast-forward only; rejected if main moved
-# if rejected: rebase the candidate onto main, re-push beta, re-verify, retry
-git tag prod-$(date +%Y%m%d) origin/beta && git push origin --tags   # optional
+git push origin origin/beta:main   # plain push: git itself rejects non-fast-forward
+git tag v0.x.y origin/beta && git push origin v0.x.y   # meaningful trains
 ```
 
-The push triggers the same workflow; production now serves the verified
-tree byte-for-byte (only `release.json` and the beta stamps differ —
-there is no build to diverge). Leaving `beta` == `main` afterwards is
-harmless (`/beta/` mirrors prod); to close the beta slot:
-
-```sh
-git push origin :beta                      # delete the branch
-gh workflow run deploy-pages.yml           # branch deletion doesn't trigger
-                                           # push workflows; one dispatch
-                                           # publishes the beta-less artifact
-```
+If rejected (`main` moved while verifying): rebase the candidate onto
+`main`, force-push `beta`, **re-verify on the beta URL**, retry. Never
+`push -f` to `main`. The promotion push triggers the workflow; production
+then serves the verified tree byte-for-byte (only stamps differ — there
+is no build to diverge).
 
 **Roll back:**
 
 ```sh
-# beta (anything goes — it's the disposable slot):
+# beta — anything goes; it's the disposable slot:
 git push -f origin <any-sha>:refs/heads/beta
 
-# production (history-preserving, never force-push main):
-git revert <bad-sha> && git push origin main
-# or for a multi-commit promotion: git revert -m/<range> as usual
+# production — history-preserving, the only path:
+git revert <bad-sha..range> && git push origin main
+
+# emergency: ship production alone while beta is broken:
+gh workflow run pages.yml -f include_beta=false
+# or delete the slot: git push origin :beta && gh workflow run pages.yml
 ```
 
-Live in ~2 min plus ≤10 min cache; confirm via `release.json`.
+Live in ~2 min workflow + ≤10 min CDN; always confirm via `release.json`
+(`cache: no-store` / `curl`), never by eyeballing UI through a
+possibly-stale cache.
 
-**Broken beta is blocking a prod hotfix** (the one awkward mode, §9):
+---
+
+## 7. Firebase rules and the owner walkthrough
+
+### 7.1 The rules change
+
+One change: the `rooms-beta` sibling, **byte-identical** to the existing
+`rooms` block except the key. Full replacement ruleset (this exact text
+also lands in `README.md`'s rules section in B1 as the canonical copy):
+
+```json
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$roomCode": {
+        ".read": true,
+        ".write": "!data.exists() || data.child('createdAt').val() > (now - 86400000) || newData.val() == null",
+        ".validate": "$roomCode.matches(/^[A-HJ-NP-Z]{6}$/)",
+        "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" }
+      }
+    },
+    "rooms-beta": {
+      "$roomCode": {
+        ".read": true,
+        ".write": "!data.exists() || data.child('createdAt').val() > (now - 86400000) || newData.val() == null",
+        ".validate": "$roomCode.matches(/^[A-HJ-NP-Z]{6}$/)",
+        "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" }
+      }
+    }
+  }
+}
+```
+
+Why this is safe for production: the `rooms` block is unchanged
+byte-for-byte; the top-level defaults still deny everything else; and
+`rooms-beta` was **already fully denied** before this change (top-level
+`false` defaults), so the edit only *adds* an allowlisted subtree that no
+shipped client touches until B3. Publishing it early is inert.
+
+Why channel mismatch is safe (§5.2 recap): a production client can only
+ever address `rooms/…`, a beta client only `rooms-beta/…` — a code from
+the other channel reads an empty path and lands in the existing
+room-not-found flow. The rules make even a buggy cross-write fail:
+each subtree validates independently.
+
+### 7.2 Owner walkthrough — publishing (Eduardo, ~5 minutes)
+
+No secrets involved anywhere in this flow; the database URL is the public
+client identifier from `config.js`.
+
+1. **Back up**: open the Firebase console → project `geoparty-9ffe7` →
+   *Realtime Database* → *Rules*. Select the entire current rules text and
+   save it into a local file (e.g. `rules-backup-2026-08-XX.json`). This
+   file is the rollback.
+2. **Sanity-check the backup** matches `README.md:144–158` (it should be
+   exactly the published block there). If it differs, stop and report the
+   diff before proceeding — the live rules would be drifted from the
+   documented ones.
+3. **Replace**: paste the §7.1 ruleset over the editor contents,
+   replacing everything.
+4. **Publish**: the console refuses syntactically invalid rules at
+   publish time; on any error, do not publish — restore the backup text
+   and report.
+
+### 7.3 Owner walkthrough — validation (console-independent)
+
+Validate from any shell via the RTDB REST API, which enforces the same
+rules as the SDK. Expected results, in order (use a code like `ZZZZZZ` —
+letters must avoid `I`/`O` per the allowed alphabet):
 
 ```sh
-gh workflow run deploy-pages.yml -f include_beta=false   # ship prod alone
-# or: git push origin :beta        (delete the slot entirely)
+DB=https://geoparty-9ffe7-default-rtdb.europe-west1.firebasedatabase.app
+
+# 1. Valid 6-letter beta room: ACCEPTED (HTTP 200, echoes the JSON)
+curl -sw '\n%{http_code}\n' -X PUT -d "{\"createdAt\":$(date +%s000)}" \
+  "$DB/rooms-beta/ZZZZZZ.json"
+
+# 2. 4-letter code: REJECTED by the .validate regex
+#    (HTTP 401, body contains "Permission denied")
+curl -sw '\n%{http_code}\n' -X PUT -d "{\"createdAt\":$(date +%s000)}" \
+  "$DB/rooms-beta/ZZZZ.json"
+
+# 3. Read the beta room back: HTTP 200 with the createdAt payload
+curl -sw '\n%{http_code}\n' "$DB/rooms-beta/ZZZZZZ.json"
+
+# 4. Clean up (delete is allowed by design): HTTP 200
+curl -sw '\n%{http_code}\n' -X DELETE "$DB/rooms-beta/ZZZZZZ.json"
+
+# 5. Production regression check — 4-letter still rejected under rooms/:
+curl -sw '\n%{http_code}\n' -X PUT -d "{\"createdAt\":$(date +%s000)}" \
+  "$DB/rooms/ZZZZ.json"
+```
+
+Pass = 200 / denied / 200 / 200 / denied, in that order. Any deviation:
+roll back (§7.4) and report which step diverged.
+
+**Rollback**: paste the backup file's contents into the Rules editor and
+publish. That single action restores the exact pre-change state;
+production clients are unaffected throughout (their subtree never
+changed).
+
+### 7.4 Sequencing
+
+Publish order is: **rules before beta exists**.
+
+1. B1 merges (canonical rules text lands in `README.md`; no shipped page
+   can reach `rooms-beta` yet, because `/beta/` isn't served).
+2. Owner publishes + validates the rules (§7.2–7.3). Inert for
+   production; nothing consumes `rooms-beta` yet.
+3. Only then is the `beta` branch first created (B3), making `/beta/`
+   live with its namespace already writable.
+
+This ordering makes the "beta is live but every room-create is silently
+rejected" window — the plan's known-broken interval — structurally
+impossible, instead of merely unlikely. The inverse order (beta live
+first) is prohibited.
+
+---
+
+## 8. Test and verification matrix
+
+### 8.1 Unit tests (Node runner, `npm test` — all local)
+
+- **`tests/channel.test.js`** (new): the full §5.1 matrix — beta paths
+  with and without trailing slash and page names, the `betamax`
+  false-positive, `file://` paths *including ones containing `/beta/`*,
+  localhost-http beta. Plus: `roomsRoot` returns only values in
+  `{"rooms", "rooms-beta"}` (the rules allowlist — a table test keeps a
+  future third value from silently escaping the rules).
+- **`tests/analytics.test.js`** (extended):
+  - `RELEASE_PROPS` contains `deployment_channel: "string"`, and
+    `register({deployment_channel: "beta"})` survives sanitization
+    (i.e. is not stripped by allowlist or `BANNED_KEY_RE`).
+  - Ordering: with a fake `loadPosthog`, events `track()`ed *before* the
+    script "loads" flush **after** the registered super properties are
+    applied — for both the returning-visitor and fresh-accept flows —
+    so no schema event can ever be channel-unstamped.
+  - `register` stays consent-gated (no consent → `false`, nothing
+    buffered to a live client).
+  - Dev path: channel registration works with `release.json` absent
+    (`release: "dev"` + `deployment_channel: "production"` coexist).
+- **Firebase namespace**: `js/firebase.js` itself imports the CDN SDK and
+  is not unit-loadable (unchanged constraint); isolation is carried by
+  the pure `roomsRoot` tests above plus the single-choke-point property —
+  §8.2 adds a static guard that `rooms/` appears in no other `js/`
+  module, so `roomRef()` remains the only namespace decision site.
+
+### 8.2 Static / workflow checks (local, in `npm test`)
+
+New `tests/deploy-workflow.test.js` reading the YAML as text (no YAML
+dependency needed — the repo has zero deps and keeps it that way):
+
+- Exactly **one** file under `.github/workflows/` references
+  `deploy-pages` / `upload-pages-artifact` — the single-deploy-workflow
+  invariant (the anti-dueling guard).
+- `pages.yml` triggers on `main` **and** `beta` pushes plus
+  `workflow_dispatch`, and has **no** `pull_request` trigger.
+- Concurrency block present: `group: pages`,
+  `cancel-in-progress: false`.
+- The build resolves both refs (`ls-remote` + both `refs/heads/`
+  entries), runs check+test with **two distinct working directories**,
+  stamps **two** `release.json` paths with `channel` fields, and guards
+  every beta step on the branch-exists output (the
+  no-beta-until-branch-exists bootstrap property).
+- `ci.yml` contains no Pages/deploy references.
+- Cross-module guard: `rooms/` as a database path string appears only in
+  `js/firebase.js` (and `rooms-beta` only via `roomsRoot`).
+
+These are deliberately string-level assertions: cheap, dependency-free,
+and they pin exactly the properties this plan declares invariant.
+
+### 8.3 Manual beta acceptance (B3, owner on real hardware)
+
+1. `curl …/geoparty/beta/release.json` → `short` = pushed beta SHA,
+   `channel: "beta"`; root `release.json` still shows the `main` SHA.
+2. Direct `/geoparty/beta/` URL loads on a phone; view-source shows the
+   `noindex` meta; no console errors.
+3. Phone A hosts a couch game on `/beta/` → **room appears under
+   `rooms-beta/` in the Firebase data view** (first-ever beta only:
+   proves rules + namespace end-to-end).
+4. Phone B scans the lobby QR → lands on a `/beta/` URL, joins, plays a
+   round. TV path: typeable address reads
+   `earino-assistant.github.io/geoparty/beta`; screen attaches.
+5. Production spot-check in parallel: `/geoparty/` hosts a room → lands
+   under `rooms/`; both games are mutually invisible.
+6. Consent-accept on a beta device → PostHog Activity shows events with
+   `deployment_channel=beta` and `release` = beta SHA. Check whether the
+   session's first `$pageview` carries the property (the §5.5 residual);
+   record the answer in `docs/analytics.md`.
+7. PWA: install from `/beta/` → separate "GeoParty Beta" icon; both
+   installs coexist and open their own channel.
+8. Promotion drill: fast-forward push → root `release.json` shows the
+   promoted SHA; site behavior verified.
+9. Rollback drill (once): `git revert` a trivial doc commit on `main`,
+   push, confirm redeploy; force-push `beta` back a commit, confirm
+   `/beta/` follows.
+
+### 8.4 What is provable where (explicit split)
+
+**Locally verifiable before any deploy** (all green required to merge):
+every §8.1 unit test, every §8.2 static check, `npm run check`, plus
+`node --check` on the workflow's inline node scripts if extracted for
+testing. **Only provable by the first production Actions run + a
+browser**: that Pages accepts and serves the assembled artifact, real
+concurrency behavior, CDN timing, the Firebase rules as published (§7.3
+REST checks), PostHog console filtering, PWA install identity, and the
+`$pageview` timing question. B0/B3 acceptance criteria (§9) are written
+around exactly this split — nothing live-only is claimed verified until
+the corresponding checklist item runs.
+
+---
+
+## 9. Implementation phases
+
+Ground rules: repo policy applies to every phase (pure logic in pure
+modules with tests; `npm test` + `npm run check` green; analytics
+schema/docs updated together; consent gate untouched). **This plan is
+subject to owner review; no phase starts before Eduardo's explicit
+approval, and Opus 4.8 (pinned) implements — one repo agent at a time.**
+
+**B0 — extend the deploy workflow.**
+Scope: `pages.yml` edits per §6 (triggers, resolve step, dual checkout /
+dual checks, assembly, per-channel stamps, fail-loud beta markers);
+`tests/deploy-workflow.test.js` (§8.2, the workflow-shape half).
+Order: first — everything else is inert without it, and its no-beta
+bootstrap path (§6.4) means it can merge alone safely.
+Acceptance: static tests green locally; then the first live run —
+`/geoparty/` byte-identical in behavior, root `release.json` gains
+`channel: "production"`/`ref: "main"`, `/geoparty/beta/` 404s, Deployments
+tab shows one deploy.
+Rollback: `git revert` the workflow commit → shipped `pages.yml` behavior
+returns on the next push.
+
+**B1 — channel module + Firebase namespace + rules text.**
+Scope: `js/channel.js` (§5.1); `js/firebase.js` root from `roomsRoot`
+(§5.2); canonical §7.1 ruleset into `README.md`; `tests/channel.test.js`
+and the `rooms/`-choke-point static guard.
+Order: after B0 (any order relative to B2; both before B3). Inert in
+production: with no `/beta/` served, every client resolves
+`production`/`rooms/`.
+Acceptance: unit tests green; a dev checkout (`file://`) and the live
+production site both still use `rooms/` (spot-check one room).
+Instrumentation: none — no new decision point; the channel rides on every
+event via B2 (a dedicated event would duplicate the super property).
+Rollback: `git revert`.
+
+**B2 — PostHog channel stamping.**
+Scope: `RELEASE_PROPS` + `deployment_channel` (§5.5 item 1);
+synchronous registration in both consent paths (§5.5 item 2);
+`docs/analytics.md` super-property row; §8.1 analytics tests.
+Order: after B1 (imports `channelFromPath`).
+Acceptance: tests green; on production, consented events carry
+`deployment_channel: "production"` (visible in PostHog Activity) — no
+behavior change otherwise.
+Rollback: `git revert`.
+
+**B3 — owner manual steps + first live beta (Eduardo, with the agent
+on standby for verification).**
+Scope, strictly ordered: (1) publish + validate Firebase rules
+(§7.2–7.3); (2) PostHog console: internal-users filter + KPI insight
+filters (§5.5); (3) create the `beta` branch from current `main`
+(`git push origin main:refs/heads/beta`) — the first candidate; (4) run
+the full §8.3 acceptance checklist, including the promotion and rollback
+drills; (5) record the `$pageview` timing finding.
+Dependencies: B0+B1+B2 all merged and live on production first.
+Acceptance: every §8.3 item passes.
+Rollback: delete the `beta` branch + one dispatch (site returns to
+production-only); re-paste the rules backup (§7.3); PostHog filter
+changes are additive and reversible in the console.
+
+Out of scope, explicitly: the v1 plan's "BETA corner badge" polish is
+dropped from the phase list (it was optional there too); it may return as
+a separately approved change. `deploy-pages` version bumps likewise (§0).
+
+---
+
+## 10. Operational policy
+
+- **Roles (project policy, restated as binding):** Fable plans and
+  reviews; pinned Opus 4.8 implements; exactly one repo agent works at a
+  time, sequentially. **Nothing is pushed, merged, promoted, or
+  force-pushed without Eduardo's explicit approval** — including every
+  `beta` force-push and every promotion.
+- **Branch lifecycle:** `beta` exists only while a candidate is under
+  verification. Created from (or rebased onto) current `main` — never
+  from a pre-B0 commit (§6.6). Force-pushing `beta` is normal and
+  expected (it is the disposable slot); deleting it closes the slot
+  (+ one dispatch). `main` is never force-pushed, ever.
+- **Default flow for every future code change:** Opus implements on a
+  feature branch → Fable review → Eduardo approves → the branch is pushed
+  to `beta` (force-push over whatever was there) → Eduardo verifies on
+  the live `/beta/` URL per §8.3's relevant subset → Eduardo approves
+  promotion → fast-forward push of the **verified SHA** to `main`.
+  Changes only skip the beta step when Eduardo explicitly says so
+  (e.g. doc-only commits).
+- **PR relationship:** PRs against `main` remain the review/discussion
+  vehicle (as PR #1 was). The *merge* mechanics change: promotion is the
+  fast-forward push of the verified beta SHA — GitHub then marks any open
+  PR whose head is that SHA as merged automatically. Merge-commit and
+  squash merges are **not** used for promotions: both would create a SHA
+  on `main` that was never the SHA verified on `/beta/`.
+- **Release tags:** meaningful promoted trains get `v0.x.y` on the
+  promoted SHA (continuing `v0.1.0-couch`, `v0.2.0-h2h`,
+  `v0.3.0` = `28d2b5b`; EM P3-11). Tags are pushed only with the
+  promotion, by the same approval.
+- **Workflow-file changes** ride the same flow — with the §6.6 caveat
+  that they take effect on `beta` pushes immediately, so they get review
+  *before* reaching the `beta` branch, like everything else.
+
+---
+
+## 11. Day-to-day runbook (owner quick reference)
+
+**Open / update the beta** (after approval):
+
+```sh
+git push -f origin <candidate-sha>:refs/heads/beta
+# workflow ~1–2 min, then ≤10 min CDN
+curl -s https://earino-assistant.github.io/geoparty/beta/release.json
+# → "short" must equal the pushed SHA, "channel":"beta"
+```
+
+**Verify:** §8.3 checklist (or its relevant subset for small changes).
+
+**Promote / tag / close the slot / roll back:** §6.7 command cards.
+
+**Broken beta blocking a prod hotfix:**
+
+```sh
+gh workflow run pages.yml -f include_beta=false   # ship prod alone
+# or: git push origin :beta && gh workflow run pages.yml
 ```
 
 ---
 
-## 8. Implementation phases (for Opus)
+## 12. Risks, failure modes, and what NOT to build
 
-Ground rules per repo policy: pure logic in pure modules with
-`tests/*.test.js` coverage; `npm test` + `npm run check` green; analytics
-schema/docs updated with any event change; consent gate untouched.
+- **Red `beta` blocks all deploys** (both trees must be green).
+  Accepted for predictability; the unblock is a documented one-liner
+  (§11). This is the same trade the shipped workflow already makes for
+  `main`.
+- **Forgotten rules paste** → beta writes silently rejected (host plays,
+  nobody joins). Designed out by §7.4's rules-before-beta-exists
+  ordering plus §8.3 item 3.
+- **Stale CDN confusion** → `release.json` is always the first verify
+  step, never UI eyeballing.
+- **First-`$pageview` channel gap** (§5.5 residual) → bounded to ≤1
+  owner-device event per beta session; `$current_url` backstop filter;
+  empirically resolved in B3.
+- **Beta marker drift** (manifest/HTML shape changes) → fail-loud build
+  error at the moment of drift (§6.5), not a silent no-op.
+- **Non-ff promotion race** → plain push is rejected by git; rebase,
+  re-push beta, **re-verify**, retry. Never `-f` to `main`.
+- **Old workflow file on the beta branch** → beta push deploys nothing
+  (§6.6); rule: candidates branch from current `main`.
+- **Rules edits affect a shared DB** → the two blocks are independent
+  siblings; trial rule changes on `rooms-beta` first (§5.2); rollback is
+  the backup re-paste (§7.3).
+- **Lost re-run-rollback path** → deliberate (§6.3); the one documented
+  rollback is `git revert`.
 
-**B0 — the workflow (supersedes observability P0 item 1).**
-`deploy-pages.yml` exactly as §6, including the beta half from day one;
-extend the §11 `release.json` shape with `channel`/`ref`; owner flips
-the Pages source (§10).
-*Tests:* none in-repo (YAML isn't node-testable) — acceptance is live:
-after merge, `/geoparty/` serves identical content with a valid
-`release.json` (`channel=production`, `short` = `main` SHA); pushing a
-throwaway `beta` branch makes `/geoparty/beta/release.json` appear with
-`channel=beta`, beta pages contain the `noindex` meta and the renamed
-manifest; deleting it + one dispatch returns `/beta/` to 404. Genuinely
-untestable-in-CI portions are this list, stated per repo rule.
+What NOT to build (retained; nobody re-litigates without new facts):
 
-**B1 — channel + Firebase namespace.**
-New `js/channel.js` (`channelFromPath`, `roomsRoot`) with the §5.1 test
-matrix; `js/firebase.js` `roomRef()`/rules-adjacent helpers take the
-root from `roomsRoot(location.pathname)`; README rules block gains the
-mirrored `rooms-beta` sibling; owner pastes rules (§10) **before** the
-first real beta session.
-*Tests:* channel/table tests incl. the `betamax` false-positive and
-`file://` cases; a test that `roomsRoot` returns only values the rules
-allowlist. *Acceptance:* verify-checklist items 1 and 5 (§7).
-*Instrumentation:* none — no new product decision point; channel rides
-on every event via B2 (justification per repo rule: a dedicated event
-would duplicate the super property).
-
-**B2 — PostHog channel stamping + KPI hygiene.**
-Extend the §11 register glue's payload with `deployment_channel` from
-`channelFromPath`; add the super-property row to `docs/analytics.md`;
-owner sets the PostHog internal/test-user default filter and adds
-`deployment_channel is not "beta"` to existing KPI insights (§10).
-*Tests:* pure register-payload builder covered for both channels and the
-dev (`release.json`-absent) case; existing sanitizer tests untouched
-(super properties bypass `track()` by design — assert the builder emits
-only the five fixed keys).
-*Acceptance:* verify-checklist item 4; a beta event visibly excluded
-from a KPI insight.
-
-**B3 (optional polish, not blocking).** A small "BETA" corner badge on
-`/beta/` pages driven by `channelFromPath` (pure predicate already
-tested; DOM glue only) — helps mid-party "which site is this phone on?"
-No event (the super property already answers every product question).
-
-Sequencing with the observability work: B0 merges *with or immediately
-after* observability P0 (same workflow file — coordinate so only one of
-the two plans authors it, with this plan's version as the superset).
-B1/B2 are independent of the observability phases and of each other.
-
----
-
-## 9. Risks, failure modes, and what NOT to build
-
-Failure modes and their designed responses:
-
-- **Red `beta` blocks all deploys** (including prod hotfixes). Accepted
-  for predictability ("nothing deploys unless everything deployable is
-  green") because the unblock is a documented one-liner
-  (`include_beta=false` dispatch, or delete the branch) — §7.
-- **Forgotten rules paste** → beta room creation writes are silently
-  rejected (fire-and-forget), host plays on while nobody can join — the
-  known Firebase failure shape. Mitigated by verify-checklist item 1
-  (console check on first beta) and the B1 acceptance gate.
-- **Stale CDN confusion** — owner tests old bytes for up to 10 min.
-  Mitigated by making `release.json` the first verify step, never UI
-  eyeballing.
-- **Beta URL leaks** — noindex meta, nothing links to it, no secrets,
-  DB open-by-design; worst case a stranger plays the beta. Accepted.
-- **`sed` stamp drift** (manifest/`</title>` shape changes) — degrades
-  to cosmetic no-op, caught by B0's acceptance checks on next beta open.
-- **Non-ff promotion race** (`main` moved while verifying) — the plain
-  push is rejected; the documented response is rebase → re-verify →
-  retry, never `-f`.
-- **Both-channels-one-DB rules mistakes** — a bad rules edit can affect
-  production; mitigated by trialing rule changes on the `rooms-beta`
-  block first (§5.2) and by the rules being two independent siblings.
-
-What NOT to build (each rejected above; listed so nobody re-litigates):
-
-- **No PR previews / multiple candidates** — one `beta` slot, period.
-- **No second Firebase or PostHog project**, no separate PostHog key.
-- **No service worker**, for either channel — the no-SW state is
-  load-bearing for cache-safety here.
-- **No third-party deploy actions**, no `gh-pages` branch, no external
+- No second Pages deploy workflow — **ever** (the P2-2 hazard).
+- No PR previews / multiple candidates — one `beta` slot, period.
+- No second Firebase or PostHog project, no separate PostHog key.
+- No service worker, for either channel — no-SW is load-bearing for
+  cache safety.
+- No third-party deploy actions, no `gh-pages` branch, no external
   preview host, no second repo.
-- **No room-schema version negotiation** — the namespace split makes it
-  dead code.
-- **No committed version/beta files, no beta config forks in JS** — the
-  path is the channel; the stamp lives only in the CI artifact.
-- **No custom-domain / robots.txt machinery** for privacy — noindex
-  meta is the ceiling of what Pages supports and is proportionate.
+- No room-schema version negotiation — the namespace split makes it dead
+  code.
+- No committed version/beta files, no beta config forks in JS — the URL
+  is the channel; stamps live only in the CI artifact.
+- No robots.txt/custom-domain machinery — the per-page `noindex` meta is
+  the ceiling of what Pages supports and is proportionate.
 
 ---
 
-## 10. Owner checklist (one-time + per-beta)
+## 13. Owner checklist (one-time + per-beta)
 
-One-time setup, in order:
+One-time, strictly in order:
 
-- [ ] Confirm with the observability track who lands
-      `deploy-pages.yml` (this plan's §6 version is the superset).
-- [ ] Repo **Settings → Pages → Build and deployment → Source: GitHub
-      Actions** (site keeps serving until the first Actions deploy).
-- [ ] Merge B0; confirm `/geoparty/release.json` goes live and the
-      site is unchanged.
-- [ ] Firebase console → Realtime Database → Rules: paste the updated
-      rules with the mirrored `rooms-beta` block; publish.
-- [ ] PostHog: set the internal/test-user default filter to
-      `deployment_channel = beta`; add `deployment_channel is not
-      "beta"` to existing KPI insights/dashboards.
+- [ ] Approve this amended plan (gates all phases).
+- [ ] B0 merged → confirm root `release.json` gains
+      `channel: "production"` and the site is unchanged; `/beta/` 404s.
+- [ ] B1 + B2 merged → production spot-checks per §9.
+- [ ] Publish + validate Firebase rules (§7.2–7.3) — **before any beta
+      branch exists**.
+- [ ] PostHog: internal/test-users filter + KPI insight filters (§5.5).
+- [ ] Create `beta` from current `main`; run the §8.3 checklist once in
+      full (including promote + rollback drills).
 
 Per-beta cycle:
 
-- [ ] `git push -f origin <candidate>:refs/heads/beta`
+- [ ] Approve the candidate → `git push -f origin <sha>:refs/heads/beta`.
 - [ ] `curl …/beta/release.json` — SHA matches.
-- [ ] Run the §7 device checklist (two phones + TV path + consent/
-      PostHog + prod spot-check).
-- [ ] Promote: `git push origin origin/beta:main`; optional tag.
-- [ ] Confirm `/geoparty/release.json` shows the promoted SHA.
-- [ ] Optionally close the slot: `git push origin :beta` + one
-      `workflow_dispatch`.
+- [ ] Verify on devices (§8.3 subset appropriate to the change).
+- [ ] Approve promotion → `git push origin origin/beta:main`
+      (+ `v0.x.y` tag for meaningful trains).
+- [ ] Confirm root `release.json` shows the promoted SHA.
+- [ ] Optionally close the slot: `git push origin :beta` + one dispatch.
 
-Rollback cards (keep handy):
-
-- Beta: `git push -f origin <good>:refs/heads/beta`
-- Production: `git revert <bad> && git push origin main`
-- Prod-only emergency deploy: `gh workflow run deploy-pages.yml
-  -f include_beta=false`
+Rollback cards: §6.7 (git), §7.3 (rules re-paste).
