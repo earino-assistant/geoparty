@@ -415,9 +415,18 @@ export const EXCEPTION_PROPS = Object.freeze({
   net_type: "string", online: "bool", webgl: "bool", ref_code: "string",
 });
 
-// Registered once per session after a successful init, from release.json.
+// Registered once per session after a successful init. `release`/`commit`/
+// `deployed_at` come from release.json (async, deploy-written, absent in a
+// dev checkout → release "dev"). `deployment_channel` is the ONE super
+// property that must NOT wait on that fetch: it is registered synchronously
+// from channelFromPath() the moment consent lands, so queued product events
+// flush already channel-stamped and never pass a production KPI filter
+// (beta-deployment-plan §5.5). It is one of two fixed strings
+// ("production"|"beta") — an aggregate by construction; BANNED_KEY_RE does
+// not match it.
 export const RELEASE_PROPS = Object.freeze({
   release: "string", commit: "string", deployed_at: "string",
+  deployment_channel: "string",
 });
 
 // Defense in depth: even if a call site (or a future schema edit) tries to

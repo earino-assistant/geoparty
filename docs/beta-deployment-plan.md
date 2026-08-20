@@ -1065,3 +1065,37 @@ Per-beta cycle:
 - [ ] Optionally close the slot: `git push origin :beta` + one dispatch.
 
 Rollback cards: §6.7 (git), §7.3 (rules re-paste).
+
+---
+
+## 14. Implementation notes (B0–B2, Opus 4.8 — built candidate, local only)
+
+B0–B2 were implemented exactly to this spec as one local candidate (no beta
+branch, no push, no rules published, no PostHog console change — those remain
+the B3 owner steps). Files: `.github/workflows/pages.yml` (extended in place),
+`js/channel.js` (new), `js/firebase.js`, `js/analytics.js`, `js/consent.js`,
+`README.md`, `docs/analytics.md`, `docs/architecture.md`, and tests
+`tests/channel.test.js`, `tests/deploy-workflow.test.js`,
+`tests/analytics.test.js`. `npm test` (all green) and `npm run check` pass.
+
+One honest realization detail, not a design change:
+
+- **Namespace literals live in `js/channel.js`, not `js/firebase.js`.** §5.2
+  mandates `roomRef()` take its root from `roomsRoot(...)`; the two legal root
+  strings (`rooms`, `rooms-beta`) therefore live in one frozen `ROOMS_ROOTS`
+  map in `channel.js`, and `firebase.js` composes `` `${ROOMS_ROOT}/${code}` ``
+  from it. So the literal `rooms/` DB *path* string no longer appears in
+  `firebase.js` (or anywhere) — it is *built* at the single choke point.
+  §8.2's cross-module guard is implemented as the equivalent, slightly
+  stronger set: the `rooms-beta` namespace literal appears only in
+  `channel.js`; no module contains a hardcoded `rooms/`-shaped DB path
+  literal; and `roomsRoot()` is called from exactly one module
+  (`firebase.js`). Same invariant — `roomRef()` is the only namespace
+  decision site — enforced without a raw path literal to drift.
+
+Everything else (workflow triggers/resolve/dual-tree/assembly/stamps/fail-loud
+markers, the `channelFromPath(pathname, protocol)` signature, the
+`deployment_channel` allowlist + synchronous dual-path registration, the
+`deploy-pages@v4` pin, `path: _site` upload) matches the spec verbatim.
+Runtime-only proofs (Pages serving the artifact, real concurrency, CDN timing,
+published rules, console filtering, `$pageview` timing) remain B3 per §8.4.

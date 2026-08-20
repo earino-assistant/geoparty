@@ -153,10 +153,32 @@ publish:
         ".validate": "$roomCode.matches(/^[A-HJ-NP-Z]{6}$/)",
         "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" }
       }
+    },
+    "rooms-beta": {
+      "$roomCode": {
+        ".read": true,
+        ".write": "!data.exists() || data.child('createdAt').val() > (now - 86400000) || newData.val() == null",
+        ".validate": "$roomCode.matches(/^[A-HJ-NP-Z]{6}$/)",
+        "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now + 300000" }
+      }
     }
   }
 }
 ```
+
+`rooms-beta/` is the beta deployment lane's isolated data subtree
+(`docs/beta-deployment-plan.md` §5.2, §7): pages served under `/geoparty/beta/`
+route every room read/write there instead of `rooms/`, chosen client-side by
+one pure function (`js/channel.js` → `roomsRoot()`), so a beta candidate's
+room-state shape can never feed a production phone. The block is **byte-identical
+to `rooms/` except the key**, same threat model and same 24 h expiry. Adding it
+is inert for production: `rooms-beta/` was already fully denied by the top-level
+`false` defaults, so this only *adds* an allowlisted subtree no shipped client
+touches until a beta branch exists, and the `rooms/` block is unchanged. This
+ruleset is the canonical copy; **publishing it to the Firebase console is a
+one-time owner step, sequenced before the first beta branch is ever created**
+(§7.4) so a beta is never live-but-unwritable. Until then the B0–B2 code change
+is inert — nothing is served under `/beta/`.
 
 These rules scope the otherwise-open database to room paths, validate the
 room-code shape, and let anyone clean up rooms older than 24 hours. They are

@@ -15,6 +15,7 @@ import {
 } from "./analytics.js";
 import { mayPromptConsent } from "./chrome.js";
 import { currentScreen, onScreenChange } from "./chrome-ui.js";
+import { channelFromPath } from "./channel.js";
 
 // §9.3 remote kill switch: recording is linked to this PostHog feature flag
 // project-side; the client honours it too, so flipping it off stops replay
@@ -110,6 +111,23 @@ export const sendDiagnosticReport = (bundle) => analytics.sendDiagnostic(bundle)
  * ================================================================ */
 
 let releaseStamped = false;
+
+// deployment_channel super property (beta plan §5.5). Registered
+// SYNCHRONOUSLY the instant consent is in effect — NOT inside the async
+// release.json fetch below — so it lands in the analytics `registered`
+// buffer before the PostHog script finishes loading, and every queued
+// product event flushes already channel-stamped (never passing a
+// production KPI filter). The channel is derived from the URL, exactly as
+// the Firebase namespace is (js/channel.js): infallible and synchronous,
+// unlike release.json. register() is itself consent-gated, so on a decline
+// this is a safe no-op (nothing is stamped before opt-in). Independent of
+// release.json: a dev checkout registers deployment_channel "production"
+// alongside release "dev".
+function stampChannel() {
+  analytics.register({
+    deployment_channel: channelFromPath(location.pathname, location.protocol),
+  });
+}
 
 function stampRelease(ph) {
   if (!ph || releaseStamped) return;
@@ -216,7 +234,12 @@ function ensureBanner() {
   banner.append(text, actions, report);
 
   accept.addEventListener("click", () => {
-    analytics.accept().then(stampRelease);
+    // accept() sets the stored consent to ACCEPTED synchronously, then loads
+    // PostHog. stampChannel() runs immediately after, so deployment_channel
+    // is buffered BEFORE the script lands and before consent_given flushes.
+    const loaded = analytics.accept();
+    stampChannel();
+    loaded.then(stampRelease);
     closeBanner();
   });
   decline.addEventListener("click", () => {
@@ -303,6 +326,10 @@ if (getConsent(window.localStorage) === null) {
     });
   }
 } else {
+  // Returning visitor with a stored choice. stampChannel() before init():
+  // for a prior ACCEPT it buffers deployment_channel before the resumed
+  // script loads; for a prior DECLINE register() is gated to a no-op.
+  stampChannel();
   analytics.init().then(stampRelease);
   ensureGear();
 }

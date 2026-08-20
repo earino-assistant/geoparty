@@ -52,6 +52,27 @@ function fakePosthog() {
   };
 }
 
+// A posthog-like sink that snapshots the super properties in effect at the
+// instant each event is captured — the way to prove ORDERING: a schema event
+// must never flush before deployment_channel has been applied (beta plan
+// §5.5 / §8.1).
+function orderingFake() {
+  return {
+    captured: [],
+    superProps: null,
+    optedOut: false,
+    capture(event, props) {
+      this.captured.push({
+        event, props,
+        superAtCapture: this.superProps ? { ...this.superProps } : null,
+      });
+    },
+    register(props) { this.superProps = { ...(this.superProps || {}), ...props }; },
+    opt_out_capturing() { this.optedOut = true; },
+    opt_in_capturing() { this.optedOut = false; },
+  };
+}
+
 // Harness: an analytics instance whose "loader" resolves synchronously-ish
 // to a fake posthog, counting how often it was asked to load.
 function harness() {
@@ -805,6 +826,89 @@ test("register: an empty/garbage stamp is rejected", async () => {
   await a.init();
   assert.equal(a.register({}), false);
   assert.equal(a.register({ nonsense: 1 }), false);
+});
+
+/* ---- deployment_channel super property (beta-deployment-plan §5.5) ---- */
+
+test("channel: RELEASE_PROPS carries deployment_channel and it survives sanitization", () => {
+  // The allowlist extension the plan mandates: without it, register() would
+  // silently strip the key and nothing would be stamped.
+  assert.equal(RELEASE_PROPS.deployment_channel, "string");
+  assert.deepEqual(
+    sanitizeProps(RELEASE_PROPS, { deployment_channel: "beta" }),
+    { deployment_channel: "beta" });
+  // And it is not caught by the coordinate/identity BANNED_KEY_RE sweep.
+  assert.equal(
+    sanitizeProps(RELEASE_PROPS, { deployment_channel: "production" }).deployment_channel,
+    "production");
+});
+
+test("channel: registration is consent-gated — nothing is stamped before opt-in", async () => {
+  const { a, storage, ph } = harness();
+  assert.equal(a.register({ deployment_channel: "beta" }), false, "no consent, no channel");
+  setConsent(storage, CONSENT_ACCEPTED);
+  await a.init();
+  assert.equal(ph.superProps, null, "the pre-consent register buffered nothing to the client");
+});
+
+test("channel: deployment_channel is applied BEFORE queued events flush (returning-visitor flow)", async () => {
+  // Mirrors consent.js's returning-visitor path: stampChannel() (register)
+  // runs synchronously, then init() resumes the load, then product events
+  // queue while the script is in flight.
+  const storage = memStorage();
+  const ph = orderingFake();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
+  setConsent(storage, CONSENT_ACCEPTED); // prior session opted in
+  a.register({ deployment_channel: "beta" });
+  a.init();
+  a.track("round_started", { room: "ABCDEF", mode: "couch", round_number: 1 });
+  assert.equal(ph.captured.length, 0, "not delivered before the script lands");
+  release();
+  await tick();
+  assert.equal(ph.superProps.deployment_channel, "beta");
+  const ev = ph.captured.find((c) => c.event === "round_started");
+  assert.ok(ev, "the queued event flushed");
+  assert.equal(ev.superAtCapture?.deployment_channel, "beta",
+    "the schema event flushed AFTER the channel super property was applied");
+});
+
+test("channel: deployment_channel is applied before consent_given flushes (fresh-accept flow)", async () => {
+  // Mirrors the banner accept handler: accept() sets consent + starts the
+  // load, stampChannel() registers the channel synchronously right after,
+  // then product events queue — all before the script lands.
+  const storage = memStorage();
+  const ph = orderingFake();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
+  a.accept();
+  a.register({ deployment_channel: "beta" });
+  a.track("game_created", { room: "ABCDEF", mode: "couch" });
+  assert.equal(ph.captured.length, 0, "nothing before the script lands");
+  release();
+  await tick();
+  assert.equal(ph.superProps.deployment_channel, "beta");
+  // EVERY captured event — the flushed game_created AND consent_given — must
+  // have seen the channel already applied.
+  assert.ok(ph.captured.length >= 2);
+  for (const ev of ph.captured) {
+    assert.equal(ev.superAtCapture?.deployment_channel, "beta",
+      `${ev.event} flushed before the channel super property`);
+  }
+});
+
+test("channel: a dev checkout stamps production channel alongside release dev", async () => {
+  // Independent of release.json: consent.js registers the channel
+  // synchronously; the absent-release.json path then registers release:"dev".
+  // Both coexist, so dev noise stays excluded by `release`, exactly as today.
+  const { a, storage, ph } = harness();
+  setConsent(storage, CONSENT_ACCEPTED);
+  await a.init();
+  a.register({ deployment_channel: "production" });
+  a.register({ release: "dev" });
+  assert.deepEqual(ph.superProps, { deployment_channel: "production", release: "dev" });
 });
 
 test("startRecording: consent-gated, and a no-op on an older bundle", async () => {

@@ -1,0 +1,222 @@
+// tests/deploy-workflow.test.js — a static contract over the ONE Pages deploy
+// workflow (beta-deployment-plan §8.2). Node has no built-in YAML parser and
+// this repo adds no npm dependencies, so this is a lexical/structural contract
+// over the raw workflow text. It pins exactly the properties the plan declares
+// invariant, so a careless edit fails locally before it can flap /beta/ or
+// break the production bootstrap. Actual Actions execution remains the final
+// proof (§8.4); this is the guard that gets us there safely.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const WF_DIR = new URL("../.github/workflows/", import.meta.url);
+const readWf = (name) => readFileSync(new URL(name, WF_DIR), "utf8");
+const pages = readWf("pages.yml");
+const ci = readWf("ci.yml");
+
+const workflowFiles = readdirSync(WF_DIR).filter((f) => /\.ya?ml$/.test(f));
+
+/* ---- Split the build job's steps into per-step blocks (no YAML dep) ---- */
+// Steps are the 6-space `- name:` / `- uses:` entries under `    steps:`.
+function buildSteps() {
+  const lines = pages.split("\n");
+  const start = lines.findIndex((l) => /^    steps:\s*$/.test(l));
+  assert.ok(start !== -1, "could not find the build job's steps: block");
+  const blocks = [];
+  let cur = null;
+  for (let i = start + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^  \S/.test(l) || /^\S/.test(l)) break; // dedented out of the job/steps
+    if (/^      - /.test(l)) {
+      if (cur) blocks.push(cur);
+      cur = l + "\n";
+    } else if (cur !== null) {
+      cur += l + "\n";
+    }
+  }
+  if (cur) blocks.push(cur);
+  return blocks;
+}
+const BLOCKS = buildSteps();
+const find = (re) => BLOCKS.find((b) => re.test(b));
+
+// The step-level `if:` guard of a block (at the 8-column step-property indent),
+// ignoring commented lines and run:-body text.
+function activeIf(block) {
+  for (const raw of block.split("\n")) {
+    let content = raw.trimStart();
+    let indent = raw.length - content.length;
+    if (content.startsWith("- ")) { content = content.slice(2); indent += 2; }
+    if (indent !== 8 || content.startsWith("#")) continue;
+    const m = /^if:\s?(.*)$/.exec(content);
+    if (m) return m[1].trim();
+  }
+  return undefined;
+}
+
+/* ================= the single-deploy-workflow invariant ================= */
+
+test("exactly ONE workflow deploys Pages (the anti-dueling-deploy guard)", () => {
+  const deployers = workflowFiles.filter((f) =>
+    /deploy-pages|upload-pages-artifact/.test(readWf(f)));
+  assert.deepEqual(deployers, ["pages.yml"],
+    "a second Pages deploy workflow would share (or race) the `pages` " +
+    "concurrency group and flap /beta/ — never author one");
+});
+
+test("ci.yml is the PR gate and never deploys Pages", () => {
+  assert.doesNotMatch(ci, /deploy-pages|upload-pages-artifact|configure-pages/,
+    "ci.yml must not touch Pages");
+  assert.match(ci, /pull_request/, "ci.yml is still the PR gate");
+});
+
+/* ============================ triggers ================================= */
+
+test("pages.yml deploys on main AND beta pushes plus workflow_dispatch", () => {
+  const onBlock = pages.slice(pages.indexOf("\non:"), pages.indexOf("\npermissions:"));
+  assert.match(onBlock, /branches:\s*\[main,\s*beta\]/, "must push-trigger on main and beta");
+  assert.match(onBlock, /workflow_dispatch:/, "manual dispatch removed");
+  assert.match(onBlock, /include_beta:/, "dispatch lost the include_beta input");
+  assert.match(onBlock, /type:\s*boolean/, "include_beta is not a boolean input");
+});
+
+test("pages.yml has NO pull_request trigger — PRs never deploy", () => {
+  const onBlock = pages.slice(pages.indexOf("\non:"), pages.indexOf("\npermissions:"));
+  assert.doesNotMatch(onBlock, /pull_request/,
+    "a pull_request trigger on the deploy workflow would ship PR heads");
+});
+
+/* ========================= concurrency safety ========================= */
+
+test("concurrency is preserved: group pages, never cancel mid-deploy", () => {
+  assert.match(pages, /concurrency:\s*\n\s*group:\s*pages/, "concurrency group changed");
+  assert.match(pages, /cancel-in-progress:\s*false/, "runs are no longer serialized");
+});
+
+/* ================= immutable-SHA resolve + dual trees ================= */
+
+test("the build resolves BOTH branch tips once, via ls-remote, main required", () => {
+  const refs = find(/id:\s*refs/);
+  assert.ok(refs, "no ref-resolution step");
+  assert.match(refs, /git ls-remote/, "tips are not resolved with ls-remote");
+  assert.match(refs, /refs\/heads\/main refs\/heads\/beta/, "does not resolve both heads at once");
+  assert.match(refs, /test -n "\$main_sha"/, "main is not asserted to exist");
+  assert.match(refs, /INCLUDE_BETA: \$\{\{ inputs\.include_beta != false \}\}/,
+    "include_beta gating is wrong (push events must still include beta)");
+  assert.match(refs, /main=\$main_sha/, "main sha not exported");
+  assert.match(refs, /beta=\$beta_sha/, "beta sha not exported");
+});
+
+test("check+test run against TWO distinct working directories", () => {
+  const prodCheck = find(/working-directory:\s*prod/);
+  const betaCheck = find(/working-directory:\s*beta-tree/);
+  assert.ok(prodCheck, "no production-tree check step");
+  assert.ok(betaCheck, "no beta-tree check step");
+  for (const step of [prodCheck, betaCheck]) {
+    assert.match(step, /npm run check/, "a tree is not syntax-checked");
+    assert.match(step, /npm test/, "a tree is not tested");
+  }
+  // The production checkout is pinned to the resolved main SHA, not a branch.
+  const prodCheckout = find(/path:\s*prod/);
+  assert.match(prodCheckout, /ref:\s*\$\{\{ steps\.refs\.outputs\.main \}\}/,
+    "production tree is not pinned to the resolved main SHA");
+});
+
+test("TWO release.json stamps are written, each with a channel field", () => {
+  const stamp = find(/Stamp releases/);
+  assert.ok(stamp, "no release-stamp step");
+  assert.match(stamp, /"_site"[\s\S]*"production"[\s\S]*"main"/,
+    "root stamp missing production/main channel+ref");
+  assert.match(stamp, /"_site\/beta"[\s\S]*"beta"[\s\S]*"beta"/,
+    "beta stamp missing beta channel+ref");
+  // Existing consumed keys are preserved.
+  for (const k of ["commit", "short", "deployed_at"]) {
+    assert.match(stamp, new RegExp(k + ":"), `stamp dropped the ${k} key consent.js reads`);
+  }
+});
+
+/* =============== the no-beta-until-branch-exists bootstrap =============== */
+
+test("beta-only steps carry the step-level branch-exists guard (bootstrap)", () => {
+  // The bootstrap invariant: with no beta branch, beta_sha is '' and every
+  // step that would fail or do wrong work without a beta tree is SKIPPED —
+  // production deploys unchanged. The checkout, the check/test and the marker
+  // steps must carry the step-level `if:` guard.
+  const GUARD = "steps.refs.outputs.beta != ''";
+  const mustGuard = [
+    ["beta checkout", find(/path:\s*beta-tree/)],
+    ["beta check+test", find(/working-directory:\s*beta-tree/)],
+    ["beta markers", find(/Stamp beta markers/)],
+  ];
+  for (const [label, step] of mustGuard) {
+    assert.ok(step, `missing the ${label} step`);
+    assert.equal(activeIf(step), GUARD,
+      `the ${label} step is not guarded on the branch-exists output`);
+  }
+});
+
+test("always-run steps that touch beta guard it INTERNALLY (no empty beta dir)", () => {
+  // Assembly and the release stamp run on every deploy but must only produce
+  // a /beta/ tree / beta stamp WHEN the branch exists — otherwise a
+  // main-only deploy would ship an empty or half-stamped beta directory.
+  const assemble = find(/Assemble _site/);
+  assert.match(assemble, /if \[ -n "\$\{\{ steps\.refs\.outputs\.beta \}\}" \]/,
+    "assembly must shell-guard the _site/beta copy on the branch-exists output");
+  const stamp = find(/Stamp releases/);
+  assert.match(stamp, /if \(process\.env\.BETA_SHA\)/,
+    "the beta release stamp must be guarded on BETA_SHA being set");
+});
+
+test("beta markers are fail-loud: manifest-name assert + noindex on every head", () => {
+  const markers = find(/Stamp beta markers/);
+  assert.ok(markers, "no beta-markers step");
+  assert.match(markers, /GeoParty Beta/, "beta manifest name is not rewritten");
+  assert.match(markers, /noindex/, "beta pages are not de-indexed");
+  assert.match(markers, /throw new Error/, "marker drift does not fail the build");
+  assert.match(markers, /<head>/, "noindex is not anchored on <head>");
+});
+
+/* ================= official actions + versions preserved ================= */
+
+test("first-party Pages actions and the shipped deploy-pages@v4 are kept", () => {
+  assert.match(pages, /actions\/configure-pages@v5/);
+  assert.match(pages, /actions\/upload-pages-artifact@v3/);
+  assert.match(pages, /actions\/deploy-pages@v4/, "deploy-pages version drifted from the shipped v4");
+  assert.match(pages, /path:\s*_site/, "the artifact must upload the assembled _site, not the repo root");
+});
+
+/* ===== cross-module guard: rooms/ is decided in ONE place (§8.2) ===== */
+
+// Strip comments so a doc comment mentioning a namespace can't trip the guard;
+// we only care about live code. The `//`-to-EOL strip also eats `https://…`
+// tails, which is harmless — we scan only for the `rooms` namespace tokens.
+function jsCode(name) {
+  const src = readFileSync(new URL("../js/" + name, import.meta.url), "utf8");
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+}
+const jsFiles = readdirSync(new URL("../js/", import.meta.url)).filter((f) => f.endsWith(".js"));
+
+test("the `rooms-beta` namespace literal lives ONLY in js/channel.js", () => {
+  for (const f of jsFiles) {
+    const hits = (jsCode(f).match(/rooms-beta/g) || []).length;
+    if (f === "channel.js") assert.ok(hits >= 1, "channel.js must define rooms-beta");
+    else assert.equal(hits, 0, `${f} hardcodes the rooms-beta namespace — route through roomsRoot()`);
+  }
+});
+
+test("no module hardcodes a rooms/ DB path — every room path composes via roomsRoot()", () => {
+  // A `"rooms/` or `` `rooms-beta/ `` literal would be a Firebase path built
+  // outside the choke point. roomRef() builds `${ROOMS_ROOT}/${code}`, so no
+  // such literal may exist anywhere.
+  for (const f of jsFiles) {
+    assert.doesNotMatch(jsCode(f), /["'`]rooms(-beta)?\//,
+      `${f} builds a rooms/ DB path literal outside roomRef()`);
+  }
+});
+
+test("roomsRoot() is called in exactly one place — the Firebase choke point", () => {
+  const callers = jsFiles.filter((f) => f !== "channel.js" && /roomsRoot\s*\(/.test(jsCode(f)));
+  assert.deepEqual(callers, ["firebase.js"],
+    "roomsRoot() must be called only by js/firebase.js (roomRef is the sole namespace decision site)");
+});

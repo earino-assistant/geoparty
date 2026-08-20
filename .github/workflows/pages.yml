@@ -1,18 +1,36 @@
-# GitHub Pages deployment (field-observability plan §11).
+# GitHub Pages deployment (field-observability plan §11; beta plan §6).
 #
-# The site stays static and no-build: this workflow checks out the repo,
-# runs the same checks CI runs, writes ONE generated file into the upload
-# artifact — release.json — and deploys. Nothing is ever committed per
-# deploy, and a plain checkout (or file://) simply has no release.json, so
-# the dev loop is unchanged and js/consent.js stamps `release: "dev"`.
+# The site stays static and no-build. This ONE workflow assembles the whole
+# Pages site from two branch tips and deploys it in a single artifact:
+#   main → https://<owner>.github.io/geoparty/        (production)
+#   beta → https://<owner>.github.io/geoparty/beta/    (the one candidate)
+#
+# It resolves both tips to immutable SHAs ONCE at the start of the run,
+# checks out each into an isolated directory, runs the same checks CI runs
+# against BOTH trees, then assembles _site/ (main at the root, beta nested
+# under _site/beta/) with a per-channel release.json stamp and — for beta
+# only, in the artifact copy — a beta PWA identity and noindex markers.
+# Nothing is ever committed per deploy: release.json is in .gitignore, and a
+# plain checkout (or file://) simply has no release.json, so the dev loop is
+# unchanged and js/consent.js stamps `release: "dev"`.
+#
+# INVARIANT: this repo has exactly ONE Pages deploy workflow, and it is this
+# file, edited in place. A second workflow touching the `pages` concurrency
+# group is the dueling-deploy hazard the plan forbids (tests/deploy-
+# workflow.test.js pins this). ci.yml stays the untouched PR gate.
 #
 # One-time setup by the owner: Settings → Pages → Source = "GitHub Actions".
 name: Deploy to Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, beta]
   workflow_dispatch:
+    inputs:
+      include_beta:
+        description: "Include /beta/ from the beta branch"
+        type: boolean
+        default: true
 
 # Least privilege: read the repo, write the Pages deployment, mint the OIDC
 # token deploy-pages needs. No contents:write — nothing is pushed back.
@@ -31,44 +49,156 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      # Resolve both branch tips to immutable SHAs in ONE atomic ls-remote,
+      # so checkout, tests and the release stamps all use the same SHA (no
+      # check-then-fetch race). main must exist; beta is optional and is
+      # dropped when the dispatch asked for include_beta=false. On push
+      # events `inputs.include_beta` is empty → `!= false` is true → beta is
+      # included whenever the branch exists (beta plan §6.3).
+      - name: Resolve branch tips (pinned for the rest of the run)
+        id: refs
+        env:
+          INCLUDE_BETA: ${{ inputs.include_beta != false }}
+        run: |
+          heads=$(git ls-remote "https://github.com/${{ github.repository }}" \
+                    refs/heads/main refs/heads/beta)
+          main_sha=$(printf '%s\n' "$heads" | awk '$2=="refs/heads/main"{print $1}')
+          beta_sha=$(printf '%s\n' "$heads" | awk '$2=="refs/heads/beta"{print $1}')
+          test -n "$main_sha"   # main must exist
+          [ "$INCLUDE_BETA" = "true" ] || beta_sha=""
+          echo "main=$main_sha" >> "$GITHUB_OUTPUT"
+          echo "beta=$beta_sha" >> "$GITHUB_OUTPUT"
+          echo "Resolved main=$main_sha beta=${beta_sha:-<none>}"
+
+      # Two checkouts into ISOLATED directories, each pinned to its SHA. The
+      # beta checkout is skipped when the branch does not exist (or was
+      # dropped) — the bootstrap path that lets this workflow merge to main
+      # before any beta branch exists, publishing production unchanged.
+      - name: Check out production tree (main)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.refs.outputs.main }}
+          path: prod
+
+      - name: Check out beta tree (beta)
+        if: steps.refs.outputs.beta != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.refs.outputs.beta }}
+          path: beta-tree
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # The same gate as CI — a broken module never reaches production.
-      - name: Syntax-check all modules
-        run: npm run check
+      # The same gate as CI — a broken module in EITHER tree never reaches
+      # production. Zero npm deps, so no install step and no cross-tree
+      # contamination is possible.
+      - name: Syntax-check + test the production tree
+        working-directory: prod
+        run: |
+          npm run check
+          npm test
 
-      - name: Run tests
-        run: npm test
+      - name: Syntax-check + test the beta tree
+        if: steps.refs.outputs.beta != ''
+        working-directory: beta-tree
+        run: |
+          npm run check
+          npm test
 
-      # The release stamp. Artifact-only: `release.json` is in .gitignore, so
-      # it can never be committed by accident. consent.js fetches it after a
-      # successful (consented) PostHog init and registers release/commit/
-      # deployed_at as super properties, so every event, exception and replay
-      # is attributable to an exact deploy.
-      - name: Stamp the release
+      # Assemble the single site. Same exclusions the shipped artifact used
+      # (it uploaded the repo root; docs/tests/tools are already public
+      # content — parity kept). rsync copies main to the root and, when beta
+      # exists, the beta tree under _site/beta/.
+      - name: Assemble _site
+        run: |
+          mkdir -p _site
+          rsync -a --exclude .git --exclude .github prod/ _site/
+          if [ -n "${{ steps.refs.outputs.beta }}" ]; then
+            mkdir -p _site/beta
+            rsync -a --exclude .git --exclude .github beta-tree/ _site/beta/
+          fi
+
+      # Per-channel release stamp, each from its OWN pinned SHA, so the stamp
+      # can never disagree with the deployed tree. Existing keys are
+      # preserved (consent.js reads only short/commit/deployed_at); `channel`
+      # and `ref` are additive metadata — a human/dashboard cross-check, NOT
+      # the runtime channel identity (that is js/channel.js, URL-derived).
+      - name: Stamp releases (one per channel)
+        env:
+          MAIN_SHA: ${{ steps.refs.outputs.main }}
+          BETA_SHA: ${{ steps.refs.outputs.beta }}
         run: |
           node -e '
             const fs = require("fs");
-            const sha = process.env.GITHUB_SHA || "";
-            fs.writeFileSync("release.json", JSON.stringify({
-              commit: sha,
-              short: sha.slice(0, 7) || "dev",
-              deployed_at: new Date().toISOString(),
-              run: process.env.GITHUB_RUN_ID || "",
-              env: "pages",
-            }) + "\n");
+            const stamp = (dir, sha, channel, ref) => {
+              const meta = {
+                commit: sha,
+                short: sha.slice(0, 7) || "dev",
+                deployed_at: new Date().toISOString(),
+                run: process.env.GITHUB_RUN_ID || "",
+                env: "pages",
+                channel,
+                ref,
+              };
+              fs.writeFileSync(dir + "/release.json", JSON.stringify(meta) + "\n");
+              console.log(dir + "/release.json", JSON.stringify(meta));
+            };
+            stamp("_site", process.env.MAIN_SHA, "production", "main");
+            if (process.env.BETA_SHA) {
+              stamp("_site/beta", process.env.BETA_SHA, "beta", "beta");
+            }
           '
-          cat release.json
+
+      # Beta markers, FAIL-LOUD (beta plan §6.5): give the /beta/ install a
+      # distinct PWA identity and de-index every beta page. Artifact-only —
+      # the repo manifest/HTML stay canonical. Any drift in the expected
+      # shape (manifest name changed, an html lost its <head>) FAILS the
+      # build so nothing deploys and the previous site keeps serving —
+      # surfacing drift the moment it happens instead of shipping a no-op.
+      - name: Stamp beta markers (fail-loud)
+        if: steps.refs.outputs.beta != ''
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const dir = "_site/beta";
+
+            // (a) PWA identity in the beta manifest copy.
+            const mfPath = path.join(dir, "manifest.webmanifest");
+            const mf = JSON.parse(fs.readFileSync(mfPath, "utf8"));
+            if (mf.name !== "GeoParty") {
+              throw new Error(
+                `beta manifest drift: name is ${JSON.stringify(mf.name)}, expected "GeoParty"`);
+            }
+            mf.name = "GeoParty Beta";
+            mf.short_name = "GeoParty β";
+            fs.writeFileSync(mfPath, JSON.stringify(mf, null, 2) + "\n");
+
+            // (b) noindex meta into every top-level beta HTML <head>.
+            const META = "<meta name=\"robots\" content=\"noindex\" />";
+            const htmls = fs.readdirSync(dir).filter((f) => f.endsWith(".html"));
+            if (htmls.length === 0) {
+              throw new Error("beta marker: no .html files found under " + dir);
+            }
+            for (const f of htmls) {
+              const p = path.join(dir, f);
+              const src = fs.readFileSync(p, "utf8");
+              if (!src.includes("<head>")) {
+                throw new Error(`beta marker: no <head> anchor in ${f}`);
+              }
+              fs.writeFileSync(p, src.replace("<head>", "<head>\n  " + META));
+              console.log("noindex ->", f);
+            }
+            console.log("beta markers stamped OK");
+          '
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
 
   deploy:
     needs: build

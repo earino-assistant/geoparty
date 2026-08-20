@@ -111,6 +111,41 @@ Every event, exception and replay also carries the release super properties
 `release.json` — written into the Pages artifact at deploy time and absent
 in a dev checkout, where `release` is simply `"dev"`.
 
+### `deployment_channel` — the beta super property
+
+| Super property | Values | Source | When |
+|---|---|---|---|
+| `deployment_channel` | `production` \| `beta` | `channelFromPath(location.pathname, location.protocol)` (`js/channel.js`) | Registered **synchronously** the moment consent is in effect (both the returning-visitor `analytics.init()` path and the banner accept handler in `js/consent.js`), so it lands before the PostHog script finishes loading and every queued product event flushes already channel-stamped |
+
+The channel is the deployment-lane identity (`docs/beta-deployment-plan.md`
+§5.5): the same PostHog project serves both `https://…/geoparty/`
+(production) and `https://…/geoparty/beta/` (the one beta candidate), and
+this super property is how beta traffic is told apart. It is one of two
+fixed strings — an aggregate by construction, in the frozen `RELEASE_PROPS`
+allowlist, not matched by `BANNED_KEY_RE`. It is **derived from the URL**,
+never from `release.json` (which is async and absent in dev): a dev checkout
+stamps `deployment_channel: "production"` alongside `release: "dev"`, so dev
+noise stays excluded by `release` exactly as today. No dedicated event is
+added — a channel event would only duplicate the super property.
+
+**Residual:** PostHog-internal events fired inside `posthog.init()` itself
+(the session's first `$pageview`) may land before any `register()` can
+apply, because the bundle loads and inits in one owner-frozen step. Worst
+case is ≤1 unstamped event per beta session, from the owner's own devices;
+all `EVENT_SCHEMA` events are immune (they pass through the queue, which
+flushes after `register`). B3 records the empirical answer here.
+
+**KPI filtering is owner console work (B3), not code.** The client only
+stamps the property; excluding beta from production KPIs happens in the
+PostHog project (the "Filter out internal and test users" condition
+`deployment_channel = beta` plus the `$current_url contains /beta/`
+backstop, and a `deployment_channel does not equal beta` filter on each
+existing insight — events without the property, i.e. all history and all
+production traffic, pass it, so no historical data is lost). The B0–B2
+change built here (`js/channel.js`, the `RELEASE_PROPS` extension, the
+`js/consent.js` registration) ships the stamp; the console filtering and the
+first live beta verification are the separate B3 owner step.
+
 ### `pool_entry` — correlating failures without coordinates
 
 `imagery.js#poolDiagId(image_id)` is two salted FNV-1a passes folded to 41

@@ -13,12 +13,21 @@ import {
   runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "../config.js";
+import { roomsRoot } from "./channel.js";
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
+// The one namespace decision, made once at module load from the URL: beta
+// pages (/beta/) get "rooms-beta", production and every file:// dev checkout
+// get "rooms" (js/channel.js, beta-deployment-plan §5.2). roomRef() is the
+// single choke point every room read/write/subscribe/transaction routes
+// through, so this one line hard-isolates the two channels' data — a beta
+// that changes room shape can never feed a production phone.
+const ROOMS_ROOT = roomsRoot(location.pathname, location.protocol);
+
 export function roomRef(code, path = "") {
-  return ref(db, `rooms/${code}${path ? "/" + path : ""}`);
+  return ref(db, `${ROOMS_ROOT}/${code}${path ? "/" + path : ""}`);
 }
 
 export async function readRoom(code) {
