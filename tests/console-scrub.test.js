@@ -40,6 +40,16 @@ const REQUIRED_COVERED = [
 // The aliases a caught error travels under in this codebase.
 const ALIAS = "(?:e|err|error|ex|_e|_err)";
 
+// Every console method PostHog's replay console capture records. All five ride
+// into the recording (enable_recording_console_log), so all five must be
+// scanned — not just warn/error (RF-A). Production has zero log/info/debug
+// sites today; method coverage is proven by the fixtures below, while per-file
+// raw-vs-scanned parity keeps the scan honest WITHOUT fabricating a per-method
+// production minimum that would force fake usage into the codebase.
+const CONSOLE_METHODS = ["log", "info", "debug", "warn", "error"];
+const consoleCallRe = () =>
+  new RegExp(`console\\.(?:${CONSOLE_METHODS.join("|")})\\s*\\(`, "g");
+
 /* ================================================================
  * A small, correct JS lexer.
  * ----------------------------------------------------------------
@@ -127,14 +137,14 @@ function codeSkeleton(src) {
   return out.join("");
 }
 
-// Extract the argument-list text of every console.warn/console.error call,
-// via balanced parens over the CODE SKELETON (so parens inside strings,
+// Extract the argument-list text of every console.log/info/debug/warn/error
+// call, via balanced parens over the CODE SKELETON (so parens inside strings,
 // comments and copy can never confuse the extractor; multiline calls span
 // newlines transparently).
 function consoleCalls(src) {
   const s = codeSkeleton(src);
   const calls = [];
-  const re = /console\.(?:warn|error)\s*\(/g;
+  const re = consoleCallRe();
   let m;
   while ((m = re.exec(s))) {
     let depth = 1;
@@ -218,7 +228,7 @@ test("scrubErrorMessage removes the image id AND the token from an SDK rejection
 /* ================================================================
  * 2. The invariant, across every production file.
  * ================================================================ */
-test("no production console.warn/error passes a caught error un-scrubbed (all js/*.js)", () => {
+test("no production console.log/info/debug/warn/error passes a caught error un-scrubbed (all js/*.js)", () => {
   const found = offenders(FILES);
   assert.deepEqual(found, [], `un-scrubbed error console sites:\n${found.join("\n")}`);
 });
@@ -231,19 +241,22 @@ test("every console call the lexer scans is a call the raw source has (per-file 
   // These agree ONLY if the lexer neither drops a real call (the RF-1 bug:
   // an apostrophe blinding a region) nor invents one from a comment/string.
   // A divergence in EITHER direction fails the suite.
-  const rawRe = /console\.(?:warn|error)\s*\(/g;
+  const rawRe = consoleCallRe();
   let total = 0;
   for (const f of FILES) {
     const src = read(f);
     const raw = (src.match(rawRe) || []).length;
     const scanned = consoleCalls(src).length;
     assert.equal(scanned, raw,
-      `${f}: lexer scanned ${scanned} console.(warn|error) calls but the raw source has ${raw} — the scan is blind to ${raw - scanned} of them`);
+      `${f}: lexer scanned ${scanned} console.(log|info|debug|warn|error) calls but the raw source has ${raw} — the scan is blind to ${raw - scanned} of them`);
     total += scanned;
   }
   // A floor mirroring track-schema.test.js: guard against the whole scan
-  // matching nothing (regex/lexer regression). The repo has ~29 sites today.
-  assert.ok(total >= 25, `expected the real call sites (~29), found only ${total}`);
+  // matching nothing (regex/lexer regression). Deliberately a TOTAL floor, not
+  // a per-method one: production has ~30 warn/error sites and zero
+  // log/info/debug sites today, so a per-method minimum would fabricate usage.
+  // Method coverage for log/info/debug is proven by fixtures below instead.
+  assert.ok(total >= 25, `expected the real call sites (~30), found only ${total}`);
 });
 
 test("every file that must be covered is present in the auto-discovered set", () => {
@@ -297,6 +310,54 @@ test("scanner flags e.message, String(e), template ${e}, and a multiline call", 
   for (const [label, src] of Object.entries(fixtures)) {
     const shapes = consoleCalls(src).map(leakShapes).flat();
     assert.ok(shapes.length > 0, `did NOT catch the ${label} leak: ${src}`);
+  }
+});
+
+test("the scanner recognises all five replay-captured console methods", () => {
+  // Guards the CONSOLE_METHODS list itself: if a method is ever dropped from
+  // the regex, the call below stops being scanned and this fails — so a future
+  // console.log/info/debug leak could not slip past by method name alone.
+  for (const m of CONSOLE_METHODS) {
+    assert.equal(consoleCalls(`console.${m}("x", e);`).length, 1,
+      `console.${m} is not scanned as a call — it dropped out of CONSOLE_METHODS`);
+  }
+});
+
+test("scanner catches unsafe caught-error forms for console.log/info/debug too", () => {
+  // RF-A: PostHog replay captures log/info/debug as well as warn/error. Prove
+  // each of the three previously-unscanned methods is caught in at least a
+  // bare-error form AND a member/interpolation/String() form. Fixtures, not
+  // production edits — production has no log/info/debug sites to mutate.
+  const perMethod = {
+    log: {
+      "bare error": `console.log("resume: image failed to load —", e);`,
+      "member access": `console.log("boom", e.message);`,
+    },
+    info: {
+      "aliased bare error": `console.info("janitor: could not delete", err);`,
+      "template interpolation": "console.info(`load failed: ${e}`);",
+    },
+    debug: {
+      "bare error": `console.debug("follow failed", error);`,
+      "String() wrap": `console.debug("x " + String(ex));`,
+    },
+  };
+  for (const [method, forms] of Object.entries(perMethod)) {
+    for (const [label, src] of Object.entries(forms)) {
+      const shapes = consoleCalls(src).map(leakShapes).flat();
+      assert.ok(shapes.length > 0,
+        `console.${method} — the ${label} leak was NOT caught: ${src}`);
+    }
+  }
+});
+
+test("scanner does not flag a properly scrubbed console.log/info/debug call", () => {
+  // The new methods must not become false-positive machines either: a scrubbed
+  // caught error is clean regardless of which method logs it.
+  for (const m of ["log", "info", "debug"]) {
+    const src = `console.${m}("firebase write failed:", scrubErrorMessage(e));`;
+    assert.deepEqual(consoleCalls(src).map(leakShapes).flat(), [],
+      `false positive on a scrubbed console.${m} call: ${src}`);
   }
 });
 

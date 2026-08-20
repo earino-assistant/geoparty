@@ -113,10 +113,11 @@ requests are dropped from the replay network waterfall entirely
 ## 4. Console output
 
 Console capture (`enable_recording_console_log: true`) syncs **every**
-`console.warn`/`console.error` into replays, so no production log line may
-carry a raw SDK error — a Mapillary rejection message embeds the image id
-(`"Image 1263588815098567 does not exist"`) and its URLs embed the access
-token (review P1-1). Two rules, both enforced by
+console method into replays — `console.log`, `console.info`, `console.debug`,
+`console.warn` **and** `console.error`, all five — so no production log line
+may carry a raw SDK error, whichever method emits it. A Mapillary rejection
+message embeds the image id (`"Image 1263588815098567 does not exist"`) and
+its URLs embed the access token (review P1-1). Two rules, both enforced by
 `tests/console-scrub.test.js`:
 
 - **Wrapper logs use the opaque diag id.** `js/viewer-ui.js` logs skipped /
@@ -126,7 +127,8 @@ token (review P1-1). Two rules, both enforced by
 - **Every caught error is scrubbed before logging.** Each viewer-failure
   console site (`host-ui.js` resume, `player-ui.js` re-anchor,
   `screen-ui.js` follow, `screen-h2h.js` seed/follow) and every other
-  caught-error `console.warn`/`console.error` in the page controllers logs
+  caught-error `console.log`/`console.info`/`console.debug`/`console.warn`/
+  `console.error` in the page controllers logs
   `scrubErrorMessage(e)` (from `js/imagery.js`) — never the raw `Error`.
   `scrubErrorMessage` strips query strings (tokens) and 10+ digit runs
   (image ids). `chrome-ui.js` (the listener-failure log) and
@@ -137,12 +139,17 @@ token (review P1-1). Two rules, both enforced by
 not a hand-picked list) with a small JS tokenizer — comments, string and
 template literals, `${…}` interpolations and regex literals are all parsed,
 so an apostrophe in a comment can no longer blind it (the old bug behind
-review RF-1). For each `console.warn`/`console.error` call it asserts no
-un-scrubbed error alias (`…, e)`, `${e}`, `e.message`, `e.stack`,
-`String(e)`, and `err`/`error`/`ex` aliases) reaches the console. A per-file
-**raw-vs-scanned count parity** check plus a total-sites floor make the scan
-non-vacuous: if a real call is ever silently dropped from the parse (or a
-guarded file disappears), the suite fails.
+review RF-1). For **each of the five captured console methods** — `log`,
+`info`, `debug`, `warn`, `error` (RF-A) — it asserts no un-scrubbed error
+alias (`…, e)`, `${e}`, `e.message`, `e.stack`, `String(e)`, and
+`err`/`error`/`ex` aliases) reaches the console. A per-file **raw-vs-scanned
+count parity** check plus a total-sites floor make the scan non-vacuous: if a
+real call is ever silently dropped from the parse (or a guarded file
+disappears), the suite fails. Production has **zero** `log`/`info`/`debug`
+sites today, so the floor is a single TOTAL count (dominated by the ~30
+warn/error sites) rather than a per-method minimum that would fabricate
+usage; method coverage for `log`/`info`/`debug` is proven by explicit leak
+fixtures instead.
 
 This is a **lexical, single-file** guarantee: it proves each `console.*` call
 *as written* does not name a bare caught-error value, and that the check
