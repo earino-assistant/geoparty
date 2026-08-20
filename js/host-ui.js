@@ -10,7 +10,7 @@ import {
   onConnectionChange,
 } from "./firebase.js";
 import {
-  defaultNight, bumpNight, carryNight, champion, gameWinner,
+  defaultNight, gameNight, champion,
   tallyLineText, crownHookText, championText, nightSummary,
 } from "./night.js";
 import {
@@ -836,7 +836,14 @@ function updateLockButton() {
     g.lat, L.Util.wrapNum(g.lng, [-180, 180], true));
   const elapsed = Math.max(0, Date.now() -
     (room.round.turnStartedAt || room.round.startedAt || Date.now()));
-  const est = lockNowEstimate(km, elapsed, room.settings.roundSeconds);
+  // C5: price the estimate through the SAME twist-aware scorer the confirm uses
+  // (blitz ×1.5 on the total + its 20s window, Long Haul's gentler curve), so
+  // the "if you locked in now" number matches what actually banks. twistId null
+  // ⇒ twistedRoundScore reproduces lockNowEstimate exactly.
+  const twistId = room.round.twist ? room.round.twist.id : null;
+  const est = twistId
+    ? twistedRoundScore(twistId, km, elapsed, room.settings)
+    : lockNowEstimate(km, elapsed, room.settings.roundSeconds);
   paintLockButton(btn, lockButtonLabel(LOCK_LABELS.couch, est, superSureArmed));
 }
 
@@ -1002,6 +1009,12 @@ function confirmGuess() {
     // Couch: round/imageId follows the host's movement, so drifting off
     // the pool entry's anchor image means the pano was navigated.
     moved: panoMoved(currentTruth.image_id, room.round.imageId),
+    // G2/G7 (R4): the round number and its twist join couch guesses to the
+    // room+round, exactly like h2h — so distance/time-by-twist and the
+    // decoy-round rival-behavior analyses cover couch too. twist is omitted on
+    // a plain round ("absent = none"); couch has no decoy surface, so no flag.
+    round_number: room.round.number,
+    ...(twistId ? { twist: twistId } : {}),
   });
 
   if (room.round.showdown) {
@@ -1460,12 +1473,13 @@ function finishGame(advance) {
   // G3 Crown Night: the winner takes this game's crown. Ties break on the
   // deterministic seeded flip so the crown always has one owner (the podium
   // still shows the true tie). `night` is display-only here; the authoritative
-  // carry into the next game is threaded via nightToCarry (no gameOver write —
-  // every device recomputes the same bump locally).
-  const crownWinner = gameWinner(room.teams, roomCode);
-  const bumped = bumpNight(room.night || defaultNight(), crownWinner);
-  nightToCarry = carryNight(room.night || defaultNight(), crownWinner);
-  if (champion(bumped)) {
+  // carry into the next game is threaded via nightToCarry. gameNight() resolves
+  // the bump + carry in one pure call so a host refresh recomputes the SAME
+  // crown (R2 — refresh-safety; see the gameOver resume path).
+  const ng = gameNight(room.night || defaultNight(), room.teams, roomCode);
+  const bumped = ng.bumped;
+  nightToCarry = ng.carry;
+  if (ng.champ) {
     track("night_champion", { mode: "couch", games: bumped.games });
   }
   destroyViewer();
@@ -1493,7 +1507,9 @@ function renderNightTally(night) {
     champEl.textContent = championText(name);
     champEl.classList.remove("hidden");
     tallyEl.classList.add("hidden");
-    playSound("fanfare");
+    // No fanfare here: finishGame() already plays the single game-over fanfare
+    // (C5 — a champion game must not double up), and the resume path renders the
+    // tally silently on a refresh.
   } else {
     champEl.classList.add("hidden");
     const line = tallyLineText(night, room.teams);
@@ -1626,6 +1642,14 @@ async function resumeGame(code, state) {
     case "roundActive": {
       showScreen("h-round");
       makeViewer();
+      // C5: a resume rebuilds the viewer from the game-wide moveAllowed, so a
+      // Frozen round would silently re-enable street movement. Re-apply the
+      // round's twist lever after the viewer exists (makeViewer's guard was a
+      // no-op while iv was null at round start).
+      if (iv && iv.setMoveAllowed) {
+        const twistId = room.round.twist ? room.round.twist.id : null;
+        iv.setMoveAllowed(twistMoveAllowed(room.settings, twistId));
+      }
       iv.beginRound(room.round.number);
       try { await iv.moveTo(room.round.imageId, "resume"); }
       catch (e) {
@@ -1655,12 +1679,23 @@ async function resumeGame(code, state) {
     case "reveal":
       enterReveal();
       break;
-    case "gameOver":
+    case "gameOver": {
       showScreen("h-gameover");
       updateCrown(); // S7 — re-checked when the first heartbeat lands
       renderTotals($("finalTotals"));
+      // R2: a host refresh between games must not lose the night. RTDB holds
+      // only the pre-bump seeded night (finishGame writes no tally), so
+      // recompute this game's crown deterministically with gameNight() — the
+      // same pure call finishGame used, so the tally + champion render exactly
+      // as before the reload. Re-thread the carry (nightToCarry) and mark the
+      // chain (prevRoomCode) so tapping "New game" still carries the tally.
+      const ng = gameNight(room.night || defaultNight(), room.teams, roomCode);
+      nightToCarry = ng.carry;
+      prevRoomCode = roomCode;
+      renderNightTally(ng.bumped);
       saveToLeaderboard(); // idempotent per room (§2.9)
       break;
+    }
     default:
       enterSetup();
   }

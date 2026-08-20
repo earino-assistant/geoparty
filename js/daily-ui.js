@@ -47,11 +47,12 @@ import {
 } from "./records.js";
 import {
   parseGhostFragment, decodeGhost, ghostExpired, poolMatches, poolCheck,
-  buildGhostPayload, duelVerdict,
+  buildGhostPayload, duelVerdict, ghostScores, runHasPins,
 } from "./ghost.js";
 import { shareResult } from "./share-ui.js";
 import {
   HINT_CARDS,
+  claimHint,
   guessMapHintLines,
   lockNowEstimate,
   lockButtonLabel,
@@ -59,7 +60,7 @@ import {
 } from "./hints.js";
 import { oneShotHint, dismissHintCard, paintLockButton } from "./hints-ui.js";
 import { countdownTick } from "./fx.js";
-import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
+import { initSound, playSound, buzz, stampFlash, prefersReducedMotion } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { scrubErrorMessage } from "./imagery.js";
 import { track } from "./consent.js";
@@ -524,18 +525,38 @@ function renderRevealMap(guess, ghostRes) {
       radius: 8, color: "#fff", weight: 2, fillColor: "#4dd6ff", fillOpacity: 1,
     }).addTo(revealMap);
   }
-  // G5: the ghost marker — distinct (dashed, muted, 👻), no polyline, with a
-  // distance chip. Maps stay replay-blocked, so it can never leak.
+  // G5/C4: the ghost marker — distinct (dashed, muted, 👻), no polyline, with a
+  // distance chip. It MATERIALIZES ~400 ms after your pin with a fade, so the
+  // two pins read as two beats, not one (spec §3.5.3). Reduced-motion: it just
+  // appears. The pin is included in `bounds` synchronously so fitBounds frames
+  // it even though the marker is added on a delay. Maps stay replay-blocked.
   if (ghostRes && ghostRes.pin) {
     const gpin = L.latLng(ghostRes.pin.lat, ghostRes.pin.lng);
     bounds.push(gpin);
-    L.circleMarker(gpin, {
-      radius: 8, color: "#c9a2ff", weight: 2, dashArray: "3 3",
-      fillColor: "#2a2140", fillOpacity: 0.85,
-    }).addTo(revealMap);
-    L.marker(gpin, {
-      icon: L.divIcon({ className: "ghost-chip", html: `👻 ${formatDistance(ghostRes.distanceKm)}` }),
-    }).addTo(revealMap);
+    const reduced = prefersReducedMotion();
+    const addGhost = () => {
+      if (!revealMap) return;
+      const circle = L.circleMarker(gpin, {
+        radius: 8, color: "#c9a2ff", weight: 2, dashArray: "3 3",
+        fillColor: "#2a2140", fillOpacity: 0.85,
+      }).addTo(revealMap);
+      const chip = L.marker(gpin, {
+        icon: L.divIcon({ className: "ghost-chip", html: `👻 ${formatDistance(ghostRes.distanceKm)}` }),
+      }).addTo(revealMap);
+      if (!reduced) {
+        const els = [circle.getElement && circle.getElement(),
+          chip.getElement && chip.getElement()].filter(Boolean);
+        for (const el of els) {
+          el.style.opacity = "0";
+          el.style.transition = "opacity 350ms ease";
+        }
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          for (const el of els) el.style.opacity = "1";
+        }));
+      }
+    };
+    if (reduced) addGhost();
+    else setTimeout(addGhost, 400);
   }
   if (bounds.length > 1) {
     revealMap.fitBounds(L.latLngBounds(bounds).pad(0.25), { maxZoom: 10 });
@@ -598,6 +619,9 @@ async function finishRun() {
     if (isDuel) {
       const dueled = applyDuelResult(records, verdict.outcome === "won");
       Object.assign(records, dueled.records);
+      // Mark this day+mode resolved so re-tapping the link later (which routes
+      // to the instant-verdict path) can't re-fold the duels counter.
+      markDuelResolved(runDayNum, mode);
     }
     saveRecords(localStorage, records);
   }
@@ -614,7 +638,87 @@ async function finishRun() {
     aces,
   });
 
-  renderDone(run, false, { verdict, streakCount, graceUsed, pb });
+  renderDone(run, false, { verdict, streakCount, graceUsed, pb, aces });
+}
+
+// "3rd", "21st" — the ACE counter's ordinal (spec §3.4). Handles the 11–13
+// teens exception.
+function ordinal(n) {
+  const v = Math.abs(n) % 100;
+  const s = ["th", "st", "nd", "rd"];
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
+// Idempotency guard for the duels counter + ghost_duel_completed: a duel for a
+// given day+mode is folded and reported exactly ONCE per device, even though a
+// challenge link can be re-tapped (re-loading the fragment) any number of times.
+// Without this, re-opening a completed duel link would inflate the device's
+// lifetime W/L and re-emit the verdict event on every open.
+function duelResolvedKey(dayNum, m) { return `geoparty_duel_done_${dayNum}_${m}`; }
+function duelAlreadyResolved(dayNum, m) {
+  try { return localStorage.getItem(duelResolvedKey(dayNum, m)) === "1"; }
+  catch { return false; }
+}
+function markDuelResolved(dayNum, m) {
+  try { localStorage.setItem(duelResolvedKey(dayNum, m), "1"); }
+  catch { /* private mode: not remembered, so it may re-fold — acceptable */ }
+}
+
+// C3: resolve an already-played duel to its verdict with no replay (§3.5.2
+// case 5). Recompute the ghost's per-round scores on THIS device against the
+// day's actual truths (integrity: no wire-trusted score), compare to the
+// recipient's saved per-round points, emit ghost_duel_completed, and show the
+// verdict done screen. poolCheck degrades to the plain result, exactly like the
+// play path. Never throws to the user — any failure falls back to plain done.
+async function instantVerdict(saved) {
+  try {
+    const pool = await loadPool();
+    const s = new PoolSampler(pool, dailySeed(runKey));
+    const truths = [];
+    const ids = [];
+    for (let i = 0; i < DAILY_ROUNDS; i++) {
+      const e = s.peek();
+      if (!e) break;
+      truths.push({ lat: e.lat, lng: e.lng });
+      ids.push(e.image_id);
+      s.advance();
+    }
+    if (!poolMatches(ghost.poolCheck, ids)) {
+      track("ghost_link_invalid", { reason: "pool" });
+      toast("This challenge was built on an older Daily — showing your result.");
+      renderDone(saved, true, { streakCount: records.streak.count });
+      return;
+    }
+    const gScores = ghostScores(truths, ghost);
+    for (let i = 0; i < gScores.length; i++) {
+      ghostRoundResults[i] = {
+        points: gScores[i].points,
+        distanceKm: gScores[i].distanceKm,
+        pin: gScores[i].pinned ? ghost.rounds[i] : null,
+      };
+    }
+    const yourPoints = saved.rounds.map((r) => r.points || 0);
+    const ghostPoints = gScores.map((r) => r.points);
+    const verdict = duelVerdict(yourPoints, ghostPoints);
+    // Fold + report ONCE per day+mode (idempotent across link re-taps). The
+    // verdict always renders; only the counter and the event are gated.
+    if (!duelAlreadyResolved(runDayNum, mode)) {
+      track("ghost_duel_completed", {
+        day_number: runDayNum,
+        outcome: verdict.outcome,
+        margin: verdict.margin,
+        hard: mode === "hard",
+      });
+      const dueled = applyDuelResult(records, verdict.outcome === "won");
+      Object.assign(records, dueled.records);
+      saveRecords(localStorage, records);
+      markDuelResolved(runDayNum, mode);
+    }
+    renderDone(saved, true, { verdict, streakCount: records.streak.count });
+  } catch (e) {
+    console.error(scrubErrorMessage(e));
+    renderDone(saved, true, { streakCount: records.streak.count });
+  }
 }
 
 function renderDone(result, alreadyPlayed, extra = {}) {
@@ -639,8 +743,21 @@ function renderDone(result, alreadyPlayed, extra = {}) {
   }
   if (!isExhibition && extra.pb) pbEl.classList.remove("hidden");
 
+  // G4 (C5): the ACE counter line — "🎯 3rd ace this month" — renders when this
+  // run earned at least one ACE and it counted (never on an exhibition). The
+  // count comes from records.aces.monthCount, already folded at completion.
+  const aceEl = $("dDoneAce");
+  aceEl.classList.add("hidden");
+  if (!isExhibition && (extra.aces || 0) > 0) {
+    aceEl.textContent = `🎯 ${ordinal(records.aces.monthCount)} ace this month`;
+    aceEl.classList.remove("hidden");
+  }
+
   // G5 duel verdict block.
   renderDuelDone(extra.verdict, result);
+  // C4: on a duel run the primary share IS the return challenge — label it so
+  // (spec §3.5.4). A non-duel run keeps its HTML default ("Share result").
+  if (extra.verdict) $("btnDShare").textContent = "Send your verdict";
 
   // Exhibition footnote (an exhibition that ends in an ad for the ritual).
   if (isExhibition) {
@@ -690,10 +807,16 @@ function renderDuelDone(verdict, result) {
 function wireShare(result, verdict) {
   $("btnDShare").onclick = async () => {
     let payload = null;
-    try {
-      const ids = await peekDayIds(runKey);
-      payload = buildGhostPayload(result, ids, runDayNum);
-    } catch { /* offline: fall back to a plain card below */ }
+    // R5: a run with no saved per-round pins (a pre-v2 save, or an all-forfeit
+    // run) must NEVER produce an all-forfeit ghost link — it's not a duel. Gate
+    // the payload on runHasPins and share the plain card with an honest toast.
+    const hasPins = runHasPins(result);
+    if (hasPins) {
+      try {
+        const ids = await peekDayIds(runKey);
+        payload = buildGhostPayload(result, ids, runDayNum);
+      } catch { /* offline: fall back to a plain card below */ }
+    }
     const base = new URL("daily.html", location.href).href;
     const url = payload ? dailyChallengeUrl(base, payload, "daily")
       : withUtm(base, "daily");
@@ -708,6 +831,9 @@ function wireShare(result, verdict) {
       verdict: verdict ? { outcome: verdict.outcome, margin: verdict.margin } : null,
     });
     shareResult(text, "daily", toast, { challenge: !!payload });
+    if (!hasPins) {
+      toast("This run has no saved pins — sharing a plain card, no ghost duel.");
+    }
   };
 }
 
@@ -765,6 +891,12 @@ function renderIntro() {
   }
   if (mode !== "hard" && records.streak.count >= 1) {
     parts.push(`🔥 ${records.streak.count}`);
+    // R6 (spec §3.1): the first streak surface on a device carries one honest
+    // line — never an accusation, just the truth that a streak is device-local.
+    // One-shot via the hints mechanism (geoparty_hint_streak).
+    if (claimHint(localStorage, "streak")) {
+      parts.push("Streaks live in this browser — same phone, same streak");
+    }
   }
   recLine.textContent = parts.join(" · ");
 
@@ -790,7 +922,11 @@ $("btnDHardDone").addEventListener("click", startHardMode);
 
 // Report a link that arrived broken (before any run), and seed the PB from an
 // existing same-device result so day-one players don't see "no best" (§3.8).
-if (ghostLinkReason === "malformed" || ghostLinkReason === "version") {
+// R3: every boot-known failure reason is reported exactly once — malformed,
+// version AND expired (the "pool" reason has its own site in startChallenge /
+// instantVerdict, after the day's ids load). This block runs once at boot.
+if (ghostLinkReason === "malformed" || ghostLinkReason === "version" ||
+    ghostLinkReason === "expired") {
   track("ghost_link_invalid", { reason: ghostLinkReason });
 }
 {
@@ -814,10 +950,15 @@ if (ghostLinkReason === "malformed") {
   toast("This challenge expired — the Daily is a fresh five every day.");
 }
 
-if (savedForRun && !isExhibition) {
-  // Already played this board today. (A duel arriving on an already-played day
-  // still shows the plain done screen; the instant no-replay verdict is a
-  // documented follow-up — see docs/g1-g8 §3.5.2 case 5.)
+if (savedForRun && !isExhibition && isDuel && ghost && ghost.ok) {
+  // C3 (spec §3.5.2 case 5): the recipient already completed this board today,
+  // so their saved run IS their side of the duel — skip gameplay straight to
+  // the verdict, no replay. Async (needs the day's truths to recompute the
+  // ghost's scores). The "Send your verdict" done screen offers the return
+  // challenge (renderDone → wireShare).
+  instantVerdict(savedForRun);
+} else if (savedForRun && !isExhibition) {
+  // Already played this board today, no usable duel — the plain done screen.
   renderDone(savedForRun, true, { streakCount: records.streak.count });
 } else {
   showScreen("d-intro");

@@ -13,6 +13,7 @@ import {
   champion,
   nextNight,
   carryNight,
+  gameNight,
   nightSummary,
   tallyLineText,
   crownHookText,
@@ -105,4 +106,39 @@ test("nightSummary / tallyLineText: sorted, named, invisible before game 2", () 
     `👑 Atlas Cats ×2 · Pin Pals ×1 — first to ${CROWNS_TO_WIN} takes the night`);
   assert.equal(crownHookText(n, teams, 4), "👑 Atlas Cats ×2 · Pin Pals ×1 — Game 4?");
   assert.equal(championText("Atlas Cats"), "👑 CHAMPION OF THE NIGHT — Atlas Cats");
+});
+
+// R2: gameNight resolves a game-over's crown deterministically, so the finish
+// path and a host-refresh recompute BYTE-IDENTICAL results — the night survives
+// a refresh between games. RTDB holds only the pre-bump seeded night; the crown
+// must be reconstructable from (night, teams, roomCode) alone.
+test("gameNight: refresh recompute reproduces the same bump + carry", () => {
+  const teams = { t1: { total: 900 }, t2: { total: 400 } };
+  const seeded = { v: 1, games: 1, crowns: { t1: 1 } }; // carried into this game
+  const a = gameNight(seeded, teams, "ROOMAB");
+  const b = gameNight(seeded, teams, "ROOMAB"); // the refresh recompute
+  assert.deepEqual(a, b);
+  assert.equal(a.winner, "t1");
+  assert.deepEqual(a.bumped, bumpNight(seeded, "t1"));
+  assert.deepEqual(a.carry, carryNight(seeded, "t1"));
+  assert.equal(a.champ, null); // t1 at 2 crowns, not yet champion
+});
+
+test("gameNight: at the third crown it reports the champion and resets the carry", () => {
+  const teams = { t1: { total: 900 }, t2: { total: 400 } };
+  const seeded = { v: 1, games: 2, crowns: { t1: 2 } };
+  const ng = gameNight(seeded, teams, "ROOMCD");
+  assert.equal(ng.winner, "t1");
+  assert.equal(ng.bumped.crowns.t1, 3);
+  assert.equal(ng.champ, "t1");
+  assert.deepEqual(ng.carry, defaultNight()); // a champion resets the night
+});
+
+test("gameNight: tolerates a malformed/absent night (fresh) and the seeded flip is stable", () => {
+  const teams = { t1: { total: 500 }, t2: { total: 500 } }; // a true tie
+  const ng1 = gameNight(null, teams, "ROOMEF");
+  const ng2 = gameNight(undefined, teams, "ROOMEF");
+  assert.equal(ng1.winner, ng2.winner);       // deterministic tie-break
+  assert.equal(ng1.bumped.games, 1);
+  assert.equal(ng1.bumped.crowns[ng1.winner], 1);
 });

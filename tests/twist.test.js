@@ -19,6 +19,8 @@ import {
   longHaulDistancePoints,
   twistHidesRivalPins,
   twistedRoundScore,
+  TWIST_DECK,
+  twistCard,
 } from "../js/twist.js";
 import { scoreForDistance } from "../js/game.js";
 import { adjustedPoints } from "../js/supersure.js";
@@ -152,4 +154,35 @@ test("SUPER SURE doubles the TWISTED round total (a blitz+SS round can ×3)", ()
   // vs. the same round without the twist: the swing is strictly larger.
   const plain = twistedRoundScore(null, 50, 5000, settings);
   assert.ok(blitz.points * 2 > plain.points * 2);
+});
+
+// C5: the Blitz multiplier is pinned to the literal 1.5, and the reveal/HUD/card
+// copy stays consistent — the estimate, the reveal tag and the card are all
+// priced off this one constant, so a drift here would silently mis-price rounds.
+test("BLITZ_MULTIPLIER is exactly 1.5, and twistMultiplier agrees", () => {
+  assert.equal(BLITZ_MULTIPLIER, 1.5);
+  assert.equal(twistMultiplier("blitz"), 1.5);
+  assert.equal(twistMultiplier("frozen"), 1);
+  assert.equal(twistMultiplier("longhaul"), 1);
+  assert.equal(twistMultiplier(null), 1);
+  // The banked total is round(1.5 × (distancePoints + timeBonus)).
+  const settings = { roundSeconds: 60, moveAllowed: true };
+  const t = twistedRoundScore("blitz", 40, 4000, settings);
+  assert.equal(t.points, Math.round(1.5 * (t.distancePoints + t.timeBonus)));
+});
+
+// R1/C5: Long Haul's copy is honest — a gentler curve on the normal location,
+// never a claim of an "expert spot" (its dedicated expert sampler is a
+// documented deferral). Every deck card exposes a card + rule string.
+test("deck card copy is consistent and Long Haul makes no expert-spot claim", () => {
+  for (const t of TWIST_DECK) {
+    const c = twistCard(t.id);
+    assert.equal(c.card, t.card);
+    assert.equal(c.rule, t.rule);
+    assert.ok(t.hud && t.revealTag, `${t.id} needs a HUD + reveal tag`);
+  }
+  const lh = TWIST_DECK.find((t) => t.id === "longhaul");
+  assert.doesNotMatch(lh.rule.toLowerCase(), /expert/,
+    "Long Haul must not claim an expert spot (sampler deferred)");
+  assert.match(lh.rule.toLowerCase(), /gentler curve/);
 });

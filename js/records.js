@@ -266,6 +266,22 @@ export function applyDuelResult(records, won) {
   return { records: out };
 }
 
+// Fold an OWN-PHONE party (h2h) guess into the device records (spec §3.8, R7):
+// the closest-ever pin (context "party") and the ACE counters. Couch guesses
+// must NEVER call this — the host phone is a shared device, so "your closest
+// ever" would be the couch's, not yours (§3.8); the h2h guessing phone is
+// personal, so its pins count. Records only improve. `distanceKm` null/NaN (a
+// forfeit) folds nothing. Returns { records, closestImproved, ace }.
+export function applyPartyGuess(records, distanceKm, monthKey) {
+  const out = { ...defaultRecords(), ...records };
+  const c = foldClosest(out.closest, distanceKm, "party");
+  out.closest = c.closest;
+  const ace = typeof distanceKm === "number" && Number.isFinite(distanceKm) &&
+    distanceKm < ACE_MAX_KM;
+  if (ace) out.aces = foldAces(out.aces, 1, monthKey);
+  return { records: out, closestImproved: c.improved, ace };
+}
+
 // Seed the daily PB from an existing same-device result on first load, so
 // yesterday's players don't see "no best" the day the feature ships (§3.8 —
 // the one cheap exception to no-backfill). Idempotent: only fills a null row.

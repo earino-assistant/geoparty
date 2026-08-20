@@ -150,9 +150,22 @@ export function encodeGhost({ dayNumber, hard, poolCheck: pc, rounds }) {
   return bytesToBase64url(bytes);
 }
 
+// Whether a saved/finished run carries at least one usable per-round pin — the
+// v2 shape (spec §5.2). A pre-v2 (v1) save has no per-round `guess`, and an
+// all-forfeit run has none either; both must fall back to the plain result card
+// with an honest toast rather than an all-forfeit Ghost link (R5) — a challenge
+// whose every round is a forfeit is not a duel. The share glue gates the ghost
+// payload on this so no phantom challenge link ever ships.
+export function runHasPins(run) {
+  return !!(run && Array.isArray(run.rounds) && run.rounds.some(
+    (r) => r && r.guess &&
+      typeof r.guess.lat === "number" && typeof r.guess.lng === "number"));
+}
+
 // Build a ghost payload straight from a saved/finished daily run + the day's
 // five image_ids. rounds without a stored pin (v1 saves, forfeits) encode as
-// forfeits — the comparison still works on points (§3.5.2 case 5).
+// forfeits — the comparison still works on points (§3.5.2 case 5). Callers must
+// gate on runHasPins() first (R5): this will happily encode an all-forfeit run.
 export function buildGhostPayload(run, imageIds, dayNumber) {
   const rounds = ((run && run.rounds) || []).map((r) => ({
     pinned: !!(r.guess && typeof r.guess.lat === "number"),

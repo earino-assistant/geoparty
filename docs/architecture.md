@@ -137,8 +137,9 @@ rooms/KWPF
   teams/t1..t4     { name, total }
   activeTeam       whose turn (couch multi-team)
   poolCursor       sampler position, for host resume
-  lhCursor         G2 Long Haul sampler position (its own expert order;
-                   host-resume, like poolCursor; absent on pre-G2 rooms)
+  # lhCursor       DEFERRED — NOT WRITTEN in this release. Long Haul ships as a
+  #                gentler curve on the normal location; its dedicated expert-tier
+  #                sampler / lhCursor is the one deferred item (spec §3.2, §12).
   night            G3 Crown Night { v, games, crowns:{tN} } — the room-chain
                    tally; absent until game ≥ 2 (see below)
   round
@@ -226,10 +227,16 @@ These extend the model without adding a contention class (spec §5.3):
   `round/results/tN/decoy`, written in the team's own lock-in patch. The live
   feed carries the decoy as ordinary `round/live/tN/pin` coords — hidden in
   play by construction (a test enforces the live-surface absence).
-- **Crown Night** rides the room chain and nowhere else (no localStorage). In
-  couch, the host increments `night` in the same patch as `phase: gameOver`. In
-  h2h, the winner's phone computes `carryNight(night, winnerId)` (`night.js`)
-  and writes it into the **new** room before the `nextRoom` pointer — the same
+- **Crown Night** rides the room chain and nowhere else (no localStorage). The
+  game-over bump is **display-only and never written back to RTDB** — RTDB
+  holds only the pre-bump `night` seeded at game creation. In couch, the host
+  recomputes the bump with `night.js#gameNight(night, teams, roomCode)` (pure,
+  deterministic) for the podium and threads the carry in memory to the next
+  game; **a host refresh into `gameOver` recomputes the identical crown** from
+  the persisted pre-bump `night`, so the night survives a reload (the same
+  `gameNight` call runs on both the finish and resume paths). In h2h, the
+  winner's phone computes `carryNight(night, winnerId)` (`night.js`) and writes
+  it into the **new** room before the `nextRoom` pointer — the same
   connection-ordering guarantee the pointer already relies on. Every device
   computes `gameWinner` locally (deterministic), so the game-over crown display
   needs no write. A broken/abandoned chain simply ends the night silently.
@@ -247,9 +254,9 @@ Writers never contend on the same path:
 | `autoAdvanceAt: null` (the S6 hold) | host phone | current `hostTeam`'s phone |
 | `screenHeartbeat` | TV | TV |
 | `teams/tN` slot claim | — | transaction (`claimTeamSlot`) — the only transactional write |
-| `round/twist`, `lhCursor` (G2) | host phone (round-start patch) | current `hostTeam`'s phone (round-start patch) |
-| `teams/tN/decoyUsed`, `round/results/tN/decoy` (G7) | — | team tN's phone (own-subtree; disjoint by construction) |
-| `night` (G3) | host phone (same patch as `phase: gameOver`) | next-room creator (winner's phone), written into the NEW room before the `nextRoom` pointer |
+| `round/twist` (G2) | host phone (round-start patch) | current `hostTeam`'s phone (round-start patch) — `lhCursor` DEFERRED, not written (spec §12) |
+| `teams/tN/decoyUsed`, `round/results/tN/decoy` (G7) | — | team tN's phone (own-subtree; disjoint by construction). `decoyUsed` is written at **plant time** (survives refresh + forfeit-sweep, no refund), re-written harmlessly at lock-in |
+| `night` (G3) | host phone (bump recomputed by `night.js#gameNight`; display-only, threaded to the next game — a host refresh into gameOver recomputes the identical crown) | next-room creator (winner's phone), written into the NEW room before the `nextRoom` pointer |
 
 Everything else is `update()` with last-write-wins, which is safe precisely
 because paths are disjoint. The two deliberate exceptions where concurrent

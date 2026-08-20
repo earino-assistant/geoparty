@@ -32,11 +32,12 @@ import {
   defaultNight, bumpNight, champion, gameWinner,
   tallyLineText, championText,
 } from "./night.js";
-import { twistHudTag } from "./twist.js";
+import { twistHudTag, twistCard } from "./twist.js";
 import { adjustedPoints, superSureLabel } from "./supersure.js";
 import { TV_VIAS, screenJoinVia } from "./tvlink.js";
 import { countdownTick, motionDuration, animFraction } from "./fx.js";
-import { initSound, playSound, prefersReducedMotion } from "./fx-ui.js";
+import { initSound, playSound, prefersReducedMotion, stampFlash } from "./fx-ui.js";
+import { medalForDistance } from "./records.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer } from "./viewer-ui.js";
@@ -161,6 +162,8 @@ function followRoom(code) {
   latestState = null;
   revealShownForRound = null;
   confettiDone = false;
+  twistCardShownFor = null;   // C1: a fresh room can reuse round numbers
+  shownRoundNumber = null;
   $("roomInput").value = code;
   joinVia = "follow";
   joinRoom(code);
@@ -176,6 +179,8 @@ function leaveRoom(message) {
   latestState = null;
   revealShownForRound = null;
   confettiDone = false;
+  twistCardShownFor = null;   // C1
+  shownRoundNumber = null;
   followedCodes = new Set();
   try { history.replaceState(null, "", location.pathname); } catch { /* file:// */ }
   showScreen("s-entry");
@@ -307,6 +312,34 @@ function applyPose(pose) {
 }
 
 let shownRoundNumber = null;
+let twistCardShownFor = null;   // C1: round number the TV twist card fired for
+let twistCardEl = null;
+let twistCardTimer = null;
+
+// C1: the full-screen twist interstitial on the TV — a ritual card flip + scrim
+// (the .twist-card-overlay family the 3-2-1/Showdown use), auto-dismissing in
+// ~2.5s, with the S4 sting. Reduced-motion collapses the flip to a fade in CSS.
+function showTvTwistCard(twistId) {
+  const card = twistCard(twistId);
+  if (!card) return;
+  playSound("sting");
+  if (!twistCardEl) {
+    twistCardEl = document.createElement("div");
+    twistCardEl.className = "twist-card-overlay";
+    document.body.appendChild(twistCardEl);
+  }
+  twistCardEl.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "twist-card-title";
+  title.textContent = card.card;
+  const rule = document.createElement("div");
+  rule.className = "twist-card-rule";
+  rule.textContent = card.rule;
+  twistCardEl.append(title, rule);
+  twistCardEl.classList.remove("hidden");
+  clearTimeout(twistCardTimer);
+  twistCardTimer = setTimeout(() => twistCardEl.classList.add("hidden"), 2500);
+}
 
 function renderRound(state) {
   showScreen("s-round");
@@ -343,6 +376,13 @@ function renderRound(state) {
     `Round ${round.number || 1}` +
     (state.settings ? ` / ${state.settings.roundCount}` : "") +
     (round.twist ? ` · ${twistHudTag(round.twist.id)}` : "");   // G2
+  // C1: the twist ritual is a full-screen card flip on the TV (the same overlay
+  // family as the 3-2-1 and Showdown card), not a HUD tag alone — once per
+  // round, reduced-motion collapses the flip to a fade via CSS.
+  if (round.twist && round.number !== twistCardShownFor) {
+    twistCardShownFor = round.number;
+    showTvTwistCard(round.twist.id);
+  }
   const ids = teamIds(state.teams);
   const activeIdx = ids.indexOf(state.activeTeam);
   const teamEl = $("tvActiveTeam");
@@ -656,6 +696,9 @@ function renderReveal(state) {
 
   const truth = L.latLng(round.truth.lat, round.truth.lng);
   const guess = L.latLng(round.guess.lat, round.guess.lng);
+  // G4 (C2): the medal grade of this pin — its caption rides the distance line,
+  // and a sub-1km ACE fires the burst when the truth lands (below).
+  const medal = medalForDistance(round.score.distanceKm);
   L.circleMarker(guess, {
     radius: 12, color: "#fff", weight: 3, fillColor: "#555", fillOpacity: 1,
   }).addTo(revealMap).bindTooltip("Guess", { permanent: true, direction: "top" });
@@ -702,9 +745,13 @@ function renderReveal(state) {
       countUpPoints(adjustedPoints(round.score)); // ×2/0 applied for bets
       showSpeedNote(round.score); // speed lands with the score count-up
       showSuperSureNote(round.score);
+      // C2: the ACE burst fires with the truth landing (reduced-motion collapses
+      // the stamp via CSS, like LOCKED IN).
+      if (medal.ace) stampFlash(`🎯 ACE — ${formatDistance(round.score.distanceKm)}`);
     }
   };
-  $("tvDistance").textContent = formatDistance(round.score.distanceKm);
+  $("tvDistance").textContent = formatDistance(round.score.distanceKm) +
+    (medal.caption ? ` · ${medal.caption}` : "");
   $("tvPoints").textContent = "0";
   ensureSpeedNote().textContent = "";
   requestAnimationFrame(step);

@@ -48,10 +48,13 @@ export function foldBestMoment(best, results, placeName) {
 
 // "GeoParty 🌍 We were 3.2 km from Kyoto, Japan 🏆 12,340 pts — beat us: <url>"
 // best may be null (an all-forfeit game still gets a card, minus the brag).
+// G4 (C2): when the game's best moment was a sub-1km ACE, the brag carries a
+// 🎯 ACE tag — a visibly different flex, no new line of copy.
 export function partyShareText({ best, points, url }) {
+  const ace = best && typeof best.km === "number" && best.km < ACE_MAX_KM;
   const brag = best
     ? `We were ${formatDistance(best.km)} from ` +
-      `${best.place || "the answer"} 🏆 `
+      `${best.place || "the answer"}${ace ? " 🎯 ACE" : ""} 🏆 `
     : "";
   return `GeoParty 🌍 ${brag}${points.toLocaleString()} pts — beat us: ${url}`;
 }

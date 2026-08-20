@@ -23,7 +23,7 @@ export const TWIST_DECK = Object.freeze([
   { id: "blitz", card: "⚡ BLITZ", rule: "20-second clock · round ×1.5", hud: "⚡BLITZ", revealTag: "×1.5 ⚡", modes: ["couch", "h2h"] },
   { id: "frozen", card: "🧊 FROZEN", rule: "No moving — read the frame", hud: "🧊FROZEN", revealTag: "🧊", modes: ["couch", "h2h"] },
   { id: "blind", card: "🔒 BLIND DUEL", rule: "Rival pins are hidden", hud: "🔒BLIND", revealTag: "🔒", modes: ["h2h"] },
-  { id: "longhaul", card: "🌍 LONG HAUL", rule: "An expert spot, gentler curve", hud: "🌍LONGHAUL", revealTag: "🌍", modes: ["couch", "h2h"] },
+  { id: "longhaul", card: "🌍 LONG HAUL", rule: "Gentler curve — go bold", hud: "🌍LONGHAUL", revealTag: "🌍", modes: ["couch", "h2h"] },
 ]);
 
 export function twistById(id) {

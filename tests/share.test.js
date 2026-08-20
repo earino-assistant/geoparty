@@ -89,6 +89,20 @@ test("partyShareText: unnamed place and missing best degrade gracefully", () => 
   assert.equal(noBest, "GeoParty 🌍 0 pts — beat us: https://x.test/");
 });
 
+// C2 (G4): a sub-1km best moment stamps the party card with a 🎯 ACE tag —
+// a visibly different flex, no new line of copy.
+test("partyShareText: a sub-1km best moment adds the 🎯 ACE expression", () => {
+  const ace = partyShareText({
+    best: { km: 0.4, place: "Kyoto, Japan" }, points: 5200, url: "https://x.test/",
+  });
+  assert.match(ace, /from Kyoto, Japan 🎯 ACE 🏆/);
+  // A non-ACE best carries no ACE tag.
+  const notAce = partyShareText({
+    best: { km: 3.2, place: "Kyoto, Japan" }, points: 5200, url: "https://x.test/",
+  });
+  assert.doesNotMatch(notAce, /🎯 ACE/);
+});
+
 /* ---------------- the daily card ---------------- */
 
 test("distanceEmoji: grades distances into the four tiers plus no-pin", () => {

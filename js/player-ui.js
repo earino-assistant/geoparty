@@ -38,6 +38,7 @@ import {
   bonusWindowMs,
   timeBonus,
   formatCountdown,
+  formatDistance,
   revealResultLine,
   revealBoardRows,
   boardRowText,
@@ -97,7 +98,10 @@ import { withUtm, partyShareText, foldBestMoment } from "./share.js";
 import { shareResult, shareTvLink } from "./share-ui.js";
 import { screenLink, tvBrowserLine, phoneJoinLine } from "./tvlink.js";
 import { countdownTick } from "./fx.js";
-import { initSound, playSound, buzz } from "./fx-ui.js";
+import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
+import {
+  loadRecords, saveRecords, applyPartyGuess, medalForDistance,
+} from "./records.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
 import { scrubErrorMessage } from "./imagery.js";
 import { drawQr } from "./qr.js";
@@ -284,6 +288,7 @@ let revealFlipTimer = null; // phone-side hold during the TV countdown
 let lastTickSecond = null;  // S4: last countdown second the phone ticked for
 let revealTickSecond = null; // S4: same, for the no-TV reveal 3-2-1
 let stungFor = null;        // S4: round number the reveal sting played for
+let acedFor = null;         // G4: round number the ACE stamp fired for
 let fanfarePlayed = false;  // S4: game-over fanfare, once per room
 
 const isHost = () => !!room && room.hostTeam === myTeam;
@@ -480,6 +485,7 @@ function enterRoom(code, teamId) {
   autoAdvanceFired = null;
   prevSubmitted = 0;
   stungFor = null;
+  acedFor = null;
   fanfarePlayed = false;
   localStage = "explore";
   superSureArmed = false;
@@ -686,7 +692,11 @@ function renderLobby() {
         : `${ids.length} teams in — start when everyone's ready.`)
     : `Waiting for ${room.teams[room.hostTeam] ? room.teams[room.hostTeam].name : "the host"} to start…`;
   const note = $("pLobbyNote");
-  note.textContent = attached ? `${base} · TV ✓` : base;
+  // G3 (C5): the night tally rides the nextRoom chain into game ≥ 2's lobby —
+  // one muted line folded into the existing status (§3.3), never a new element.
+  const tally = tallyLineText(room.night, room.teams);
+  const status = attached ? `${base} · TV ✓` : base;
+  note.textContent = tally ? `${tally} · ${status}` : status;
   note.classList.toggle("ok", attached);
 }
 
@@ -877,7 +887,17 @@ function renderRoundActive() {
       oneShotHint("pano", HINT_CARDS.pano);
       if (viewer) viewer.resize();
     }
-    if (!iv) makeViewer();
+    if (!iv) {
+      makeViewer();
+      // C5: makeViewer seeds movement from the game-wide moveAllowed, so a
+      // Frozen round resumed/refreshed into (applyRoundTwist ran while iv was
+      // still null) would silently re-enable street movement. Re-assert the
+      // round's twist lever now that the viewer exists.
+      if (iv && iv.setMoveAllowed) {
+        iv.setMoveAllowed(
+          twistMoveAllowed(room.settings, round.twist ? round.twist.id : null));
+      }
+    }
     // One pano_session per round on THIS phone. startRound() only runs on
     // the h2h host, so without this every non-host player would be invisible
     // to the navigation/interaction panels.
@@ -1008,6 +1028,13 @@ function ensureGuessMap() {
     if (fold.place === "decoy") {
       placeDecoyMarker(e.latlng);
       renderDecoyChip();
+      // C5 (spec §3.7): the spend is recorded at PLANT time, not lock-in, so a
+      // decoy stays spent across a refresh (decoyState is local and lost on
+      // reload) AND across a host forfeit-sweep of this phone — no refund. The
+      // lock-in patch re-writes the same value harmlessly.
+      if (room && room.round) {
+        push({ [`teams/${myTeam}/decoyUsed`]: room.round.number });
+      }
       scheduleLiveWrite();        // the decoy now rides the live feed
       return;                     // no real pin yet → lock stays disabled
     }
@@ -1055,7 +1082,14 @@ function updateLockButton() {
   const km = haversineKm(
     truth.lat, truth.lng, g.lat, L.Util.wrapNum(g.lng, [-180, 180], true));
   const elapsed = Math.max(0, Date.now() - (room.round.startedAt || Date.now()));
-  const est = lockNowEstimate(km, elapsed, room.settings.roundSeconds);
+  // C5: price the estimate through the SAME twist-aware scorer lockIn uses
+  // (blitz ×1.5 + its 20s window, Long Haul's gentler curve), so the "if you
+  // locked in now" number matches what actually banks. twistId null ⇒
+  // twistedRoundScore reproduces lockNowEstimate exactly.
+  const twistId = room.round.twist ? room.round.twist.id : null;
+  const est = twistId
+    ? twistedRoundScore(twistId, km, elapsed, room.settings)
+    : lockNowEstimate(km, elapsed, room.settings.roundSeconds);
   paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, est, superSureArmed));
 }
 
@@ -1319,6 +1353,18 @@ function lockIn(auto = false) {
     // the same accepted posture as the embedded truth and the bet).
     decoy: decoyPin ? { lat: decoyPin.lat, lng: decoyPin.lng } : null,
   };
+  // R7 (G8/G4): fold this OWN-PHONE h2h guess into the device records —
+  // closest-ever (context "party") and the ACE counter. The h2h guessing phone
+  // is personal, so its pins count (§3.8); the couch host phone is shared and
+  // never runs this path. Local-only: nothing here is sent, hashed, or
+  // analytics-bound. A forfeit (no guess) folds nothing.
+  if (guess) {
+    const now = new Date();
+    const monthKey =
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const applied = applyPartyGuess(loadRecords(localStorage), distanceKm, monthKey);
+    saveRecords(localStorage, applied.records);
+  }
   cancelLiveWrite();
   const patch = {
     [`round/results/${myTeam}`]: result,
@@ -1585,12 +1631,24 @@ function renderReveal() {
   myBest = foldBestMoment(
     myBest, { me: mine }, round.truth && round.truth.name);
 
+  // G4 (C2): the medal grade of my pin — its caption rides the reveal result
+  // line, and a sub-1km ACE fires the stamp ceremony once per round on the
+  // acing phone (reduced-motion collapses the stamp via CSS, like LOCKED IN).
+  const medal = mine && typeof mine.distanceKm === "number"
+    ? medalForDistance(mine.distanceKm) : null;
+  if (medal && medal.ace && acedFor !== round.number) {
+    acedFor = round.number;
+    playSound("stamp");
+    stampFlash(`🎯 ACE — ${formatDistance(mine.distanceKm)}`);
+  }
+
   /* §6.4: ONE result line replaces the Location/Distance/Points cards and
    * the two sub-lines that used to be injected under them (speed breakdown,
    * SUPER SURE verdict). The SUPER SURE ceremony is untouched — the verdict
    * rides here and on the map halo, exactly as before. */
   const resultEl = $("pRevealResult");
-  resultEl.textContent = revealResultLine(mine);
+  resultEl.textContent = revealResultLine(
+    medal && medal.caption ? { ...mine, medalCaption: medal.caption } : mine);
   resultEl.classList.toggle(
     "lost", !!(mine && mine.superSure && mine.superSureOutcome !== "won"));
 

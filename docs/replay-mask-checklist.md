@@ -82,6 +82,8 @@ one.
   `#h2hLobbyTeams`, `#h2hGrid`, `#h2hRoundBoard`, `#h2hTotals` — team names
 - `#tvNightTally`, `#tvLobbyNight`, `#tvChampion` — G3 Crown Night tally /
   champion carry team names
+- `#h2hLobbyNote` — the h2h lobby status line now folds in the Crown Night
+  tally (team names) in game ≥ 2 (spec §3.3, C5)
 - `#tvPlace`, `#h2hPlace` — the round's answer
 - `#tvShowdown`, the guess-screen team caption — injected at runtime;
   masked in `screen-ui.js`

@@ -77,6 +77,19 @@ export function carryNight(night, winnerId) {
   return nextNight(bumpNight(night, winnerId));
 }
 
+// One pure resolution of a game-over night, so the finish path and the
+// refresh/resume path compute BYTE-IDENTICAL results (spec §3.3, R2). `night`
+// is the room's seeded pre-bump tally (persisted in RTDB at game creation);
+// `bumped` is the display tally for this game-over, `carry` is what the next
+// game inherits, `champ` is the champion id (or null). Deterministic in
+// (night, teams, roomCode) — a host refresh between games recomputes the same
+// crown it showed before the reload, so the night survives a refresh.
+export function gameNight(night, teams, roomCode) {
+  const winner = gameWinner(teams, roomCode);
+  const bumped = bumpNight(night, winner);
+  return { winner, bumped, carry: nextNight(bumped), champ: champion(bumped) };
+}
+
 /* ================================================================
  * Formatting (team names ride these → the DOM nodes carry data-ph-mask, §3.3)
  * ================================================================ */

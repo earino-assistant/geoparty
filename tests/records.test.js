@@ -19,6 +19,7 @@ import {
   foldDuel,
   applyDailyResult,
   applyDuelResult,
+  applyPartyGuess,
   seedBestFromResult,
 } from "../js/records.js";
 import { newDailyRun, recordDailyRound } from "../js/daily.js";
@@ -269,4 +270,47 @@ test("seedBestFromResult: fills a null PB row once, idempotently", () => {
     { key: "20260819", score: 8000, rounds: [] }, 1, true);
   assert.deepEqual(hardSeed.hard.bestScore, { score: 8000, day: 1 });
   assert.equal(hardSeed.daily.bestScore, null);
+});
+
+/* ---------------- R7: own-phone party guess fold (G8 closest + G4 aces) ------ */
+
+test("applyPartyGuess: an own-phone h2h guess folds closest with context 'party'", () => {
+  const rec = defaultRecords();
+  const a = applyPartyGuess(rec, 42.5, "2026-08");
+  assert.deepEqual(a.records.closest, { km: 42.5, context: "party" });
+  assert.equal(a.closestImproved, true);
+  assert.equal(a.ace, false);
+  // A worse guess never regresses the record.
+  const b = applyPartyGuess(a.records, 900, "2026-08");
+  assert.deepEqual(b.records.closest, { km: 42.5, context: "party" });
+  assert.equal(b.closestImproved, false);
+  // A strictly closer guess replaces it.
+  const c = applyPartyGuess(b.records, 5, "2026-08");
+  assert.deepEqual(c.records.closest, { km: 5, context: "party" });
+  assert.equal(c.closestImproved, true);
+});
+
+test("applyPartyGuess: a sub-1km party pin is an ACE and bumps the month + all-time counters", () => {
+  const rec = defaultRecords();
+  const a = applyPartyGuess(rec, 0.4, "2026-08");
+  assert.equal(a.ace, true);
+  assert.deepEqual(a.records.aces, { month: "2026-08", monthCount: 1, allTime: 1 });
+  // Another ACE the same month.
+  const b = applyPartyGuess(a.records, 0.9, "2026-08");
+  assert.deepEqual(b.records.aces, { month: "2026-08", monthCount: 2, allTime: 2 });
+  // A non-ACE guess leaves the ACE counters untouched.
+  const c = applyPartyGuess(b.records, 3, "2026-08");
+  assert.equal(c.ace, false);
+  assert.deepEqual(c.records.aces, { month: "2026-08", monthCount: 2, allTime: 2 });
+});
+
+test("applyPartyGuess: a forfeit (null/NaN distance) folds nothing and never mutates input", () => {
+  const rec = defaultRecords();
+  rec.closest = { km: 10, context: "daily" };
+  const frozen = JSON.stringify(rec);
+  const a = applyPartyGuess(rec, null, "2026-08");
+  assert.equal(a.closestImproved, false);
+  assert.equal(a.ace, false);
+  assert.deepEqual(a.records.closest, { km: 10, context: "daily" });
+  assert.equal(JSON.stringify(rec), frozen, "input records must not be mutated");
 });

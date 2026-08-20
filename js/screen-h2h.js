@@ -8,7 +8,8 @@ import { createViewer } from "./viewer-ui.js";
 import { scrubErrorMessage } from "./imagery.js";
 import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
-import { twistHudTag } from "./twist.js";
+import { twistHudTag, twistHidesRivalPins } from "./twist.js";
+import { tallyLineText } from "./night.js";
 import { revealDecoys } from "./decoy.js";
 import {
   autoAdvanceStatus,
@@ -178,9 +179,14 @@ function renderLobby(state, showScreen) {
     chip.style.color = teamHex(state.teams, id);
     wrap.appendChild(chip);
   });
-  $("h2hLobbyNote").textContent = ids.length < 2
+  const base = ids.length < 2
     ? "Every team plays on their own phone — scan the host's QR to join"
     : `${ids.length} teams ready — waiting for the host to start`;
+  // G3 (C5): the night tally rides the nextRoom chain into game ≥ 2's lobby —
+  // one muted line, folded into the existing status (§3.3). Team names ride it,
+  // and #h2hLobbyNote already carries data-ph-mask.
+  const tally = tallyLineText(state.night, state.teams);
+  $("h2hLobbyNote").textContent = tally ? `${tally} · ${base}` : base;
 }
 
 // The screen knows its room code only from its own URL (kept fresh by
@@ -412,7 +418,12 @@ function applyTeamFeed(p, state, round, feed, result, tid) {
           { animate: !prefersReducedMotion(), duration: 0.5 });
       }
     }
-    const pin = feed && feed.pin;
+    // Blind Duel (G2, spec §3.2): the TV must never contradict the card or the
+    // hidden-information constitution — rival live pins are invisible this round.
+    // Force the "no pin" path so a marker planted before the twist was known
+    // also gets cleared. The map view + "on the map 📍" status still update.
+    const blind = twistHidesRivalPins(round.twist && round.twist.id);
+    const pin = blind ? null : (feed && feed.pin);
     if (pin && typeof pin.lat === "number") {
       const key = `${pin.lat.toFixed(4)},${pin.lng.toFixed(4)}`;
       if (key !== p.pinKey) {

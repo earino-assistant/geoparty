@@ -10,6 +10,7 @@ import {
   poolCheck,
   encodeGhost,
   buildGhostPayload,
+  runHasPins,
   decodeGhost,
   ghostExpired,
   poolMatches,
@@ -280,3 +281,25 @@ function refreshChecksum(bytes) {
   bytes[bytes.length - 2] = cs & 0xff;
   bytes[bytes.length - 1] = (cs >> 8) & 0xff;
 }
+
+// R5: a saved run must carry at least one usable pin before it can become a
+// challenge link — a pre-v2 (v1) save or an all-forfeit run has none, and must
+// fall back to the plain card + honest toast, never an all-forfeit ghost link.
+test("runHasPins: true only when at least one round has a usable v2 pin", () => {
+  // A v2 run with pins.
+  assert.equal(runHasPins({ rounds: [
+    { guess: null }, { guess: { lat: 10, lng: 20 } }, { guess: null },
+  ] }), true);
+  // A pre-v2 (v1) save: rounds have points but no per-round `guess`.
+  assert.equal(runHasPins({ rounds: [
+    { distanceKm: 12, points: 3000 }, { distanceKm: 40, points: 2000 },
+  ] }), false);
+  // An all-forfeit run (v2 shape, every guess null).
+  assert.equal(runHasPins({ rounds: [{ guess: null }, { guess: null }] }), false);
+  // Malformed pins (non-numeric coords) do not count.
+  assert.equal(runHasPins({ rounds: [{ guess: { lat: "x", lng: 3 } }] }), false);
+  // Defensive: missing/empty shapes.
+  assert.equal(runHasPins(null), false);
+  assert.equal(runHasPins({}), false);
+  assert.equal(runHasPins({ rounds: [] }), false);
+});

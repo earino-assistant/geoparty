@@ -231,7 +231,14 @@ because the deck did it, not because they were trailing).
 | `blitz` | ⚡ BLITZ | 20-second clock, round total ×1.5 | round `endsAt` override + multiplier | couch, h2h |
 | `frozen` | 🧊 FROZEN | No street movement — read the single frame | the existing movement toggle, per-round | couch, h2h |
 | `blind` | 🔒 BLIND DUEL | Rival pins invisible this round | `liveRivalPins` returns `[]` for the round | h2h only |
-| `longhaul` | 🌍 LONG HAUL | An Expert-tier location, scored on a gentler curve | S3 tiers + a halved decay curve | couch, h2h |
+| `longhaul` | 🌍 LONG HAUL | Gentler scoring curve — go bold | a halved decay curve on the round's normal location | couch, h2h |
+
+> **As shipped (this release):** Long Haul applies the gentler (halved-decay)
+> curve to the round's **normal selected location**. The dedicated Expert-tier
+> secondary sampler (`lhCursor`, described under "Long Haul location supply"
+> below) is the one **explicitly deferred** item of this release — see §12. The
+> card copy ("Gentler curve — go bold") reflects the shipped behavior; it makes
+> no "expert spot" claim.
 
 **Host control.** One segmented setting in the collapsed "More options"
 disclosure (per the de-clutter rules — it's a convenience setting):
@@ -287,14 +294,20 @@ the twisted seconds by the same writer, exactly as today.
   `guess_submitted.total_score` remains "the raw round total", which now
   simply *is* the twisted total.
 
-**Long Haul location supply.** The main sampler order must stay untouched
-(cursor determinism is what makes resume work, `js/pool.js:139–160`). The
-room gets a second deterministic order:
-`orderedPool(pool, roomCode + "-lh", "expert")` with its own persisted
-cursor (`lhCursor` in room state, beside `poolCursor`). A Long Haul round
-pulls from it; the main cursor doesn't advance that round. Dead-image
-skips advance `lhCursor` exactly as `poolCursor` today. If the expert
-order is exhausted, the draw treats `longhaul` as ineligible.
+**Long Haul location supply.** *(DEFERRED — not in this release; see §12.)*
+The design below describes a future dedicated expert-tier sampler. **As
+shipped, none of it exists:** Long Haul is purely the gentler scoring curve
+(`longHaulDistancePoints` = `scoreForDistance(km / 2)`) applied to the round's
+**normal** selected location; the main sampler order and its single
+`poolCursor` are untouched, and there is no `lhCursor` in room state, no
+`orderedPool(…, "expert")` call, and no separate cursor persisted anywhere.
+`drawTwist` is invoked with `longHaulExhausted: false` (there is no expert
+order to exhaust). The deferred design: *the room would get a second
+deterministic order `orderedPool(pool, roomCode + "-lh", "expert")` with its
+own persisted `lhCursor`; a Long Haul round would pull from it without
+advancing the main cursor; dead-image skips would advance `lhCursor` like
+`poolCursor`; an exhausted expert order would make `longhaul` ineligible.*
+That work is the single explicit deferral of this release (§12).
 
 **Explicit interactions** (the cross-feature rulings other sections refer
 back to):
@@ -1257,3 +1270,78 @@ PM guardrails; where a mechanic could have undermined the product it was
 minimized, not dropped — all eight features are specified as their
 smallest genuinely-fun shape. Implementation begins only after owner
 approval, phase by phase per §8.*
+
+---
+
+## 12. Implementation status — G1–G8 release completion pass (Opus 4.8, 2026-08-20)
+
+This section is the source of truth for **what actually shipped** versus the
+design text above, so no reader mistakes a described-but-deferred mechanic for a
+live one. Everything in §1–§11 is implemented **except** the one item called out
+below.
+
+**The single explicit deferral.** Long Haul's dedicated **expert-tier secondary
+sampler / `lhCursor`** (§3.2 "Long Haul location supply") is **not built**.
+Long Haul ships as a gentler scoring curve
+(`longHaulDistancePoints` = `scoreForDistance(km / 2)`, tested) on the round's
+**normal** selected location. There is no `lhCursor`, no `orderedPool(…,
+"expert")`, no second cursor in room state; `drawTwist` runs with
+`longHaulExhausted: false`. Product copy is honest — the card reads *"Gentler
+curve — go bold"*, never "expert spot". **Future follow-up:** build the
+expert-order sampler exactly as the deferred design in §3.2 describes, behind
+the same `longHaulExhausted` eligibility hook that already exists — the seam is
+in place, so it is additive and needs no rework here.
+
+**Shipped in this completion pass (release blockers, required, and approved
+user-visible work):**
+
+- **Blind Duel TV (B1):** `screen-h2h.js` suppresses rival *live* pins whenever
+  `round.twist.id === "blind"` (reveal pins unaffected) — the TV can no longer
+  contradict the card or the hidden-information rule.
+- **Crown Night refresh-safety (R2):** `night.js#gameNight` resolves a
+  game-over's crown from `(night, teams, roomCode)` alone; `host-ui.js`'s finish
+  path **and** its gameOver *resume* path both call it, so a host refresh between
+  games recomputes the identical tally and re-threads the carry. Couch and h2h
+  carry are refresh-safe (h2h carry already rode the persisted room chain).
+- **Couch `guess_submitted` (R4):** now carries `round_number` and (when present)
+  `twist`, matching h2h.
+- **Ghost link telemetry (R3):** `ghost_link_invalid {reason:"expired"}` is now
+  emitted once at boot alongside malformed/version; `pool` keeps its own site.
+- **Pre-v2 / all-forfeit ghost guard (R5):** `ghost.js#runHasPins` gates the
+  share; a run with no usable pins produces the plain card + an honest toast,
+  never an all-forfeit challenge link.
+- **Streak storage-honesty hint (R6):** one-shot `geoparty_hint_streak` line on
+  the daily intro's first streak surface.
+- **Party record folds (R7):** `records.js#applyPartyGuess` folds an own-phone
+  h2h guess into device-local `closest` (context `"party"`) and the ACE
+  counters; wired in `player-ui.js#lockIn`, gated on a real pin. Couch (shared
+  host phone) never folds. Local-only — no analytics.
+- **TV twist interstitial (C1):** full-screen `.twist-card-overlay` ritual on the
+  TV, once per round, reduced-motion → fade (CSS).
+- **Party ACE (C2):** medal caption on the h2h reveal result line, an ACE stamp
+  on the acing phone and an ACE burst on the TV reveal, and a 🎯 ACE tag on the
+  party share card. Reduced-motion via the existing stamp CSS; no new PII.
+- **Ghost already-played instant verdict (C3):** an already-completed matching
+  daily/mode resolves straight to the duel verdict (recomputing the ghost's
+  scores on-device), emits `ghost_duel_completed`, and the done screen's
+  **"Send your verdict"** primary is the return challenge.
+- **Ghost reveal choreography (C4):** the 👻 marker materializes ~400 ms after
+  your pin with a fade (reduced-motion → instant); the duel done screen's
+  primary reads **"Send your verdict"**.
+- **Other C5 fixes:** resumed **Frozen** rounds re-assert the no-movement lever
+  (couch + h2h); the lock-button estimate is priced through the twist-aware
+  scorer (Blitz ×1.5 + 20 s window, Long Haul curve); the couch champion plays
+  exactly **one** fanfare; a planted decoy writes `decoyUsed` at **plant time**,
+  so it stays spent across a refresh and a host forfeit-sweep (no refund); the
+  night tally renders in both h2h lobbies (game ≥ 2); the daily ACE counter line
+  ("Nth ace this month") renders on the done screen; `BLITZ_MULTIPLIER = 1.5` and
+  the deck card copy are pinned by tests.
+
+**One honest divergence from the copy above (C5 — better UX, documented, not
+silent):** the grace-bridge line *"Missed a day — your streak survived. 🔥 N"*
+renders on the **done screen at the moment the bridging run completes** (the
+immediate, legible beat), rather than on the *next* intro as §3.1's copy
+paragraph describes. The done-screen moment is strictly more timely and needs no
+"already-shown" flag; the streak fold, grace guard, and all other §3.1 behavior
+are unchanged. The intro still carries the streak count (`🔥 N`) and the
+storage-honesty line (R6).
