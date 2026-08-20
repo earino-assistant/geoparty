@@ -3,6 +3,16 @@
 **Status: PLAN ONLY — no production code changes until owner approval.**
 Implementation is specified here for Opus to execute phase by phase (§14).
 
+> **Revision 2026-08-20 — learning mode.** Owner decision: the original
+> failure-triggered-only replay posture was too cautious for a product
+> with almost no users and a 5,000-free-replays/month allowance. Replay
+> now follows a **staged policy** (§9): a time-boxed **learning mode**
+> records 100% of explicitly-consented sessions to establish what healthy
+> looks like, then steps down to sampled healthy sessions plus guaranteed
+> recording of degraded/failed sessions. No privacy requirement is
+> weakened — recording remains strictly behind explicit analytics
+> consent, with every masking rule (§9.4) intact.
+
 The three field complaints this system must make diagnosable:
 
 1. "Images fail to load" — the pano never appears, or rounds burn through
@@ -27,8 +37,12 @@ only exception is a user-initiated one-time diagnostic report, §10.4).
 
 - Every imagery/viewer failure that today dies in a `catch` becomes a
   classified, release-stamped PostHog exception or event.
-- Failing sessions get a session replay with synchronized console output
-  and a network waterfall (timing/status/path only).
+- Session replay establishes what *normal* looks like before failures
+  need explaining: a time-boxed learning mode records 100% of consented
+  sessions; after a baseline exists, healthy sessions are sampled and
+  every degraded/failed session is still recorded — always with
+  synchronized console output and a network waterfall
+  (timing/status/path only). Staged policy in §9.
 - A "Report it" affordance turns a frustrated user into a diagnostic
   bundle with a support reference code — including users who declined
   analytics, via explicit one-time consent.
@@ -41,14 +55,19 @@ only exception is a user-initiated one-time diagnostic report, §10.4).
 
 - No Sentry now (§17 defines when that changes). Single vendor: PostHog.
 - No server-side code, no build step, no npm dependencies (repo law).
-- No recording of every session — replay is failure-triggered (§9).
+- No *permanent* 100% recording — learning mode (§9.2) is explicitly
+  time-boxed; the steady state samples healthy sessions and guarantees
+  recording only for degraded/failed ones. And no recording of any kind,
+  in any stage, without explicit analytics consent.
 - No weakening of the schema-allowlist / consent-gate architecture.
   Observability *extends* `js/analytics.js`; it never bypasses it.
 
 **Cost envelope** (PostHog free tier, current): 1M events/mo, 100k
-exceptions/mo, 5k replays/mo. Budget math in §13 shows expected usage at
-well under 5% of each; client-side caps (§7.4) make runaway loops unable to
-blow the exception budget.
+exceptions/mo, 5k replays/mo. Budget math in §9.5 shows even 100%
+learning-mode recording at current traffic consuming well under 10% of
+the 5k replay allowance; a 50%-of-allowance warning threshold prompts a
+sampling review (not billing), and client-side caps (§7.4) make runaway
+loops unable to blow the exception budget.
 
 ---
 
@@ -88,10 +107,18 @@ blow the exception budget.
 
 Flow for a field failure: `moveTo` rejects → wrapper classifies →
 `track("imagery_load", {ok:false, error_class, …})` + `trackError(...)` →
-PostHog groups it as an issue → the `$exception` event triggers session
-replay upload (buffered, §9.2) → issue links replay with console warns and
-the Mapillary network waterfall → dashboard panel moves → (if chronic on
-one entry) weekly health check confirms → quarantine PR.
+PostHog groups it as an issue → the session's replay is available per the
+staged policy (§9: 100% of consented sessions in learning mode; in later
+stages the `$exception` trigger and client-side override guarantee the
+failing session recorded, §9.3) → issue links replay with console warns
+and the Mapillary network waterfall → dashboard panel moves → (if chronic
+on one entry) weekly health check confirms → quarantine PR.
+
+Flow for a *healthy* session (learning mode's whole point): consented
+session records from the start → the health classifier (§9.1) marks it
+healthy → it feeds the baseline panels (§12.1) — P50/P95 load times, skip
+rates, navigation use — so failure numbers have a "normal" to be compared
+against.
 
 Everything below `consent.js` in that diagram fires **only after consent**
 (analytics consent, or the one-shot diagnostic consent). No new scripts,
@@ -104,9 +131,15 @@ reused verbatim, and `trackError` sits behind the same gate.
 
 | State | Product events | Exceptions | Replay | Report flow |
 |---|---|---|---|---|
-| Accepted | yes (today) | yes (new) | on failure triggers (new) | full |
-| Declined | no | no | no | one-time consent ask (§10.4) |
-| Not chosen yet | no | no | no | one-time consent ask (§10.4) |
+| Accepted | yes (today) | yes (new) | yes (new) — staged: 100% in learning mode, then sampled healthy + guaranteed failures (§9.2) | full |
+| Declined | no | no | **no — never, in any stage** | one-time consent ask (§10.4) |
+| Not chosen yet | no | no | **no — never, in any stage** | one-time consent ask (§10.4) |
+
+Because replay now records *healthy* consented sessions too (not only
+failing ones), the consent banner copy and PRIVACY.md must clearly
+disclose session replay and technical telemetry **before** recording
+turns on — this is a P1 ship-blocker (§14), not a follow-up. The
+one-time diagnostic path never records a replay in any stage (§10.4).
 
 The one-time diagnostic path is user-initiated (a tap on "Report it"),
 explicitly consented in its own dialog, sends exactly one report bundle
@@ -141,11 +174,12 @@ export const POSTHOG_INIT_OPTIONS = {
   // NEW — Web Vitals autocapture ($web_vitals: LCP/CLS/INP/FCP)
   capture_performance: { web_vitals: true },
 
-  // NEW — session replay behavior (recording itself is trigger-gated, §9)
+  // NEW — session replay behavior (retention follows the staged
+  // policy in §9.2; masking below applies identically in every stage)
   session_recording: {
     maskAllInputs: true,
-    maskTextSelector: "[data-ph-mask]",   // team names, room codes (§9.3)
-    captureCanvas: false,                 // WebGL pano NOT recorded (§9.3)
+    maskTextSelector: "[data-ph-mask]",   // team names, room codes (§9.4)
+    captureCanvas: false,                 // WebGL pano NOT recorded (§9.4)
     recordHeaders: false,
     recordBody: false,
     maskCapturedNetworkRequestFn: (req) => {
@@ -182,12 +216,12 @@ shapes above are the current documented API.
 |---|---|---|
 | Error tracking → Exception autocapture | **ON** | groups `$exception` into issues |
 | Session replay → Record user sessions | **ON** | master switch |
-| Session replay → Sampling | **0%** | nothing records by default |
-| Session replay → Event trigger | `$exception`, `imagery_report` | record only failing sessions (§9.2) |
+| Session replay → Sampling | **stage-dependent (§9.2): 100% (Stage 1) → 15% (Stage 2) → 1–5% (Stage 3)** | healthy-session retention; stage transitions are a project-settings click, no deploy |
+| Session replay → Event trigger | `$exception`, `imagery_report` | belt-and-braces guarantee that failing sessions record in *every* stage (§9.3) — redundant at 100% sampling, load-bearing from Stage 2 |
 | Session replay → Minimum duration | 2000 ms | drop empty blips |
 | Session replay → Capture console logs | **ON** | synced warns/errors |
 | Session replay → Capture network performance | **ON** | waterfall (timing/status/path) |
-| Session replay → Record canvas | **OFF** | pano pixels stay out (§9.3) |
+| Session replay → Record canvas | **OFF** | pano pixels stay out (§9.4) |
 | Web analytics → Discard client IP | **ON** (verify) | PRIVACY.md already promises it |
 | Autocapture → Web vitals | **ON** | pairs with `capture_performance` |
 
@@ -433,28 +467,119 @@ nothing in this plan touches guess data.
 
 ---
 
-## 9. Session replay: triggers, sampling, privacy
+## 9. Session replay: staged policy, health model, privacy
 
-### 9.1 What gets recorded
+Replay retention is **staged: learn first, sample later**. GeoParty has
+almost no users yet, and the free tier includes 5,000 replays/month. A
+failure-only posture at this volume would leave us with a handful of
+broken-session recordings and *zero* examples of what a healthy session
+looks like — no baseline load times, no normal skip rate, no picture of
+how real players actually use navigation. The owner's call: optimize for
+learning now, not for hypothetical future scale.
 
-Only sessions where something went wrong: project-side **event triggers**
-on `$exception` and `imagery_report` (§4.2), sampling otherwise **0%**.
-Expected volume: (failing sessions) ≈ tens/month — far under the 5k cap.
+### 9.1 Session health model
 
-### 9.2 Trigger mechanics and the buffering caveat
+Sessions are classified into three classes by `classifySessionHealth()`
+— a pure fold in `js/imagery.js` over the session's instrumentation
+(`viewer_init`, `imagery_load`, `pano_session`, exceptions, reports),
+unit-tested with fixtures per class. The same definition is used
+client-side (to force recording of non-healthy sessions in Stage 2+,
+§9.3) and dashboard-side (the healthy/degraded/failed comparison panels,
+§12.1). Precedence: **failed > degraded > healthy**.
 
-posthog-js with an event trigger buffers rrweb data client-side while the
-trigger is *pending* and flushes the buffer when the trigger event fires —
-which is exactly the "show me the lead-up to the failure" behavior we
-want. **P1 must verify this buffering empirically** (it is the load-
-bearing assumption of the replay design). Fallback if buffering proves
-partial or absent: init with `disable_session_recording: true` and call
-`posthog.startSessionRecording()` from the wrapper at the first classified
-failure — accepting that the recording then starts *at* the failure
-(retries, skips, and the report flow are still captured). A linked feature
-flag (`replay-imagery-debug`) acts as a remote kill switch either way.
+| Class | Definition |
+|---|---|
+| **Healthy** | All of: viewer(s) constructed (`viewer_init ok:true`); every anchor/resume `imagery_load` ok with `duration_ms < 10 s`, `skips = 0`, not `late`; where movement is enabled, navigation available when attempted (`nav_available` true, `nav_failures = 0`); rounds progress normally (`guess_submitted` → `reveal_shown` for each started round); zero captured exceptions (`cancelled` never captures, §5) and zero `imagery_report`s. |
+| **Degraded** | Playable but impaired — any of: a successful load with `duration_ms ≥ 10 s` or `late:true`; pool skips (`skips ≥ 1`) that still landed a pano; `no_neighbors`, `nav_available:false`, or `nav_failures > 0` where movement is enabled; partial interaction failure (`pointer_downs > 0` with `looks = 0` — the gesture-blocked signal). |
+| **Failed** | The user saw a broken game — any of: no playable panorama for a round (anchor skip loop exhausted, or every attempt `ok:false`); `viewer_init ok:false` / `webgl_unavailable` / `webgl_context_lost`; any captured classified exception of a hard class (`http_auth`, `network_timeout` never corrected by a late success, `image_dead` exhausting the loop); or an explicit `imagery_report`. |
 
-### 9.3 Replay privacy configuration
+A skip that ultimately lands a pano marks the session **degraded**, not
+failed — failed is reserved for sessions where the player experienced
+breakage, so the failure-rate panels stay honest.
+
+### 9.2 Staged retention policy
+
+**Stage 1 — Learning mode (initial launch).**
+
+- Record **100% of sessions where the user has explicitly accepted
+  analytics** — healthy, degraded, and failed alike.
+- **Time-box: 30 days, or 300 useful sessions, whichever comes first.**
+  A *useful session* is a consented session with at least one round
+  reaching `reveal_shown`, or at least one classified failure. Why 300
+  (from the defensible 200–500 range): split across the top ~3 browser
+  families × two device classes, 300 leaves roughly 50 sessions per
+  major segment — about the minimum for stable per-segment P50s and
+  meaningful P95s. Under ~200 the segment P95s are noise; past ~500,
+  more data buys little at this traffic level and delays Stage 2.
+- Failure triggers and the client-side override (§9.3) are configured
+  from day one — redundant while sampling is 100%, but they make the
+  Stage-2 transition a pure sampling change with no code risk.
+- **Weekly replay-consumption review** (§9.5) and a **remote kill
+  switch** (§9.3) run for the whole stage.
+- Users who **declined or have not chosen remain completely
+  unrecorded** — the only capture path outside accepted consent stays
+  the explicit one-time diagnostic *report* flow (§10.4), which sends a
+  single event bundle and **never a replay**.
+
+**Stage 2 — Baseline sampling (after the learning threshold).**
+
+- Healthy sessions: **15% random retention** (default; midpoint of the
+  10–20% range). Justification: at current volumes 15% still yields a
+  steady trickle of fresh healthy baselines — enough to notice drift in
+  "normal" after a release — while cutting steady-state consumption
+  ~85%; tune with §9.5 consumption data before moving off it.
+- **100% recording** for sessions with: any captured exception; any
+  `imagery_load ok:false`; a successful anchor load with
+  `duration_ms ≥ 10 s`; `skips ≥ 2` in one round; navigation failures
+  (`nav_failures > 0` or `no_neighbors`); or a manual `imagery_report`.
+  (I.e., everything §9.1 classes as degraded or failed.)
+
+**Stage 3 — Future scale (only if traffic materially grows).**
+
+- Trigger: sustained consented traffic where Stage-2 policy would
+  approach the §9.5 warning threshold (roughly >2k consented
+  sessions/mo).
+- Healthy sampling drops to **1–5%**; high-severity failures stay at
+  100%.
+- **Targeted temporary sampling** during investigations: boost recording
+  for a specific browser/device/release via project settings or the
+  linked feature flag, reverted when the investigation closes.
+
+Stage transitions are owner decisions executed as PostHog
+project-settings changes (no deploy); each transition gets a dated line
+appended to the revision note at the top of this doc.
+
+### 9.3 Recording mechanics: sampling, guaranteed triggers, kill switch
+
+Healthy-session retention and failure guarantees ride on independent
+mechanisms, so failing sessions record in *every* stage:
+
+1. **Project-side sampling** governs healthy retention (100% → 15% →
+   1–5%), adjustable remotely without a deploy.
+2. **Failure guarantee**, twice over: project-side event triggers on
+   `$exception` and `imagery_report` (§4.2), plus client-side — when the
+   wrapper classifies a failure or a degraded condition (slow anchor,
+   `skips ≥ 2`, nav failure), it calls
+   `posthog.startSessionRecording()` to override a negative sampling
+   decision. Buffering caveat: posthog-js buffers rrweb data client-side
+   while a trigger is pending and flushes the lead-up when it fires —
+   in Stage 1 this is moot (recording runs from session start), so
+   **empirical verification of the buffering becomes a Stage-2 entry
+   criterion** rather than a P1 blocker. If buffering proves partial or
+   absent, Stage 2 accepts recording-from-the-failure-onward, with
+   sampled healthy sessions still providing lead-up coverage
+   statistically.
+3. **Remote kill switch:** recording is linked to the
+   `replay-imagery-debug` feature flag — turning it off stops all
+   recording remotely, in any stage, without a deploy. The project-level
+   "Record user sessions" master toggle is the second, vendor-side
+   lever.
+
+### 9.4 Replay privacy configuration (identical in every stage)
+
+Learning mode does not loosen one bit of masking: a 100%-sampled healthy
+session is recorded under exactly the same configuration as a failing
+one, and all of it only ever after explicit analytics consent.
 
 - `maskAllInputs: true` — nothing typed is recorded, ever (team names!).
 - `maskTextSelector: "[data-ph-mask]"` — a P1 sweep adds `data-ph-mask`
@@ -478,6 +603,36 @@ flag (`replay-imagery-debug`) acts as a remote kill switch either way.
   strips query strings from event-side URLs anyway, and the P1 checklist
   evaluates `history.replaceState` cleanup on the player/screen pages as
   a nice-to-have.
+
+To restate the invariants that hold even at 100% learning-mode
+recording: replay only after explicit analytics consent; canvas/street
+imagery never captured; inputs, team names, and room-code UI masked;
+headers and request/response bodies never recorded; URL query
+strings/tokens stripped; no coordinates and no raw image ids leave the
+device. And per §3, consent copy + PRIVACY.md disclose replay before any
+of it ships.
+
+### 9.5 Replay budget, weekly review, warning thresholds
+
+- **Free allowance: 5,000 replays/month.** Expected Stage-1 volume:
+  current traffic is, optimistically, tens of consented sessions per
+  week — even at 100% recording that is a few hundred replays/month,
+  comfortably under 10% of the allowance. The headroom is large; the
+  binding constraint in learning mode is *owner review attention*, not
+  quota.
+- **Weekly consumption review** (owner, ~10 minutes, every stage):
+  check the month-to-date replay count against the thresholds below,
+  skim a few new recordings (feeding the §12.1 baseline notes), and
+  spot-check that masking holds on real recordings.
+- **Warning threshold: 2,500 replays/month (50% of allowance).**
+  Crossing it prompts a *sampling review* — consider entering Stage 2
+  early, raising the minimum-duration floor, or tightening degraded
+  triggers. It is a review prompt, **not** automatic billing: the free
+  tier stops ingesting rather than charging, and the plan never
+  intentionally rides the allowance edge. At **4,000/month (80%)**,
+  reduce sampling immediately rather than waiting for the weekly slot.
+- The 2000 ms minimum-duration setting (§4.2) keeps empty blips from
+  consuming quota in every stage.
 
 ---
 
@@ -509,8 +664,9 @@ as chrome only while the pano screen is up.
    the PostHog session id + a monotonic counter (pure, tested; no
    `Math.random` needed for uniqueness at our scale).
 3. Fires `imagery_report` (event) + `trackError(ReportedByUser, …)` with
-   `ref_code` — the exception ensures the replay trigger fires even in
-   sessions with no prior `$exception`.
+   `ref_code` — from Stage 2 on, the exception ensures the replay
+   trigger fires even in sessions with no prior `$exception` (in
+   learning mode the session is already recording).
 4. Shows the confirmation with the reference code.
 
 Lookup path for support: search `ref_code` in PostHog → the
@@ -600,6 +756,34 @@ One PostHog dashboard, **"Field reliability"**:
 | 9 | First playable pano rate | share of `imagery_load` (purpose=anchor) with `ok=true`, `skips=0`, `duration_ms<10000` — "round 1 just worked" |
 | 10 | Reports | `imagery_report` table: `ref_code`, `error_class`, `surface` → session/replay links |
 | 11 | Web Vitals | built-in `$web_vitals` panel (LCP/INP on phone pages) |
+| 12 | Session health mix | share of sessions healthy / degraded / failed (§9.1), trended, by `release` and `surface` |
+| 13 | Health-class comparison | healthy vs degraded vs failed side by side: anchor load P50/P95, skip rate, navigation use, round-completion rate |
+
+### 12.1 Baseline learning (the Stage-1 deliverable)
+
+Learning mode is only worth its replays if it ends with written answers.
+Panels 12–13 give every reliability number a healthy/degraded/failed
+comparison, and the learning-mode **exit report** (written at the §9.2
+threshold, before flipping to Stage 2) must answer, from data:
+
+- **Load-time baseline:** P50/P95 anchor image load by `$browser`,
+  `$os`, `net_type`, and `surface` — what "normal speed" is per segment,
+  so the panel-2 alert thresholds stop being guesses.
+- **Normal skip rate:** share of rounds with `skips > 0` and its
+  distribution — what background pool decay looks like when nothing is
+  wrong.
+- **Navigation availability and use:** how often `nav_available` is
+  true where movement is enabled, how often players actually navigate
+  (`nav_moves`), and the baseline `nav_failures` rate.
+- **Completion differences:** do degraded sessions still finish rounds
+  and games at healthy rates (`guess_submitted` / `reveal_shown` funnels
+  per health class), or do slow loads and skips bleed players?
+- **WebGL and mobile Safari behavior:** WebGL support rate,
+  `webgl_context_lost` frequency, and whether iOS Safari's load P95s and
+  context losses differ enough to deserve segment-specific thresholds.
+
+Those answers become the Stage-2 alert thresholds and the yardstick
+every future "is imagery healthy?" question is measured against.
 
 Alerts (PostHog insight alerts → owner email):
 
@@ -611,6 +795,7 @@ Alerts (PostHog insight alerts → owner email):
 | Auth failure | any `http_auth` > 5/day (token revoked — page the owner) |
 | Viewer init failure | `viewer_init` ok=false rate > 2%/day |
 | Chronic entry | any `pool_entry` ≥ 5 failures across ≥ 3 sessions / 7 d (feeds §13 suspects) |
+| Replay consumption | month-to-date replays > 2,500 (50% of allowance → sampling review, §9.5); > 4,000 (80% → reduce sampling now) |
 
 Thresholds are starting points; the P1 exit criterion is two weeks of real
 data without a false-positive-dominated inbox, tuning as needed.
@@ -687,21 +872,40 @@ event; no behavior change to any existing catch/skip/toast path.
 
 ### P1 — "See the story" (1 PR + settings, ~a day)
 
-1. Replay: init `session_recording` block, project triggers/sampling
-   (§4.2), `data-ph-mask` sweep checklist, console diag-id sweep,
-   **empirical buffering verification** (§9.2) with documented result;
-   fallback wiring if needed; `replay-imagery-debug` kill-switch flag.
-2. `pano_session` event + wrapper listeners (`navigable`,
-   `webglcontextlost`, interaction fold).
-3. Report flow, consented path only (§10.1–10.3): toast action + ambient
+1. Replay in **learning mode**: init `session_recording` block; project
+   settings sampling **100%** + failure event triggers (§4.2, §9.2–9.3);
+   client-side `startSessionRecording()` override wiring; console
+   diag-id sweep; `replay-imagery-debug` kill-switch flag wired and
+   tested off/on.
+2. **Ship-blockers before recording turns on:** (a) the `data-ph-mask`
+   sweep checklist completed and verified against a *real* recording
+   (masked team names/room codes, black canvas); (b) consent banner copy
+   and PRIVACY.md updated to clearly disclose session replay and
+   technical telemetry (§3).
+3. `pano_session` event + wrapper listeners (`navigable`,
+   `webglcontextlost`, interaction fold); `classifySessionHealth` in
+   `js/imagery.js` (§9.1).
+4. Report flow, consented path only (§10.1–10.3): toast action + ambient
    link + sheet + `imagery_report` + ref codes.
-4. Dashboard panels 7, 9, 10, 11; alerts 5–6.
-- **Tests:** pano-session fold; ref-code format/uniqueness; report bundle
-  fold; mask-selector list snapshot (checklist file).
+5. Dashboard panels 7, 9–13; alerts 5–7; the weekly consumption review
+   (§9.5) starts with the first deploy.
+- **Tests:** pano-session fold; health classifier fixtures per class
+  (healthy/degraded/failed, precedence rules); ref-code
+  format/uniqueness; report bundle fold; mask-selector list snapshot
+  (checklist file).
 - **Failure injection:** scenarios B, C, D, F — proving the full chain
-  issue → exception/event → replay → console+network → dashboard.
+  issue → exception/event → replay → console+network → dashboard — plus
+  the healthy-session recording check (§15).
 - **Rollback:** replay OFF is one project-settings toggle (or the flag);
   events revert with the commit.
+
+### P1.5 — Stage-2 transition (no PR; settings + a written report)
+
+At 30 days or 300 useful sessions (§9.2), whichever first: write the
+learning-mode exit report (§12.1); **empirically verify trigger
+buffering** (§9.3) with documented result, wiring the fallback if
+needed; then flip project-side sampling 100% → 15%. One settings change,
+one dated line in the revision note.
 
 ### P2 — "Close the loop" (2 small PRs)
 
@@ -711,7 +915,8 @@ event; no behavior change to any existing catch/skip/toast path.
 2. Pool health workflow + `pool_health.mjs` + quarantine filter in
    `loadPool()` (+ tests: filter applied, absent-file no-op) +
    `tools/diag_lookup.mjs`.
-3. Two-week threshold-tuning pass on alerts; Sentry checkpoint (§17).
+3. Threshold-tuning pass on alerts using the §12.1 baseline numbers;
+   Sentry checkpoint (§17).
 
 ### Explicitly deferred (not in P0–P2)
 
@@ -747,6 +952,15 @@ Mapillary request in the **network** waterfall with status/timing →
 dashboard panels 1/3/5 move → `tools/diag_lookup.mjs` maps the
 `pool_entry` back to the real entry locally.
 
+Learning-mode proof (P1 exit criterion, alongside the chain proof): play
+one fully *healthy* round on a real phone with consent accepted →
+a replay appears without any failure trigger firing, the §9.1 classifier
+marks the session healthy, panel 12 counts it — and the recording shows
+masked inputs/team-name elements, a black canvas, and query-stripped
+network entries (§9.4 verified on a real recording, not just in code
+review). Then flip the `replay-imagery-debug` flag off and confirm a
+second session records nothing.
+
 ---
 
 ## 16. What remains invisible (honest limits)
@@ -769,7 +983,7 @@ dashboard panels 1/3/5 move → `tools/diag_lookup.mjs` maps the
   browser crashes can drop the buffer before `sendBeacon` flushes; the
   exception often outruns the crash, the replay tail may not.
 - **The pano pixels in replays** — deliberately black (`captureCanvas:
-  false`, §9.3).
+  false`, §9.4), in learning mode exactly as in every later stage.
 - **Internal SDK arrow-click navigation failures** — no rejection reaches
   our code; visible only via console capture inside replays and
   `pano_session` counters, not as classified exceptions.
@@ -789,11 +1003,14 @@ sustained for a month:
    duplicate/fragmented issues per release at a rate that makes triage
    slower than reading raw events (evaluate after 2 months of real
    traffic, P2 checkpoint).
-2. **Pre-failure replay proves impossible** — §9.2's buffering
-   verification fails AND post-failure-only recordings demonstrably miss
-   root causes we needed.
+2. **Pre-failure replay proves impossible** — the §9.3 buffering
+   verification (Stage-2 entry criterion) fails AND post-failure-only
+   recordings demonstrably miss root causes we needed — a gap that
+   Stage-1's full recordings and Stage-2's sampled healthy sessions are
+   expected to cover statistically first.
 3. **Volume** — exceptions trend past ~50k/mo (half the free tier) or
-   replays past 2.5k/mo.
+   replays sustain past the 2.5k/mo warning threshold (§9.5) *after*
+   sampling has already been tightened.
 4. **Release-health gating** — we want crash-free-session rates to gate
    deploys automatically, which PostHog doesn't model.
 5. **Alert routing** — email alerts stop being enough (on-call routing,
@@ -811,7 +1028,7 @@ exceptions + replay only; product analytics stays in PostHog.
 | Phase | New | Modified |
 |---|---|---|
 | P0 | `js/imagery.js`, `js/viewer-ui.js`, `tests/imagery.test.js`, `.github/workflows/pages.yml` | `js/analytics.js`, `js/consent.js`, `js/host-ui.js`, `js/player-ui.js`, `js/daily-ui.js`, `js/screen-ui.js`, `js/screen-h2h.js`, `js/landing-ui.js`, `tests/analytics.test.js`, `docs/analytics.md`, `PRIVACY.md` |
-| P1 | (checklist file for mask sweep) | `js/analytics.js` (replay opts), `*-ui.js` (report flow, `data-ph-mask`), `css/*`, `tests/imagery.test.js`, `docs/analytics.md` |
+| P1 | (checklist file for mask sweep) | `js/analytics.js` (replay opts), `js/imagery.js` (`classifySessionHealth`), `*-ui.js` (report flow, `data-ph-mask`), `css/*`, `tests/imagery.test.js`, `docs/analytics.md`, `PRIVACY.md` + consent banner copy (replay disclosure, ship-blocker §3) |
 | P2 | `.github/workflows/pool-health.yml`, `tools/pool_health.mjs`, `tools/diag_lookup.mjs`, `data/pool_quarantine.json` (empty seed) | `js/pool.js`, `js/analytics.js` (one-shot init), `js/consent.js`, `tests/pool.test.js`, `PRIVACY.md` |
 
 Nothing in this plan touches `data/location_pool.json` generation,
