@@ -1,8 +1,11 @@
 # Beta infrastructure removal plan — main-only Pages + verify-live gate
 
-**Status:** Plan, awaiting Eduardo's approval; pinned Opus 4.8 implements the
-repo change set (§2, §4), external steps per §3/§5. Nothing in this commit
-changes code, workflows, settings, branches, or external systems.
+**Status:** **Executed 2026-08-20 (this commit)** — the repo change set (§2,
+§4) is implemented locally by pinned Opus 4.8, `npm test` + `npm run check`
+green. Remaining steps are external and owner-owned: §3.3 (Firebase
+`rooms-beta` rules removal) and §3.4 (PostHog fact-check); the phase-3 push
+(§5) is unpushed pending owner approval. This document now joins the
+historical record; nothing in its substantive prescription changed.
 **Date:** 2026-08-20. **Author:** Fable.
 **Owner decision being executed:** abandon the beta lane. The product flow is:
 reviewed candidate → explicit owner approval → push `main` → production Pages

@@ -54,8 +54,7 @@ function fakePosthog() {
 
 // A posthog-like sink that snapshots the super properties in effect at the
 // instant each event is captured — the way to prove ORDERING: a schema event
-// must never flush before deployment_channel has been applied (beta plan
-// §5.5 / §8.1).
+// must never flush before the registered super properties have been applied.
 function orderingFake() {
   return {
     captured: [],
@@ -657,8 +656,8 @@ test("tracker: decline before load resolves also drops queued events", async () 
 
 // Guardrail: the fix must not regress the happy path — a fresh accept with no
 // revoke still loads, opts in, and captures consent_given exactly once, with
-// the deployment_channel super property already applied (B2 ordering).
-test("tracker: uninterrupted fresh accept still captures consent_given after channel is registered", async () => {
+// any synchronously-registered super property already applied (ordering).
+test("tracker: uninterrupted fresh accept still captures consent_given after super props are registered", async () => {
   const storage = memStorage();
   const ph = orderingFake();
   let release;
@@ -666,7 +665,7 @@ test("tracker: uninterrupted fresh accept still captures consent_given after cha
   const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
 
   const accepted = a.accept();
-  a.register({ deployment_channel: "beta" }); // stampChannel(), synchronous
+  a.register({ release: "abc1234" }); // a synchronous super-property register
   release();
   await accepted;
   await tick();
@@ -674,8 +673,8 @@ test("tracker: uninterrupted fresh accept still captures consent_given after cha
   assert.equal(ph.optedOut, false, "a genuine acceptance is opted IN");
   const given = ph.captured.filter((c) => c.event === "consent_given");
   assert.equal(given.length, 1, "consent_given fires exactly once");
-  assert.equal(given[0].superAtCapture?.deployment_channel, "beta",
-    "consent_given must flush AFTER deployment_channel is registered (B2)");
+  assert.equal(given[0].superAtCapture?.release, "abc1234",
+    "consent_given must flush AFTER registered super properties are applied");
 });
 
 test("tracker: a failed script load degrades silently", async () => {
@@ -900,87 +899,70 @@ test("register: an empty/garbage stamp is rejected", async () => {
   assert.equal(a.register({ nonsense: 1 }), false);
 });
 
-/* ---- deployment_channel super property (beta-deployment-plan §5.5) ---- */
+/* ---- release super-property allowlist + registration ordering ---- */
 
-test("channel: RELEASE_PROPS carries deployment_channel and it survives sanitization", () => {
-  // The allowlist extension the plan mandates: without it, register() would
-  // silently strip the key and nothing would be stamped.
-  assert.equal(RELEASE_PROPS.deployment_channel, "string");
-  assert.deepEqual(
-    sanitizeProps(RELEASE_PROPS, { deployment_channel: "beta" }),
-    { deployment_channel: "beta" });
-  // And it is not caught by the coordinate/identity BANNED_KEY_RE sweep.
-  assert.equal(
-    sanitizeProps(RELEASE_PROPS, { deployment_channel: "production" }).deployment_channel,
-    "production");
+test("release: RELEASE_PROPS is EXACTLY {release, commit, deployed_at}", () => {
+  // The allowlist is a hard pin: it can neither silently regrow a key (the
+  // retired deployment_channel) nor lose one that js/consent.js registers.
+  assert.deepEqual(RELEASE_PROPS,
+    { release: "string", commit: "string", deployed_at: "string" });
 });
 
-test("channel: registration is consent-gated — nothing is stamped before opt-in", async () => {
+test("release: registration is consent-gated — nothing is stamped before opt-in", async () => {
   const { a, storage, ph } = harness();
-  assert.equal(a.register({ deployment_channel: "beta" }), false, "no consent, no channel");
+  assert.equal(a.register({ release: "abc1234" }), false, "no consent, no stamp");
   setConsent(storage, CONSENT_ACCEPTED);
   await a.init();
   assert.equal(ph.superProps, null, "the pre-consent register buffered nothing to the client");
 });
 
-test("channel: deployment_channel is applied BEFORE queued events flush (returning-visitor flow)", async () => {
-  // Mirrors consent.js's returning-visitor path: stampChannel() (register)
-  // runs synchronously, then init() resumes the load, then product events
-  // queue while the script is in flight.
+test("release: super props are applied BEFORE queued events flush (returning-visitor flow)", async () => {
+  // Mirrors consent.js's returning-visitor path: a register() may run
+  // synchronously, then init() resumes the load, then product events queue
+  // while the script is in flight. The buffered-register-before-flush
+  // property is general consent machinery.
   const storage = memStorage();
   const ph = orderingFake();
   let release;
   const gate = new Promise((r) => { release = r; });
   const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
   setConsent(storage, CONSENT_ACCEPTED); // prior session opted in
-  a.register({ deployment_channel: "beta" });
+  a.register({ release: "abc1234" });
   a.init();
   a.track("round_started", { room: "ABCDEF", mode: "couch", round_number: 1 });
   assert.equal(ph.captured.length, 0, "not delivered before the script lands");
   release();
   await tick();
-  assert.equal(ph.superProps.deployment_channel, "beta");
+  assert.equal(ph.superProps.release, "abc1234");
   const ev = ph.captured.find((c) => c.event === "round_started");
   assert.ok(ev, "the queued event flushed");
-  assert.equal(ev.superAtCapture?.deployment_channel, "beta",
-    "the schema event flushed AFTER the channel super property was applied");
+  assert.equal(ev.superAtCapture?.release, "abc1234",
+    "the schema event flushed AFTER the release super property was applied");
 });
 
-test("channel: deployment_channel is applied before consent_given flushes (fresh-accept flow)", async () => {
+test("release: super props are applied before consent_given flushes (fresh-accept flow)", async () => {
   // Mirrors the banner accept handler: accept() sets consent + starts the
-  // load, stampChannel() registers the channel synchronously right after,
-  // then product events queue — all before the script lands.
+  // load, a register() may run synchronously right after, then product events
+  // queue — all before the script lands.
   const storage = memStorage();
   const ph = orderingFake();
   let release;
   const gate = new Promise((r) => { release = r; });
   const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
   a.accept();
-  a.register({ deployment_channel: "beta" });
+  a.register({ release: "abc1234" });
   a.track("game_created", { room: "ABCDEF", mode: "couch" });
   assert.equal(ph.captured.length, 0, "nothing before the script lands");
   release();
   await tick();
-  assert.equal(ph.superProps.deployment_channel, "beta");
+  assert.equal(ph.superProps.release, "abc1234");
   // EVERY captured event — the flushed game_created AND consent_given — must
-  // have seen the channel already applied.
+  // have seen the super property already applied.
   assert.ok(ph.captured.length >= 2);
   for (const ev of ph.captured) {
-    assert.equal(ev.superAtCapture?.deployment_channel, "beta",
-      `${ev.event} flushed before the channel super property`);
+    assert.equal(ev.superAtCapture?.release, "abc1234",
+      `${ev.event} flushed before the release super property`);
   }
-});
-
-test("channel: a dev checkout stamps production channel alongside release dev", async () => {
-  // Independent of release.json: consent.js registers the channel
-  // synchronously; the absent-release.json path then registers release:"dev".
-  // Both coexist, so dev noise stays excluded by `release`, exactly as today.
-  const { a, storage, ph } = harness();
-  setConsent(storage, CONSENT_ACCEPTED);
-  await a.init();
-  a.register({ deployment_channel: "production" });
-  a.register({ release: "dev" });
-  assert.deepEqual(ph.superProps, { deployment_channel: "production", release: "dev" });
 });
 
 test("startRecording: consent-gated, and a no-op on an older bundle", async () => {

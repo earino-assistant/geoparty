@@ -14,8 +14,6 @@ js/h2h.js          Pure head-to-head logic: slots, submissions, winner     ← t
 js/supersure.js    Pure SUPER SURE bet logic: resolution + settlement      ← tested
 js/frontdoor.js    Pure front-door logic: join routing, chooser targets    ← tested
 js/tvlink.js       Pure "Add a TV" logic: screen links, typeable address   ← tested
-js/channel.js      Pure deployment-channel identity from the URL: production
-                   vs the /beta/ lane, + the Firebase namespace it selects  ← tested
 js/hints.js        Pure education logic: one-shot flags, guess-map card,
                    SUPER SURE sheet copy, lock-now estimate + the primary
                    button's label composition                              ← tested
@@ -89,21 +87,19 @@ the deploy artifact (never committed — it is in `.gitignore`), and
 after a consented init. A dev checkout has no `release.json` and reports
 `release: "dev"`.
 
-Deployment channels (`docs/beta-deployment-plan.md`): the one `pages.yml`
-assembles the whole site from two branch tips — `main` at the root
-(production) and, when a `beta` branch exists, its tip nested under
-`/beta/` — in a single artifact, each channel with its own `release.json`
-stamp (`channel: "production"|"beta"`). The runtime channel identity is NOT
-that stamp but `js/channel.js#channelFromPath(location.pathname,
-location.protocol)`: an `http(s)` page under a `/beta/` directory is the beta
-lane, everything else (including every `file://` dev checkout) is production.
-That one pure function feeds two consumers — `firebase.js` picks the RTDB
-namespace (`roomsRoot()` → `rooms` vs `rooms-beta`) and `consent.js`
-registers the `deployment_channel` PostHog super property. The B0–B2 code
-change (this workflow, `js/channel.js`, the Firebase/PostHog wiring) is the
-built, locally-verified candidate; publishing the `rooms-beta` Firebase rules
-(README), the PostHog console filtering, and creating the first `beta` branch
-for live end-to-end verification are the separate **B3 owner steps**.
+Deployment: the one `pages.yml` deploys a single production site from `main`
+(a push to `main`, or a `workflow_dispatch`, which always runs on `main`).
+It checks out `github.sha`, runs the same check + test gate as CI, stamps
+`release.json` at the root (`{commit, short, deployed_at, run, env}`) and
+uploads the repo as the Pages artifact. A post-deploy **`verify` job** then
+polls the public root `release.json` (cache-busted, bounded retry) and fails
+the run unless it stamps that run's `run`/`commit` — so a green run *means*
+the public site changed, by construction rather than by hope. This is the one
+lesson of the beta-lane incident: a green deployment record is not a public
+endpoint change; only the public stamp is the activation oracle. The beta
+delivery lane it came from was removed — see
+`docs/beta-delivery-architecture-audit.md` (the incident and the verify-live
+principle) and `docs/beta-removal-plan.md` (the removal change set).
 
 The split is deliberate: everything above `firebase.js` is dependency-free
 and runs in Node — that's what the test suite exercises. The `*-ui.js`
@@ -113,11 +109,9 @@ it from the UI file, so it stays testable.
 
 ## RTDB data model
 
-Everything lives under `rooms/{CODE}` (6 letters, no I/O) — or, for pages
-served on the beta lane, the byte-identical `rooms-beta/{CODE}` subtree
-(chosen once at load by `channel.js#roomsRoot()`; see Deployment channels
-above). The two subtrees are disjoint, so the model below is identical in
-both; only the root key differs. Couch mode:
+Everything lives under `rooms/{CODE}` (6 letters, no I/O), composed once by
+`js/firebase.js#roomRef()` — the single choke point every room
+read/write/subscribe/transaction routes through. Couch mode:
 
 ```
 rooms/KWPF

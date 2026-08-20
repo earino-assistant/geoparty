@@ -1,36 +1,36 @@
-# GitHub Pages deployment (field-observability plan §11; beta plan §6).
+# GitHub Pages deployment (field-observability plan §11).
 #
-# The site stays static and no-build. This ONE workflow assembles the whole
-# Pages site from two branch tips and deploys it in a single artifact:
-#   main → https://<owner>.github.io/geoparty/        (production)
-#   beta → https://<owner>.github.io/geoparty/beta/    (the one candidate)
+# The site stays static and no-build: this ONE workflow checks out the repo,
+# runs the same checks CI runs, writes ONE generated file into the upload
+# artifact — release.json — and deploys. Nothing is ever committed per
+# deploy, and a plain checkout (or file://) simply has no release.json, so
+# the dev loop is unchanged and js/consent.js stamps `release: "dev"`.
 #
-# It resolves both tips to immutable SHAs ONCE at the start of the run,
-# checks out each into an isolated directory, runs the same checks CI runs
-# against BOTH trees, then assembles _site/ (main at the root, beta nested
-# under _site/beta/) with a per-channel release.json stamp and — for beta
-# only, in the artifact copy — a beta PWA identity and noindex markers.
-# Nothing is ever committed per deploy: release.json is in .gitignore, and a
-# plain checkout (or file://) simply has no release.json, so the dev loop is
-# unchanged and js/consent.js stamps `release: "dev"`.
+# ONE branch matters: main. A production deploy runs on a push to main (or a
+# manual workflow_dispatch, which always runs on main) — a single site
+# assembled from one branch tip, with no nested candidate route. The delivery
+# rationale and the incident it comes from are recorded in docs/architecture.md
+# (Deployment) and the delivery-architecture audit it links.
 #
 # INVARIANT: this repo has exactly ONE Pages deploy workflow, and it is this
 # file, edited in place. A second workflow touching the `pages` concurrency
-# group is the dueling-deploy hazard the plan forbids (tests/deploy-
+# group is the dueling-deploy hazard the audit forbids (tests/deploy-
 # workflow.test.js pins this). ci.yml stays the untouched PR gate.
+#
+# GREEN MEANS LIVE: a `verify` job (below) polls the public root release.json
+# after deploy and fails the run unless it stamps THIS run's id and sha. This
+# is the one lesson the delivery-architecture audit proved beyond doubt — a
+# green deployment record is NOT a public endpoint change; only the public
+# stamp is the activation oracle. The workflow enforces it so a run cannot go
+# green without the site actually changing.
 #
 # One-time setup by the owner: Settings → Pages → Source = "GitHub Actions".
 name: Deploy to Pages
 
 on:
   push:
-    branches: [main, beta]
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      include_beta:
-        description: "Include /beta/ from the beta branch"
-        type: boolean
-        default: true
 
 # Least privilege: read the repo, write the Pages deployment, mint the OIDC
 # token deploy-pages needs. No contents:write — nothing is pushed back.
@@ -39,7 +39,9 @@ permissions:
   pages: write
   id-token: write
 
-# One live deployment at a time; never cancel a run that is mid-deploy.
+# One live deployment at a time; never cancel a run that is mid-deploy. This
+# also protects `verify`: the group is held until the whole run — verify
+# included — completes, so no newer run can overwrite the stamp mid-poll.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -49,163 +51,45 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # Resolve both branch tips to immutable SHAs in ONE atomic ls-remote,
-      # so checkout, tests and the release stamps all use the same SHA (no
-      # check-then-fetch race). main must exist; beta is optional and is
-      # dropped ONLY when a workflow_dispatch explicitly sets
-      # include_beta=false (the emergency hatch). The guard must survive push
-      # events, where the `inputs` context is null: `inputs.include_beta`
-      # is then null, and `inputs.include_beta != false` evaluates to FALSE
-      # (GitHub loose equality: null == false), which would silently clear
-      # beta on every push. So the guard short-circuits on the event name —
-      # `github.event_name != 'workflow_dispatch' || inputs.include_beta` —
-      # true for any non-dispatch event (push always includes beta when the
-      # branch exists), and only a dispatch falls through to the boolean
-      # input (beta plan §6.3).
-      - name: Resolve branch tips (pinned for the rest of the run)
-        id: refs
-        env:
-          INCLUDE_BETA: ${{ github.event_name != 'workflow_dispatch' || inputs.include_beta }}
-        run: |
-          heads=$(git ls-remote "https://github.com/${{ github.repository }}" \
-                    refs/heads/main refs/heads/beta)
-          main_sha=$(printf '%s\n' "$heads" | awk '$2=="refs/heads/main"{print $1}')
-          beta_sha=$(printf '%s\n' "$heads" | awk '$2=="refs/heads/beta"{print $1}')
-          test -n "$main_sha"   # main must exist
-          [ "$INCLUDE_BETA" = "true" ] || beta_sha=""
-          echo "main=$main_sha" >> "$GITHUB_OUTPUT"
-          echo "beta=$beta_sha" >> "$GITHUB_OUTPUT"
-          echo "Resolved main=$main_sha beta=${beta_sha:-<none>}"
-
-      # Two checkouts into ISOLATED directories, each pinned to its SHA. The
-      # beta checkout is skipped when the branch does not exist (or was
-      # dropped) — the bootstrap path that lets this workflow merge to main
-      # before any beta branch exists, publishing production unchanged.
-      - name: Check out production tree (main)
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.refs.outputs.main }}
-          path: prod
-
-      - name: Check out beta tree (beta)
-        if: steps.refs.outputs.beta != ''
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.refs.outputs.beta }}
-          path: beta-tree
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # The same gate as CI — a broken module in EITHER tree never reaches
-      # production. Zero npm deps, so no install step and no cross-tree
-      # contamination is possible.
-      - name: Syntax-check + test the production tree
-        working-directory: prod
-        run: |
-          npm run check
-          npm test
+      # The same gate as CI — a broken module never reaches production.
+      - name: Syntax-check all modules
+        run: npm run check
 
-      - name: Syntax-check + test the beta tree
-        if: steps.refs.outputs.beta != ''
-        working-directory: beta-tree
-        run: |
-          npm run check
-          npm test
+      - name: Run tests
+        run: npm test
 
-      # Assemble the single site. Same exclusions the shipped artifact used
-      # (it uploaded the repo root; docs/tests/tools are already public
-      # content — parity kept). rsync copies main to the root and, when beta
-      # exists, the beta tree under _site/beta/.
-      - name: Assemble _site
-        run: |
-          mkdir -p _site
-          rsync -a --exclude .git --exclude .github prod/ _site/
-          if [ -n "${{ steps.refs.outputs.beta }}" ]; then
-            mkdir -p _site/beta
-            rsync -a --exclude .git --exclude .github beta-tree/ _site/beta/
-          fi
-
-      # Per-channel release stamp, each from its OWN pinned SHA, so the stamp
-      # can never disagree with the deployed tree. Existing keys are
-      # preserved (consent.js reads only short/commit/deployed_at); `channel`
-      # and `ref` are additive metadata — a human/dashboard cross-check, NOT
-      # the runtime channel identity (that is js/channel.js, URL-derived).
-      - name: Stamp releases (one per channel)
-        env:
-          MAIN_SHA: ${{ steps.refs.outputs.main }}
-          BETA_SHA: ${{ steps.refs.outputs.beta }}
+      # The release stamp. Artifact-only: `release.json` is in .gitignore, so
+      # it can never be committed by accident. consent.js fetches it after a
+      # successful (consented) PostHog init and registers release/commit/
+      # deployed_at as super properties, so every event, exception and replay
+      # is attributable to an exact deploy. The `run` field is what the verify
+      # job below matches against.
+      - name: Stamp the release
         run: |
           node -e '
             const fs = require("fs");
-            const stamp = (dir, sha, channel, ref) => {
-              const meta = {
-                commit: sha,
-                short: sha.slice(0, 7) || "dev",
-                deployed_at: new Date().toISOString(),
-                run: process.env.GITHUB_RUN_ID || "",
-                env: "pages",
-                channel,
-                ref,
-              };
-              fs.writeFileSync(dir + "/release.json", JSON.stringify(meta) + "\n");
-              console.log(dir + "/release.json", JSON.stringify(meta));
-            };
-            stamp("_site", process.env.MAIN_SHA, "production", "main");
-            if (process.env.BETA_SHA) {
-              stamp("_site/beta", process.env.BETA_SHA, "beta", "beta");
-            }
+            const sha = process.env.GITHUB_SHA || "";
+            fs.writeFileSync("release.json", JSON.stringify({
+              commit: sha,
+              short: sha.slice(0, 7) || "dev",
+              deployed_at: new Date().toISOString(),
+              run: process.env.GITHUB_RUN_ID || "",
+              env: "pages",
+            }) + "\n");
           '
-
-      # Beta markers, FAIL-LOUD (beta plan §6.5): give the /beta/ install a
-      # distinct PWA identity and de-index every beta page. Artifact-only —
-      # the repo manifest/HTML stay canonical. Any drift in the expected
-      # shape (manifest name changed, an html lost its <head>) FAILS the
-      # build so nothing deploys and the previous site keeps serving —
-      # surfacing drift the moment it happens instead of shipping a no-op.
-      - name: Stamp beta markers (fail-loud)
-        if: steps.refs.outputs.beta != ''
-        run: |
-          node -e '
-            const fs = require("fs");
-            const path = require("path");
-            const dir = "_site/beta";
-
-            // (a) PWA identity in the beta manifest copy.
-            const mfPath = path.join(dir, "manifest.webmanifest");
-            const mf = JSON.parse(fs.readFileSync(mfPath, "utf8"));
-            if (mf.name !== "GeoParty") {
-              throw new Error(
-                `beta manifest drift: name is ${JSON.stringify(mf.name)}, expected "GeoParty"`);
-            }
-            mf.name = "GeoParty Beta";
-            mf.short_name = "GeoParty β";
-            fs.writeFileSync(mfPath, JSON.stringify(mf, null, 2) + "\n");
-
-            // (b) noindex meta into every top-level beta HTML <head>.
-            const META = "<meta name=\"robots\" content=\"noindex\" />";
-            const htmls = fs.readdirSync(dir).filter((f) => f.endsWith(".html"));
-            if (htmls.length === 0) {
-              throw new Error("beta marker: no .html files found under " + dir);
-            }
-            for (const f of htmls) {
-              const p = path.join(dir, f);
-              const src = fs.readFileSync(p, "utf8");
-              if (!src.includes("<head>")) {
-                throw new Error(`beta marker: no <head> anchor in ${f}`);
-              }
-              fs.writeFileSync(p, src.replace("<head>", "<head>\n  " + META));
-              console.log("noindex ->", f);
-            }
-            console.log("beta markers stamped OK");
-          '
+          cat release.json
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: .
 
   deploy:
     needs: build
@@ -217,3 +101,50 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Green means live. Poll the PUBLIC root release.json until it stamps this
+  # run's id and sha; fail the run if it never does. It depends on deploy, so
+  # it is skipped when deploy fails, and reads nothing but a public URL, so it
+  # holds no elevated permission.
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    # Backstop above the in-script ~5 min budget.
+    timeout-minutes: 8
+    # This job only fetches a public URL — no Pages, OIDC, or contents scope.
+    permissions: {}
+    steps:
+      - name: Verify the public release stamp activated
+        run: |
+          url="https://earino-assistant.github.io/geoparty/release.json"
+          echo "Expecting run=$GITHUB_RUN_ID commit=$GITHUB_SHA at $url"
+          body=""
+          # 30 attempts, 10s apart (~5 min) — ~10-20x the observed ~15-30s
+          # activation latency and past the 10-min edge cache.
+          for attempt in $(seq 1 30); do
+            # Fresh cache-busting query EVERY attempt: Pages serves
+            # cache-control: max-age=600 via Fastly and custom headers cannot
+            # be configured, so Fastly caches per full URL. A UNIQUE query per
+            # attempt lets each poll observe fresh origin state; reusing one
+            # query could pin a stale/404 answer in the edge for up to 10 min.
+            # This is the core false-red defense (audit §2.1).
+            body=$(curl -fsS "$url?verify=$GITHUB_RUN_ID-$attempt" || true)
+            # Fixed-string match on the single-line JSON stamp: BOTH the run
+            # and the commit must be this run's (order-independent).
+            if printf '%s' "$body" | grep -qF "\"run\":\"$GITHUB_RUN_ID\"" \
+               && printf '%s' "$body" | grep -qF "\"commit\":\"$GITHUB_SHA\""; then
+              echo "Verified: production is publicly serving run $GITHUB_RUN_ID."
+              exit 0
+            fi
+            echo "Attempt $attempt/30: stamp not live yet; sleeping 10s."
+            sleep 10
+          done
+          echo "::error::Public release stamp did not match after 30 attempts (~5 min)."
+          echo "Expected run=$GITHUB_RUN_ID commit=$GITHUB_SHA"
+          echo "Last body fetched: ${body:-<empty>}"
+          echo "A RED verify means the NEW deployment did not publicly activate."
+          echo "The PREVIOUS deployment is STILL being served — the site is NOT down."
+          echo "Remedy: investigate, then RE-RUN failed jobs. A re-run re-polls"
+          echo "under this same run id, so late propagation turns it green"
+          echo "without redeploying."
+          exit 1
