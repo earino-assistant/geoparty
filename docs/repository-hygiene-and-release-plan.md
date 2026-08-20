@@ -5,6 +5,10 @@ against `main` @ `6eb2f0d` (G1–G8 shipped, proprietary license landed).
 **Author:** Fable (audit/planning pass commissioned by Eduardo).
 **Verified baseline:** `npm test` 616/616 green, `npm run check` green,
 working tree clean except 43 untracked `.feat-*.md` briefs.
+**Amended 2026-08-20:** the two external beta-removal items this plan
+originally listed as open (Firebase console `rooms-beta` rule, PostHog
+fact-check) were completed by the owner and verified after the audit —
+see §2.5, §4 step 7, and D11.
 
 Nothing in this document is executed by the change that adds it — every
 action below waits on the owner decisions in §9, except committing this
@@ -36,10 +40,14 @@ The debt is almost entirely **documentation status-labeling** and
    `.feat-*.md` to `.gitignore` so future briefs can't be committed by
    accident.
 4. **External cleanup is small:** delete one stale remote branch, push the
-   never-pushed `v0.1.0-couch` tag, fill in the empty GitHub repo
-   description/topics/homepage, and complete the two owner-side items the
-   beta removal left open (Firebase console `rooms-beta` rules, PostHog
-   fact-check).
+   never-pushed `v0.1.0-couch` tag, and fill in the empty GitHub repo
+   description/topics/homepage. The two owner-side items the beta removal
+   left open are now **done and verified**: Eduardo removed the Firebase
+   console `rooms-beta` rule (REST-validated: six-letter `rooms/` PUT →
+   200 with cleanup 200; four-letter `rooms/` PUT → 401; `rooms-beta/`
+   six-letter PUT → 401), and the PostHog fact-check was performed via
+   the project API (settings, all 33 insights, all 3 dashboards: no
+   `deployment_channel` or `/beta/` filters; no cleanup was necessary).
 5. **Release: tag `v0.4.0`** (annotated) on the post-hygiene commit, with
    the release notes drafted in §6. This is a minor-version release —
    large in scope but pre-1.0 and backward-compatible in spirit with the
@@ -128,8 +136,8 @@ sole carrier of an open item or backlog.
 | Repo description / topics / homepage | EXTERNAL — set | All currently empty/null. Proposed values in §6.4. |
 | License metadata | EXTERNAL — accept | Shows `Other`/`NOASSERTION` because LICENSE is custom proprietary text. **Do not** expect an SPDX badge; do not swap to a template license just for the badge. |
 | Wiki / Projects (enabled, unused) | EXTERNAL — disable | Reduce surface on a proprietary repo (D10). Issues: keep enabled. |
-| Firebase console `rooms-beta` rules block | EXTERNAL — owner | Open item from `beta-removal-plan.md` §3.3; deadline condition: "before the next Firebase rules edit of any kind." |
-| PostHog dashboard fact-check | EXTERNAL — owner | Open item from `beta-removal-plan.md` §3.4. |
+| Firebase console `rooms-beta` rules block | EXTERNAL — **done, verified** | Item from `beta-removal-plan.md` §3.3. Removed by Eduardo 2026-08-20; live rules validated by REST outcome afterward: valid six-letter `rooms/` PUT → 200 (cleanup 200), invalid four-letter `rooms/` PUT → 401, `rooms-beta/` six-letter PUT → 401. |
+| PostHog dashboard fact-check | EXTERNAL — **done, verified** | Item from `beta-removal-plan.md` §3.4. Performed 2026-08-20 through the project API: project settings, all 33 insights, and all 3 dashboards carry no `deployment_channel` or `/beta/` filters; no cleanup was necessary. |
 
 ---
 
@@ -154,12 +162,11 @@ push") is deletion, and every brief self-instructs "do not commit."
 - **`.feat-fable-repo-hygiene-plan.md`: DELETE once this document is
   committed** — it is the parent brief of this plan; this document is its
   deliverable and captures all of its unique content.
-- **`.feat-fable-remove-beta-review.md`: DELETE after confirming one
-  fact** — it records that the Firebase console `rooms-beta` block was
-  deliberately left inert for later owner removal. That prescription
-  already lives in `docs/beta-removal-plan.md` §3.3, so the brief is
-  redundant once the owner confirms the item is either done or still
-  tracked there (it is restated in §2.5 and D11 of this plan).
+- **`.feat-fable-remove-beta-review.md`: DELETE** — it records that the
+  Firebase console `rooms-beta` block was deliberately left inert for
+  later owner removal. That removal has since been done and
+  REST-verified (§2.5, D11), and the prescription itself lives in
+  `docs/beta-removal-plan.md` §3.3, so the brief is fully redundant.
 
 Nothing in any brief needs extraction beyond the above.
 
@@ -167,8 +174,9 @@ Nothing in any brief needs extraction beyond the above.
 
 ## 4. Proposed cleanup order
 
-Each step is independently revertible; steps 5–8 are external and need
-owner action or approval.
+Each step is independently revertible; steps 5, 6 and 8 are external
+and need owner action or approval (step 7 was completed and verified
+2026-08-20 — kept in the table for the record).
 
 | # | Step | Actor | Gate |
 |---|---|---|---|
@@ -179,7 +187,7 @@ owner action or approval.
 | 4 | Tag `v0.4.0` (annotated) on the post-hygiene tip; push tag; create the GitHub release with §6.2 notes; push `v0.1.0-couch` | owner (or agent w/ approval) | D5/D6 |
 | 5 | Delete remote branch `docs/beta-deployment-plan` (record `70d27ab` first) | owner/agent | D4 |
 | 6 | Set repo description/topics/homepage; disable wiki+projects | owner | D7/D10 |
-| 7 | Firebase console `rooms-beta` removal + PostHog fact-check | **owner only** | D11 |
+| 7 | Firebase console `rooms-beta` removal + PostHog fact-check — **done 2026-08-20 and verified** (§2.5; D11 closed) | owner (done) | — |
 | 8 | **Local brief cleanup, last:** create the §7 backup tarball, verify it, then `rm .feat-*.md` | agent | **D2 — owner approval required; never before step 0's plan and the backup exist** |
 
 Brief cleanup is deliberately last: the briefs are untracked, so they are
@@ -331,10 +339,12 @@ status lines don't contradict.
 
 > **Status: EXECUTED and PUSHED — the removal shipped as `2e05e5f` on
 > `main`; Pages is main-only with the verify-live gate.** Historical
-> record. **Two owner-side items remain open:** §3.3 (delete the
-> `rooms-beta` block from the Firebase console rules — before the next
-> rules edit of any kind) and §3.4 (the PostHog no-filters fact-check).
-> Everything else in §5–§7 is done.
+> record. **Both owner-side items are closed** (2026-08-20): §3.3 — the
+> `rooms-beta` console rule was removed by the owner and the live rules
+> REST-verified (six-letter `rooms/` PUT 200, four-letter `rooms/` PUT
+> 401, `rooms-beta/` PUT 401); §3.4 — the PostHog fact-check was
+> API-inspected clean (no `deployment_channel` or `/beta/` filters; no
+> cleanup needed). Everything in §5–§7 is done.
 
 **Testing note (per CLAUDE.md):** every edit in §5 is copy/documentation
 only — no logic changes, so no new tests or instrumentation apply. The
@@ -460,7 +470,7 @@ license to get one.
 | Remote branch `docs/beta-deployment-plan` | Record now: tip = `70d27ab`. Restore anytime with `git push origin 70d27ab:refs/heads/docs/beta-deployment-plan` (the commit remains reachable in this clone; it is also two objects away from `0f28562` on `main`). |
 | Tags | `v0.4.0` before announcing: `git push --delete origin v0.4.0` + retag. After announcing: never move; cut `v0.4.1`. |
 | GitHub metadata/settings | All trivially re-editable; no backup needed. Note current values are empty/default. |
-| Firebase / PostHog changes | Owner console actions; `docs/beta-removal-plan.md` §3.3 includes the rules text being removed if it must be restored. |
+| Firebase / PostHog changes | Both already executed and verified 2026-08-20 (§2.5). If the Firebase rule must ever be restored, `docs/beta-removal-plan.md` §3.3 preserves the removed rules text. PostHog required no changes, so there is nothing to roll back. |
 
 ---
 
@@ -528,7 +538,7 @@ npm test && npm run check                          # unchanged, green
 | D8 | Create `docs/archive/` and move retired beta docs | **No** — banners preserve context with working cross-links; an archive move breaks inbound refs from README/architecture for little gain. Revisit only if `docs/` doubles again. |
 | D9 | Public lhCursor note in the release | **Yes** — the §6.2 "Known gaps" phrasing is user-truthful without exposing internals. |
 | D10 | Disable Wiki + Projects | **Yes**; keep Issues. |
-| D11 | Firebase console `rooms-beta` removal + PostHog fact-check | **Owner-only, do soon** — the §3.3 deadline condition ("before the next Firebase rules edit of any kind") is standing. |
+| D11 | Firebase console `rooms-beta` removal + PostHog fact-check | **CLOSED — done 2026-08-20.** The owner removed the Firebase rule (live rules REST-verified: six-letter `rooms/` PUT 200, four-letter PUT 401, `rooms-beta/` PUT 401) and the PostHog check was API-inspected clean — no `deployment_channel` or `/beta/` filters anywhere, no cleanup needed (§2.5). The §3.3 deadline condition is satisfied. |
 | D12 | Sequence: hygiene → push+verify → tag → external → briefs | **Yes** — order in §4. |
 
 ---
