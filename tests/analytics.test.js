@@ -606,6 +606,78 @@ test("tracker: revoke while the script is in flight drops the queue", async () =
   assert.equal(ph.optedOut, true);
 });
 
+// Regression (accept→revoke privacy race): the user taps Accept — which sets
+// the stored flag ACCEPTED and starts the PostHog load — then declines/revokes
+// BEFORE the script resolves. The accept() completion handler fires late, on a
+// now-loaded posthog, and MUST NOT re-opt-in or capture consent_given: the
+// decline has to win. ensureLoaded() already drops the queue and opts out; the
+// bug was accept()'s late handler undoing that.
+test("tracker: decline before the accept load resolves — no opt-in, no consent_given", async () => {
+  const storage = memStorage();
+  const ph = fakePosthog();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
+
+  const accepted = a.accept();       // sets ACCEPTED, load in flight
+  a.decline();                       // revoke before the script lands
+  assert.equal(a.consentState(), CONSENT_DECLINED, "decline persists immediately");
+  release();
+  await accepted;                    // let accept()'s late handler run
+  await tick();
+
+  assert.equal(ph.optedOut, true, "the raced session is opted OUT, not in");
+  assert.deepEqual(ph.captured.map((c) => c.event), [],
+    "consent_given must not be captured for a revoked acceptance");
+  // And the decline stays authoritative for subsequent capture attempts.
+  assert.equal(a.track("next_game", { mode: "couch" }), false);
+});
+
+// The same race but with a product event queued before the decline: the queue
+// must be dropped and no consent_denied/consent_given may slip through (decline
+// found posthog still null, so it recorded nothing — the privacy-safe outcome).
+test("tracker: decline before load resolves also drops queued events", async () => {
+  const storage = memStorage();
+  const ph = fakePosthog();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
+
+  const accepted = a.accept();
+  assert.equal(a.track("game_created", { room: "ABCDEF", mode: "couch" }), true,
+    "queued while the gate is (transiently) open");
+  a.decline();
+  release();
+  await accepted;
+  await tick();
+
+  assert.equal(ph.captured.length, 0, "no queued event, and no consent_given, survives the revoke");
+  assert.equal(ph.optedOut, true);
+});
+
+// Guardrail: the fix must not regress the happy path — a fresh accept with no
+// revoke still loads, opts in, and captures consent_given exactly once, with
+// the deployment_channel super property already applied (B2 ordering).
+test("tracker: uninterrupted fresh accept still captures consent_given after channel is registered", async () => {
+  const storage = memStorage();
+  const ph = orderingFake();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
+
+  const accepted = a.accept();
+  a.register({ deployment_channel: "beta" }); // stampChannel(), synchronous
+  release();
+  await accepted;
+  await tick();
+
+  assert.equal(ph.optedOut, false, "a genuine acceptance is opted IN");
+  const given = ph.captured.filter((c) => c.event === "consent_given");
+  assert.equal(given.length, 1, "consent_given fires exactly once");
+  assert.equal(given[0].superAtCapture?.deployment_channel, "beta",
+    "consent_given must flush AFTER deployment_channel is registered (B2)");
+});
+
 test("tracker: a failed script load degrades silently", async () => {
   const storage = memStorage();
   const a = createAnalytics({

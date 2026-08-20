@@ -102,10 +102,109 @@ test("the build resolves BOTH branch tips once, via ls-remote, main required", (
   assert.match(refs, /git ls-remote/, "tips are not resolved with ls-remote");
   assert.match(refs, /refs\/heads\/main refs\/heads\/beta/, "does not resolve both heads at once");
   assert.match(refs, /test -n "\$main_sha"/, "main is not asserted to exist");
-  assert.match(refs, /INCLUDE_BETA: \$\{\{ inputs\.include_beta != false \}\}/,
-    "include_beta gating is wrong (push events must still include beta)");
+  // The exact expression is pinned + evaluated in the INCLUDE_BETA suite
+  // below; here we assert the shell consumes it to DROP beta only when it is
+  // not the literal `true`.
+  assert.match(refs, /\[ "\$INCLUDE_BETA" = "true" \] \|\| beta_sha=""/,
+    "beta must be dropped only when INCLUDE_BETA is not literally true");
   assert.match(refs, /main=\$main_sha/, "main sha not exported");
   assert.match(refs, /beta=\$beta_sha/, "beta sha not exported");
+});
+
+/* ============ the INCLUDE_BETA guard: exact + evaluated ============ */
+// The guard decides whether /beta/ ships. Its previous form,
+// `inputs.include_beta != false`, was BROKEN on push events: `inputs` is null
+// there, so `inputs.include_beta` is null and — under GitHub's loose equality
+// (null == false) — `!= false` was `false`, silently clearing beta on every
+// push to main/beta. These tests pin the corrected expression AND evaluate it
+// under a faithful subset of GitHub Actions expression semantics for the
+// three contexts it must serve, so a regression to any always-substring-
+// present-but-wrong form fails here, not in production.
+
+// Pull the raw expression out of `INCLUDE_BETA: ${{ ... }}`.
+function includeBetaExpr() {
+  const m = /INCLUDE_BETA:\s*\$\{\{\s*(.+?)\s*\}\}/.exec(pages);
+  assert.ok(m, "no INCLUDE_BETA expression found in the workflow");
+  return m[1].trim();
+}
+
+// --- a faithful subset of GitHub Actions expression evaluation ---
+// Context lookups null-propagate (accessing a property of null yields null,
+// never an error — this is exactly why the push case must not throw).
+function ghProp(ctx, path) {
+  return path.split(".").reduce((o, k) => (o == null ? null : o[k]), ctx);
+}
+// GitHub truthiness: booleans as-is; null/'' falsy; non-zero numbers and
+// non-empty strings truthy. Enough for the boolean operands here.
+function ghTruthy(v) {
+  if (v === null || v === undefined) return false;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0 && !Number.isNaN(v);
+  if (typeof v === "string") return v !== "";
+  return true;
+}
+function evalTerm(src, ctx) {
+  if (/^'.*'$/.test(src)) return src.slice(1, -1); // string literal
+  if (src === "true") return true;
+  if (src === "false") return false;
+  return ghProp(ctx, src); // dotted context path (github.*, inputs.*)
+}
+function evalOperand(src, ctx) {
+  const neq = src.split("!=");
+  if (neq.length === 2) {
+    // string-vs-string inequality (the only comparison in this guard)
+    return evalTerm(neq[0].trim(), ctx) !== evalTerm(neq[1].trim(), ctx);
+  }
+  return evalTerm(src, ctx);
+}
+// Evaluate `<left> || <right>` with GitHub's OR semantics: return the left
+// operand when truthy (short-circuit — the right, `inputs.*`, is never even
+// resolved on push), else the right operand.
+function evalIncludeBeta(expr, ctx) {
+  const m = /^(.+?)\s*\|\|\s*(.+)$/.exec(expr);
+  assert.ok(m, "INCLUDE_BETA is not an OR expression");
+  const left = evalOperand(m[1].trim(), ctx);
+  return ghTruthy(left) ? left : evalOperand(m[2].trim(), ctx);
+}
+// How Actions substitutes the result into the env string the shell then reads.
+const ghString = (v) => (v === null || v === undefined ? "" : String(v));
+
+const PUSH = { github: { event_name: "push" }, inputs: null };
+const DISPATCH_DEFAULT = {
+  github: { event_name: "workflow_dispatch" }, inputs: { include_beta: true },
+};
+const DISPATCH_OFF = {
+  github: { event_name: "workflow_dispatch" }, inputs: { include_beta: false },
+};
+
+test("INCLUDE_BETA is the exact GitHub-correct guard expression", () => {
+  assert.equal(includeBetaExpr(),
+    "github.event_name != 'workflow_dispatch' || inputs.include_beta",
+    "the beta guard must short-circuit on non-dispatch events; " +
+    "`inputs.include_beta != false` is FALSE on push (inputs is null)");
+});
+
+test("INCLUDE_BETA resolves to \"true\" on a push (beta never silently cleared)", () => {
+  // The regression the old expression caused: this is the case that broke.
+  assert.equal(ghString(evalIncludeBeta(includeBetaExpr(), PUSH)), "true");
+});
+
+test("INCLUDE_BETA resolves to \"true\" on a default/true workflow_dispatch", () => {
+  assert.equal(ghString(evalIncludeBeta(includeBetaExpr(), DISPATCH_DEFAULT)), "true");
+});
+
+test("INCLUDE_BETA resolves to \"false\" ONLY on an explicit include_beta=false dispatch", () => {
+  assert.equal(ghString(evalIncludeBeta(includeBetaExpr(), DISPATCH_OFF)), "false");
+});
+
+test("the shell drops beta only when INCLUDE_BETA is not literally \"true\"", () => {
+  // Cross-check the env→shell contract: the three env values above feed
+  // `[ "$INCLUDE_BETA" = "true" ] || beta_sha=""`, so beta survives push and
+  // default dispatch and is cleared only on the emergency hatch.
+  const drop = (env) => env !== "true"; // beta_sha="" iff not literal true
+  assert.equal(drop(ghString(evalIncludeBeta(includeBetaExpr(), PUSH))), false);
+  assert.equal(drop(ghString(evalIncludeBeta(includeBetaExpr(), DISPATCH_DEFAULT))), false);
+  assert.equal(drop(ghString(evalIncludeBeta(includeBetaExpr(), DISPATCH_OFF))), true);
 });
 
 test("check+test run against TWO distinct working directories", () => {

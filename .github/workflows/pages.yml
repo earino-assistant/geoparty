@@ -52,13 +52,20 @@ jobs:
       # Resolve both branch tips to immutable SHAs in ONE atomic ls-remote,
       # so checkout, tests and the release stamps all use the same SHA (no
       # check-then-fetch race). main must exist; beta is optional and is
-      # dropped when the dispatch asked for include_beta=false. On push
-      # events `inputs.include_beta` is empty → `!= false` is true → beta is
-      # included whenever the branch exists (beta plan §6.3).
+      # dropped ONLY when a workflow_dispatch explicitly sets
+      # include_beta=false (the emergency hatch). The guard must survive push
+      # events, where the `inputs` context is null: `inputs.include_beta`
+      # is then null, and `inputs.include_beta != false` evaluates to FALSE
+      # (GitHub loose equality: null == false), which would silently clear
+      # beta on every push. So the guard short-circuits on the event name —
+      # `github.event_name != 'workflow_dispatch' || inputs.include_beta` —
+      # true for any non-dispatch event (push always includes beta when the
+      # branch exists), and only a dispatch falls through to the boolean
+      # input (beta plan §6.3).
       - name: Resolve branch tips (pinned for the rest of the run)
         id: refs
         env:
-          INCLUDE_BETA: ${{ inputs.include_beta != false }}
+          INCLUDE_BETA: ${{ github.event_name != 'workflow_dispatch' || inputs.include_beta }}
         run: |
           heads=$(git ls-remote "https://github.com/${{ github.repository }}" \
                     refs/heads/main refs/heads/beta)

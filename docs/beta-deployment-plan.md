@@ -486,8 +486,14 @@ on:
 - **`workflow_dispatch`** is the manual lever: routine re-deploys, the
   post-branch-deletion re-publish, and the `include_beta: false`
   emergency hatch that ships a production-only artifact while `beta` is
-  broken (`inputs.include_beta` evaluates empty → not-`false` on push
-  events, so pushes always include beta when the branch exists).
+  broken. The guard is `github.event_name != 'workflow_dispatch' ||
+  inputs.include_beta`: on push events the `inputs` context is null, so
+  it short-circuits to `true` and always includes beta when the branch
+  exists; only a dispatch falls through to the boolean input. (The
+  earlier `inputs.include_beta != false` was broken — on a push
+  `inputs.include_beta` is null and, under GitHub's loose equality,
+  `null == false`, so `!= false` was `false` and beta was silently
+  cleared on every push.)
 
 ### 6.2 Concurrency — what happens when main and beta change together
 
@@ -520,7 +526,7 @@ First build step, before any checkout:
 - name: Resolve branch tips (pinned for the rest of the run)
   id: refs
   env:
-    INCLUDE_BETA: ${{ inputs.include_beta != false }}
+    INCLUDE_BETA: ${{ github.event_name != 'workflow_dispatch' || inputs.include_beta }}
   run: |
     heads=$(git ls-remote "https://github.com/${{ github.repository }}" \
               refs/heads/main refs/heads/beta)

@@ -670,6 +670,12 @@ export function createAnalytics({ storage, loadPosthog, loadPosthogOneShot }) {
       setConsent(storage, CONSENT_ACCEPTED);
       return ensureLoaded().then((ph) => {
         if (!ph) return null;
+        // The script can finish loading AFTER a decline/revoke that raced
+        // this acceptance. ensureLoaded() already dropped the queue and
+        // opted this session out in that case; this late handler must NOT
+        // undo that by re-opting-in or capturing consent_given. Decline
+        // always wins — re-check the stored flag before acting on it.
+        if (consent() !== CONSENT_ACCEPTED) return null;
         if (optedOut && ph.opt_in_capturing) {
           ph.opt_in_capturing();
           optedOut = false;
