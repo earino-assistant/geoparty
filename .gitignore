@@ -5,3 +5,7 @@ release.json
 
 # Weekly pool-health run artifacts that are not the committed state file.
 tools/.pool-health-cache.json
+
+# Local agent task briefs — never committed (each self-instructs "do not
+# commit"; repo precedent 1f7073c removed the earlier batch before push).
+.feat-*.md

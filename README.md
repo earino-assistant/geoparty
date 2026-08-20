@@ -10,7 +10,7 @@ The entire system is static JavaScript synced through Firebase Realtime
 Database. No server code, no build step, no cost.
 
 > **Proprietary software — not open source.** GeoParty is owned by Eduardo Ariño
-de la Rubia and is licensed under the proprietary [GeoParty License](LICENSE).
+> de la Rubia and is licensed under the proprietary [GeoParty License](LICENSE).
 > You may not use, copy, modify, distribute, host, or create derivative works
 > from it without a separate written license.
 
@@ -45,10 +45,39 @@ for the next game.
   *"One phone + the TV"*) and one code-entry join path that reads the
   room's mode and routes to the right page automatically. The TV is an
   in-lobby / footer "Add a TV" affordance, not a top-level choice.
+- **`daily.html`** — the solo Daily Challenge: one date-seeded run of the
+  same five locations for everyone that day, played on a single device with
+  no room or Firebase. Scores build streaks and personal bests locally, and
+  a finished run can be shared as an emoji grid or a Ghost Duel challenge
+  link (below).
 
 Scoring is GeoGuessr-style exponential decay: `round(5000 * exp(-d / 1492))`
 with `d` the haversine great-circle distance in km. Perfect pin is 5000;
 ~1500 km is roughly 1800; antipodal is effectively 0.
+
+## The Daily ritual & party twists
+
+Beyond the two live modes, GeoParty has a solo daily loop and a set of
+party rule-benders (the "G1–G8" gameplay expansion):
+
+- **Streaks & personal bests** — a Daily run keeps a streak going day to
+  day (with a grace window so one missed day doesn't reset it), and your
+  best Daily score is tracked and celebrated when you beat it. Both live
+  only in `localStorage` on the device that played.
+- **Hard Mode** — an opt-in no-movement Daily variant for purists.
+- **ACE** — land close enough to the answer and the game says so, loudly.
+- **Ghost Duel challenge links** — after finishing your Daily you can send
+  a friend a link to play the same five locations against the "ghost" of
+  your run. The link carries **only your own guesses and timings**, in the
+  URL *fragment* — it is never sent to any server, never reaches analytics
+  or session replay, and contains no names, answer locations, or image
+  ids. See [`PRIVACY.md`](PRIVACY.md) and CLAUDE.md for the exact boundary.
+- **Twist rounds** — a seeded deck of rule-benders (e.g. Blitz scoring)
+  that hits every party the same way.
+- **Crown Night** — a full-evening tally across games with a champion
+  ceremony on the TV, in couch and head-to-head alike.
+- **Decoy Pin** (head-to-head) — drop one fake pin to mislead rivals
+  watching your live panel; exposed at the reveal.
 
 ## Running a game
 
@@ -82,14 +111,21 @@ over the new file).
 
 ## Tests & CI
 
-The pure logic layer (`js/game.js`, `js/h2h.js`, `js/pool.js`, `js/qr.js`,
-`js/imagery.js`) is covered by a dependency-free test suite using Node's
-built-in runner — scoring, the time bonus, phase machines, turn rotation,
-reveal ordering, winner tie-breaks, the seeded shuffle/resume contract, QR
-encoding, an integrity check over `data/location_pool.json`, and the
-field-observability layer (error taxonomy, privacy scrubbers, the
-collision-free pool diag id, session-health classification, and the
-seven-scenario failure-injection matrix in `tests/viewer-ui.test.js`):
+The pure logic layer is covered by a dependency-free test suite using Node's
+built-in runner. It spans the original game core (`js/game.js`, `js/h2h.js`,
+`js/pool.js`, `js/qr.js`, `js/imagery.js`, `js/analytics.js`) and the
+G1–G8 gameplay-expansion modules (`js/records.js`, `js/ghost.js`,
+`js/twist.js`, `js/night.js`, `js/decoy.js`, `js/daily.js`, `js/share.js`,
+`js/supersure.js`, `js/frontdoor.js`, `js/tvlink.js`, `js/hints.js`,
+`js/chrome.js`, `js/autoadvance.js`, `js/couchscreen.js`, `js/fx.js`) —
+scoring, the time bonus, phase machines, turn rotation, reveal ordering,
+winner tie-breaks, the seeded shuffle/resume contract, QR encoding, Daily
+streaks and personal bests, the Ghost Duel fragment codec, twist decks,
+Crown Night tallies, an integrity check over `data/location_pool.json`, and
+the field-observability layer (error taxonomy, privacy scrubbers, the
+collision-free pool diag id, session-health classification, and the 16-row
+failure-injection matrix in `tests/viewer-ui.test.js`, catalogued in
+[`docs/failure-injection.md`](docs/failure-injection.md)):
 
 ```sh
 npm test        # node --test tests/*.test.js — no install needed
@@ -133,7 +169,11 @@ runbook.
 
 ## Deployment (GitHub Pages)
 
-1. Create a public GitHub repo `geoparty` and push this directory to `main`.
+1. These steps document how the **owner** publishes GeoParty; under the
+   proprietary license they are not an invitation to host your own copy. The
+   owner pushes this directory to the `main` branch of the `geoparty`
+   repository (the code is visible, but use and hosting require a written
+   license).
 2. Repo Settings → Pages → Source = **GitHub Actions**
    (`.github/workflows/pages.yml` runs the checks, stamps `release.json`
    with the deployed commit, and deploys — nothing is committed per
@@ -191,23 +231,27 @@ client-side identifiers designed to be embedded and public.
 ## Location pool
 
 Rounds draw from `data/location_pool.json` — pregenerated, verified Mapillary
-360° pano locations. The pool is shuffled once per game (Fisher–Yates seeded
-from the room code, so a resumed host sees the same order) and sampled without
-replacement. If an image has been deleted from Mapillary since generation, the
-host skips to the next entry silently.
+360° pano locations, currently **5,312 entries across 134 countries**. The
+pool is shuffled once per game (Fisher–Yates seeded from the room code, so a
+resumed host sees the same order) and sampled without replacement. If an image
+has been deleted from Mapillary since generation, the host skips to the next
+entry silently.
 
-To regenerate the pool:
+The pool is produced by a three-stage pipeline (full runbook and rationale in
+[`docs/pool-scale-plan.md`](docs/pool-scale-plan.md)):
 
-```sh
-pip install requests
-cd data
-python3 ../tools/build_location_pool.py --count 200 --mode weighted
-# or --mode wild for fully random globe sampling (slower, more exotic)
-```
+1. **Build** — `tools/scale_location_pool.py` gathers panoramic imagery from
+   the Mapillary Graph API and dedupes on a grid. (The original single-bbox
+   sampler `tools/build_location_pool.py` is kept for reference but
+   superseded.)
+2. **Tier** — `tools/score_location_pool.py` assigns each entry a difficulty
+   tier (Casual / World tour / Expert) used by the Daily and the tier picker.
+3. **Verify** — `tools/validate_location_pool.py` checks structural integrity
+   before the pool is committed.
 
-The generator queries the Mapillary Graph API for recent (2018+) panoramic
-imagery, dedupes on ~10 km grid cells, and in `weighted` mode favors regions
-with dense coverage.
+Separately, a weekly GitHub Actions job (`.github/workflows/pool-health.yml`)
+asks Mapillary whether pooled images still exist and proposes removing dead
+ones via a `data/pool_quarantine.json` PR that is never auto-merged.
 
 Each pool entry also carries a human-readable `name` ("Yakutsk, Russia") that
 the reveal shows on screen and host. Names are reverse-geocoded **once, at

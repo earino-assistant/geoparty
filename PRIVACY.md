@@ -1,7 +1,10 @@
 # Privacy
 
 GeoParty is a static party game: no accounts, no logins, no server of ours.
-This page explains the two places any data goes and how to opt out.
+This page explains where any data goes — the two systems it can be sent to
+(opt-in PostHog analytics and Firebase game sync) plus the one thing you can
+voluntarily hand to a friend yourself (a Daily Ghost Duel link, which reaches
+no server of ours at all) — and how to opt out.
 
 ## Analytics (opt-in only)
 
@@ -80,6 +83,29 @@ device), it never records a replay, and **it does not change your stored
 "no"**: you remain opted out afterwards. It is the only way any data
 leaves a declining user's device, and it takes two deliberate taps.
 
+### Daily Ghost Duel links
+
+When you finish a Daily run you can choose to send a friend a **Ghost Duel**
+link, so they can play the same five locations against the "ghost" of your
+run. This is the single deliberate sharing feature in GeoParty, and it is
+built so it can leak nothing:
+
+- The link carries **only your own completed Daily guesses and timings** —
+  nothing about anyone else, and nothing beyond that one run.
+- The payload rides in the URL **fragment** (everything after the `#`), which
+  browsers never put on the wire. It is never transmitted to GeoParty,
+  Firebase, PostHog, session replay, or any third party, and it is stripped
+  from the address (via `history.replaceState`) **before** analytics even
+  initialise — so not one byte of it can reach analytics or a recording.
+- It is shared **person-to-person, by you**: you send the link to whoever you
+  choose. GeoParty does not send it anywhere.
+- It never contains your name or identity, the answer locations, any
+  coordinate, or any Mapillary image id.
+
+This does not weaken anything above: nothing derived from a guess is ever sent
+to a server, and this voluntary, own-run-only fragment is the sole exception —
+and it too never reaches a server.
+
 ### Which version you were running
 
 Events carry the short commit hash of the deployed build, so we can tell
@@ -126,7 +152,8 @@ involved, and it runs whether or not anyone has opted in to anything.
 
 Live rooms are synced through Firebase Realtime Database (EU region,
 `europe-west1`): room code, game phase, team names you enter, guesses and
-scores — the shared game state the TV and phones need. Rooms are deleted
-within 24 hours. Street-level imagery is served by Mapillary and map tiles
+scores, plus the party-game state the TV and phones need — including decoy
+pins (a deliberate fake guess a head-to-head team can drop) and Crown Night
+tallies (the running multi-game score). Rooms are deleted within 24 hours. Street-level imagery is served by Mapillary and map tiles
 by OpenStreetMap; your browser talks to them directly, subject to their own
 privacy policies.
