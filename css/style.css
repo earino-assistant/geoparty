@@ -1324,6 +1324,27 @@ body:has(.action-bar) .consent-settings {
   line-height: 1.5;
 }
 
+/* G3 Crown Night: the muted tally line + the full-screen champion. */
+.night-tally {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-top: 8px;
+}
+.night-champion {
+  font-size: clamp(1.4rem, 4vw, 2.6rem);
+  font-weight: 900;
+  color: #ffcf3f;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  margin: 10px 0;
+}
+.btn-subline {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
 /* G5: the ghost pin's distance chip on the reveal map (map is replay-blocked). */
 .ghost-chip {
   color: #e9dcff;

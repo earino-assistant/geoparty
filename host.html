@@ -190,6 +190,9 @@
       <h1>Final standings</h1>
       <!-- S7: the crown, when this phone is the shared screen. -->
       <div id="hostCrown" data-ph-mask class="host-crown hidden"></div>
+      <!-- G3 Crown Night: full-screen champion, else the muted tally. -->
+      <div id="hChampion" data-ph-mask class="night-champion hidden"></div>
+      <div id="hNightTally" data-ph-mask class="night-tally hidden"></div>
       <ul id="finalTotals" data-ph-mask class="totals-list"></ul>
       <!-- §2.9: saving to a localStorage leaderboard is not a decision a
            human should have to make — the game saves itself and says so. -->
@@ -197,7 +200,9 @@
     </div>
     <div class="action-bar">
       <button id="btnShareResult">📤 Share</button>
-      <button id="btnNewGameOver" class="btn-primary">New Game</button>
+      <button id="btnNewGameOver" class="btn-primary">
+        New Game<span id="hNightHook" data-ph-mask class="btn-subline hidden"></span>
+      </button>
     </div>
   </section>
 

@@ -44,6 +44,8 @@
       <h1 class="tv-title"><span class="geo">Geo</span>Party</h1>
       <p class="tv-sub">Waiting for the operator…</p>
       <div id="lobbyTeams" data-ph-mask class="tv-teams"></div>
+      <!-- G3 Crown Night: the muted tally, from game 2 on. -->
+      <div id="tvLobbyNight" data-ph-mask class="night-tally hidden"></div>
     </div>
   </section>
 
@@ -124,7 +126,10 @@
     <div id="confetti" class="confetti"></div>
     <div class="tv-center">
       <h1 class="tv-title">Game over!</h1>
+      <!-- G3 Crown Night: full-screen champion (at 3), else the tally line. -->
+      <div id="tvChampion" data-ph-mask class="night-champion hidden"></div>
       <div id="podium" data-ph-mask class="podium"></div>
+      <div id="tvNightTally" data-ph-mask class="night-tally hidden"></div>
       <div id="tvNextHost" data-ph-mask class="tv-next-host hidden"></div>
       <!-- §2.11: a TV is not a touch surface. The real path is "the screen
            follows the host", so the accent button + its explanatory line

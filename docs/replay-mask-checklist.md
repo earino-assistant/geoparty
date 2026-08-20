@@ -48,6 +48,8 @@ into it, so a future scoreboard row cannot slip through unmasked.
 - `#revealBoard` — the merged reveal board (round delta → running total),
   which replaced `#revealTotals`; carries team names
 - `#finalTotals`, `#hostCrown` — scoreboard, winner line
+- `#hChampion`, `#hNightTally`, `#hNightHook` — G3 Crown Night champion /
+  tally / "Game N?" hook carry team names
 - `#hostShowdownResults` — injected at runtime; masked in `host-ui.js`
 
 `#revealResult` is deliberately **not** masked: it is the same aggregate
@@ -63,6 +65,8 @@ one.
 - `#pLobbyTeams`, `#pLockedList`, `#pRevealBoard`, `#pFinalTotals`,
   `#pLockedRank`, `#pHandoffNote` — team names. `#pRevealBoard` is the
   merged board that replaced `#pRoundResults` + `#pRevealTotals`
+- `#pChampion`, `#pNightTally`, `#pNightHook` — G3 Crown Night champion /
+  tally / "Game N?" hook carry team names
 - `#pRevealPlace` — the round's answer (now the reveal headline)
 - `#pRevealResult` — unmasked, deliberately: aggregates only (see above)
 - `#pLobbyNote` — the lobby status line names the host team ("Waiting for
@@ -76,6 +80,8 @@ one.
 - `#roomInput`, `#h2hLobbyCode`, `#h2hLobbyUrl` — room codes/links
 - `#lobbyTeams`, `#tvActiveTeam`, `#tvBoard`, `#podium`, `#tvNextHost`,
   `#h2hLobbyTeams`, `#h2hGrid`, `#h2hRoundBoard`, `#h2hTotals` — team names
+- `#tvNightTally`, `#tvLobbyNight`, `#tvChampion` — G3 Crown Night tally /
+  champion carry team names
 - `#tvPlace`, `#h2hPlace` — the round's answer
 - `#tvShowdown`, the guess-screen team caption — injected at runtime;
   masked in `screen-ui.js`

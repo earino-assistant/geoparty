@@ -20,6 +20,10 @@ import {
   onConnectionChange,
 } from "./firebase.js";
 import {
+  defaultNight, bumpNight, carryNight, champion,
+  tallyLineText, crownHookText, championText, nightSummary,
+} from "./night.js";
+import {
   makeRoomCode,
   isValidRoomCode,
   haversineKm,
@@ -1620,6 +1624,13 @@ function nextOrFinish(advance) {
       team_count: teamIds(room.teams).length,
       advance: via,
     });
+    // G3 Crown Night: the phase-writing device fires the champion event when
+    // this game's crown reaches first-to-3 (display is recomputed on every
+    // device; the authoritative carry happens in createNextGame).
+    const bumped = bumpNight(room.night || defaultNight(), winner);
+    if (champion(bumped)) {
+      track("night_champion", { mode: "h2h", games: bumped.games });
+    }
   } else {
     startRound(via);
   }
@@ -1645,6 +1656,33 @@ function renderGameOver() {
   $("pHandoffNote").textContent = iWon
     ? "Winner runs the table: your phone is the host now. Set up the next game and everyone follows automatically."
     : `${winnerName} won — their phone is the host now. Stay here; you'll follow into their next game automatically.`;
+  renderNightTally(bumpNight(room.night || defaultNight(), winner), iWon);
+}
+
+// G3: the night tally + champion ceremony on the h2h game-over screen, and the
+// "Game N?" hook on the winner's next-game button. Team names ride these nodes,
+// so #pChampion / #pNightTally / #pNightHook carry data-ph-mask in player.html.
+function renderNightTally(night, iWon) {
+  const champId = champion(night);
+  const champEl = $("pChampion");
+  const tallyEl = $("pNightTally");
+  if (champId) {
+    const name = (room.teams[champId] && room.teams[champId].name) || champId;
+    champEl.textContent = championText(name);
+    champEl.classList.remove("hidden");
+    tallyEl.classList.add("hidden");
+  } else {
+    champEl.classList.add("hidden");
+    const line = tallyLineText(night, room.teams);
+    tallyEl.textContent = line;
+    tallyEl.classList.toggle("hidden", !line);
+  }
+  const hook = $("pNightHook");
+  if (hook) {
+    const show = iWon && nightSummary(night, room.teams).length > 0;
+    hook.textContent = show ? crownHookText(night, room.teams, night.games + 1) : "";
+    hook.classList.toggle("hidden", !show);
+  }
 }
 
 // S1: every phone shares its own team's card — closest moment + final
@@ -1689,6 +1727,10 @@ async function createNextGame() {
     const code = await pickFreeRoomCode();
     const teams = carryTeams(room.teams);
     const state = initialH2hRoomState(collectSettings(), teams, myTeam);
+    // G3 Crown Night: the winner's phone carries the tally into the NEW room —
+    // bumped for the game just won, or reset to zero after a champion — before
+    // the nextRoom pointer (the same ordering the pointer already relies on).
+    state.night = carryNight(room.night || defaultNight(), myTeam);
     switchingRooms = true; // stop reacting to the old room mid-handoff
     writeRoom(code, state).catch((e) =>
       console.warn("Firebase write failed:", scrubErrorMessage(e)));

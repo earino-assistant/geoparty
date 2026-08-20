@@ -28,6 +28,10 @@ import {
   advanceTarget,
   countdownText,
 } from "./autoadvance.js";
+import {
+  defaultNight, bumpNight, champion, gameWinner,
+  tallyLineText, championText,
+} from "./night.js";
 import { adjustedPoints, superSureLabel } from "./supersure.js";
 import { TV_VIAS, screenJoinVia } from "./tvlink.js";
 import { countdownTick, motionDuration, animFraction } from "./fx.js";
@@ -252,6 +256,14 @@ function renderLobby(state) {
     chip.style.color = TEAM_COLORS[i % TEAM_COLORS.length];
     wrap.appendChild(chip);
   });
+  // G3: the muted night tally, from game 2 on (empty string before, so the
+  // node stays invisible in game 1 by construction).
+  const tally = $("tvLobbyNight");
+  if (tally) {
+    const line = tallyLineText(state.night, state.teams);
+    tally.textContent = line;
+    tally.classList.toggle("hidden", !line);
+  }
 }
 
 /* ---------------- Round: mirror the host's viewer ---------------- */
@@ -922,10 +934,34 @@ function renderGameOver(state) {
     slot.append(name, score, bar);
     podium.appendChild(slot);
   });
+  renderTvNight(state);
   if (!confettiDone) {
     confettiDone = true;
     playSound("fanfare"); // S4: podium + confetti get their chord
     spawnConfetti();
+  }
+}
+
+// G3 Crown Night on the TV: the tally, or a full-screen champion at first-to-3.
+// The TV is a pure subscriber (it never writes `night`); it recomputes this
+// game's bump locally from state.night + the deterministic winner (§3.3).
+function renderTvNight(state) {
+  const champEl = $("tvChampion");
+  const tallyEl = $("tvNightTally");
+  if (!champEl || !tallyEl) return;
+  const winnerId = state.hostTeam || gameWinner(state.teams, roomCode);
+  const night = bumpNight(state.night || defaultNight(), winnerId);
+  const champId = champion(night);
+  if (champId) {
+    const name = (state.teams[champId] && state.teams[champId].name) || champId;
+    champEl.textContent = championText(name);
+    champEl.classList.remove("hidden");
+    tallyEl.classList.add("hidden");
+  } else {
+    champEl.classList.add("hidden");
+    const line = tallyLineText(night, state.teams);
+    tallyEl.textContent = line;
+    tallyEl.classList.toggle("hidden", !line);
   }
 }
 

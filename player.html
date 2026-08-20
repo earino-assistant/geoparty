@@ -171,6 +171,9 @@
   <section id="p-gameover" class="phase-screen hidden">
     <div class="host-wrap">
       <h1 id="pGameOverTitle">Game over!</h1>
+      <!-- G3 Crown Night: full-screen champion, else the muted tally. -->
+      <div id="pChampion" data-ph-mask class="night-champion hidden"></div>
+      <div id="pNightTally" data-ph-mask class="night-tally hidden"></div>
       <ul id="pFinalTotals" data-ph-mask class="totals-list"></ul>
       <div id="pHandoffNote" data-ph-mask class="handoff-note"></div>
       <!-- §4.1 forbids a three-button bar; the exit is the third action, so
@@ -180,7 +183,7 @@
     </div>
     <div class="action-bar">
       <button id="btnPShareResult">📤 Share</button>
-      <button id="btnPNextGame" class="btn-primary hidden">Set Up the Next Game</button>
+      <button id="btnPNextGame" class="btn-primary hidden">Set Up the Next Game<span id="pNightHook" data-ph-mask class="btn-subline hidden"></span></button>
     </div>
   </section>
 

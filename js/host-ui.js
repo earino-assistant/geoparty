@@ -10,6 +10,10 @@ import {
   onConnectionChange,
 } from "./firebase.js";
 import {
+  defaultNight, bumpNight, carryNight, champion, gameWinner,
+  tallyLineText, crownHookText, championText, nightSummary,
+} from "./night.js";
+import {
   canTransition,
   makeRoomCode,
   haversineKm,
@@ -236,6 +240,9 @@ let unsubHeartbeat = null;
 let screenBeat = null;    // S7 screen liveness (couchscreen.foldHeartbeat)
 let prevRoomCode = null;  // finished room to leave a nextRoom pointer in,
                           // so a still-subscribed screen follows us over
+let nightToCarry = null;  // G3 Crown Night: the tally to seed the next game
+                          // with (bumped for the game just won, reset after a
+                          // champion) — threaded finishGame → newGame
 
 function persistActive() {
   lsSet(LS_ACTIVE, { code: roomCode, createdAt: room.createdAt });
@@ -332,6 +339,12 @@ async function newGame() {
     }
     roomCode = code;
     room = initialRoomState(collectSettings(), collectTeams(), roomCode);
+    // G3 Crown Night: seed the room with the tally carried from the last game
+    // in this chain (bumped for that win, or reset after a champion). Only a
+    // "next game" continuation (prevRoomCode set) carries it; a fresh chain
+    // starts at zero.
+    room.night = (prevRoomCode && nightToCarry) ? nightToCarry : defaultNight();
+    nightToCarry = null;
     sampler = new PoolSampler(pool, roomCode, 0, room.settings.difficulty);
     currentTruth = null;
     gameBest = null;
@@ -1377,16 +1390,56 @@ function finishGame(advance) {
     // Absent on the pool-exhaustion end, which skips the final reveal.
     ...(advance === "auto" || advance === "manual" ? { advance } : {}),
   });
+  // G3 Crown Night: the winner takes this game's crown. Ties break on the
+  // deterministic seeded flip so the crown always has one owner (the podium
+  // still shows the true tie). `night` is display-only here; the authoritative
+  // carry into the next game is threaded via nightToCarry (no gameOver write —
+  // every device recomputes the same bump locally).
+  const crownWinner = gameWinner(room.teams, roomCode);
+  const bumped = bumpNight(room.night || defaultNight(), crownWinner);
+  nightToCarry = carryNight(room.night || defaultNight(), crownWinner);
+  if (champion(bumped)) {
+    track("night_champion", { mode: "couch", games: bumped.games });
+  }
   destroyViewer();
   destroyHostRevealMap();
   showScreen("h-gameover");
   playSound("fanfare"); // S4
   updateCrown(); // S7: no TV podium — this phone crowns the winner
   renderTotals($("finalTotals"));
+  renderNightTally(bumped);
   // §2.9: it is localStorage — there is no reason to make a human press a
   // database button. The game saves itself and says so in one quiet line,
   // and the setup screen's "Past games" disclosure is where it resurfaces.
   saveToLeaderboard();
+}
+
+// G3: the night tally + champion ceremony on the couch game-over screen (and
+// the "Game N?" hook on the next-game button). Team names ride these nodes, so
+// #hNightTally / #hChampion carry data-ph-mask in host.html.
+function renderNightTally(night) {
+  const tallyEl = $("hNightTally");
+  const champEl = $("hChampion");
+  const champId = champion(night);
+  if (champId) {
+    const name = (room.teams[champId] && room.teams[champId].name) || champId;
+    champEl.textContent = championText(name);
+    champEl.classList.remove("hidden");
+    tallyEl.classList.add("hidden");
+    playSound("fanfare");
+  } else {
+    champEl.classList.add("hidden");
+    const line = tallyLineText(night, room.teams);
+    tallyEl.textContent = line;
+    tallyEl.classList.toggle("hidden", !line);
+  }
+  const hook = $("hNightHook");
+  if (hook && nightSummary(night, room.teams).length) {
+    hook.textContent = crownHookText(night, room.teams, night.games + 1);
+    hook.classList.remove("hidden");
+  } else if (hook) {
+    hook.classList.add("hidden");
+  }
 }
 
 // S1: the post-game result card — the game's closest moment plus the
