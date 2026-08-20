@@ -1379,6 +1379,15 @@ body:has(.action-bar) .consent-settings {
   margin-top: 2px;
 }
 
+/* G7: the decoy marker (planter's own map + reveal exposure). */
+.decoy-marker {
+  font-size: 1.4rem;
+  line-height: 1;
+  text-shadow: 0 1px 3px #000;
+  filter: saturate(0.7);
+}
+.decoy-marker.reveal { opacity: 0.85; }
+
 /* G5: the ghost pin's distance chip on the reveal map (map is replay-blocked). */
 .ghost-chip {
   color: #e9dcff;

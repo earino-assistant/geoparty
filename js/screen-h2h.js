@@ -9,6 +9,7 @@ import { scrubErrorMessage } from "./imagery.js";
 import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
 import { twistHudTag } from "./twist.js";
+import { revealDecoys } from "./decoy.js";
 import {
   autoAdvanceStatus,
   advanceTarget,
@@ -629,6 +630,13 @@ function runRevealAnimation(state, round) {
     };
     requestAnimationFrame(step);
   };
+  // G7: expose every planted decoy with a 🎭 marker BEFORE the real pins land.
+  for (const d of revealDecoys(round)) {
+    L.marker(L.latLng(d.lat, d.lng), {
+      icon: L.divIcon({ className: "decoy-marker reveal", html: "🎭" }),
+      interactive: false,
+    }).addTo(revealMap);
+  }
   drawNext(0);
 }
 

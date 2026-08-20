@@ -28,6 +28,9 @@ import {
   twistedRoundScore, twistHudTag, twistRevealTag, twistCard,
 } from "./twist.js";
 import {
+  decoyAvailable, decoyInitialState, decoyDeployFold, revealDecoys,
+} from "./decoy.js";
+import {
   makeRoomCode,
   isValidRoomCode,
   haversineKm,
@@ -264,6 +267,12 @@ let localStage = "explore"; // "explore" (pano) | "map" — this phone's UI mode
 let lastRoundSeen = null;   // round number the UI has been reset for
 let superSureArmed = false; // SUPER SURE toggled on for THIS pin — local only
                             // until lock-in, so rivals can't see it coming
+// G7 Decoy (h2h): the deploy state machine + the decoy's own marker/coords.
+// Reset per round. The decoy rides the live feed as an ordinary pin (hidden in
+// play by construction); the real pin never rides once a decoy is planted.
+let decoyState = decoyInitialState();
+let decoyMarker = null;
+let decoyPin = null;
 let autoSubmitted = false;  // timeout auto-lock fired for this round
 let sweepDone = false;      // host forfeit sweep fired for this round
 let revealFlipPushed = null; // round number this phone already flipped for
@@ -832,10 +841,15 @@ function renderRoundActive() {
     revealTickSecond = null;
     clearTimeout(revealFlipTimer);
     if (guessMarker) { guessMarker.remove(); guessMarker = null; }
+    // G7: reset the decoy deploy state for the new round.
+    decoyState = decoyInitialState();
+    if (decoyMarker) { decoyMarker.remove(); decoyMarker = null; }
+    decoyPin = null;
     clearRivalPins();
     if (guessMap) guessMap.setView([25, 10], 2);
     $("btnLockIn").disabled = true;
     renderSuperSureChip();
+    renderDecoyChip();
     updateLockButton();
     updateGuessBanner();
     startTick();
@@ -987,6 +1001,16 @@ function ensureGuessMap() {
   }).addTo(guessMap);
   guessMap.on("moveend zoomend", scheduleLiveWrite);
   guessMap.on("click", (e) => {
+    // G7: while a decoy is armed-but-not-yet-planted, the FIRST tap plants the
+    // decoy; every tap after places/moves the real pin (decoy.js decides).
+    const fold = decoyDeployFold(decoyState, "tap");
+    decoyState = fold.state;
+    if (fold.place === "decoy") {
+      placeDecoyMarker(e.latlng);
+      renderDecoyChip();
+      scheduleLiveWrite();        // the decoy now rides the live feed
+      return;                     // no real pin yet → lock stays disabled
+    }
     if (guessMarker) {
       guessMarker.setLatLng(e.latlng);
     } else {
@@ -995,7 +1019,7 @@ function ensureGuessMap() {
       guessMarker.on("move", updateLockButton);
     }
     scheduleLiveWrite();
-    $("btnLockIn").disabled = false;
+    $("btnLockIn").disabled = false;  // a real pin exists (canLockWithDecoy)
     updateGuessBanner();
     updateLockButton();
   });
@@ -1074,6 +1098,7 @@ function openGuessMapScreen() {
   $("btnLockIn").disabled = !guessMarker;
   updateGuessBanner();
   renderSuperSureChip();
+  renderDecoyChip();
   // First guess map ever: the scoring one-liner and the rival-pins warning,
   // at the moment they matter (M5). The SUPER SURE line has left this card
   // — the bet is explained in exactly one place now, its own sheet (§6.1).
@@ -1130,6 +1155,58 @@ function renderSuperSureChip() {
   btn.setAttribute("aria-pressed", String(available && superSureArmed));
 }
 
+/* ---------------- G7 Decoy: plant a fake pin for rivals ---------------- */
+
+// The chip shows only while the decoy is unspent AND meaningful this round
+// (hidden during a Blind Duel, where rival pins don't render). Once armed it
+// stays visible until the decoy is planted, then goes away — same "spent = gone"
+// rule as the 🔥 chip. Nothing here reveals the decoy to rivals (hidden in play).
+function renderDecoyChip() {
+  const btn = $("btnDecoy");
+  if (!btn) return;
+  const twistId = room && room.round && room.round.twist ? room.round.twist.id : null;
+  const available = !!room && decoyAvailable(room.teams, myTeam, twistId) &&
+    !decoyState.planted;
+  btn.classList.toggle("hidden", !available);
+  btn.classList.toggle("armed", available && decoyState.armed);
+  btn.setAttribute("aria-pressed", String(available && decoyState.armed));
+}
+
+function openDecoySheet() {
+  const twistId = room && room.round && room.round.twist ? room.round.twist.id : null;
+  if (!room || myResult() || !decoyAvailable(room.teams, myTeam, twistId) ||
+      decoyState.planted) return;
+  showHintCard({
+    title: "🎭 Decoy",
+    lines: [
+      "Plant a fake pin for rivals to see. Your real pin goes dark.",
+      "Once per game.",
+    ],
+    actions: [
+      { label: "Not now", primary: false },
+      { label: "Plant the decoy", onClick: () => {
+        decoyState = decoyDeployFold(decoyState, "arm").state;
+        renderDecoyChip();
+        toast("Your next tap plants the decoy — then tap again for your real pin.");
+      } },
+    ],
+  });
+}
+
+// The decoy marker on THIS phone's map — visually distinct (🎭), non-draggable,
+// so the planter can never mistake it for their real pin.
+function placeDecoyMarker(latlng) {
+  decoyPin = { lat: latlng.lat, lng: L.Util.wrapNum(latlng.lng, [-180, 180], true) };
+  if (decoyMarker) {
+    decoyMarker.setLatLng(latlng);
+  } else {
+    decoyMarker = L.marker(latlng, {
+      draggable: false,
+      icon: L.divIcon({ className: "decoy-marker", html: "🎭" }),
+    }).addTo(guessMap);
+  }
+}
+
 function backToStreet() {
   localStage = "explore";
   showScreen("p-round");
@@ -1175,7 +1252,12 @@ function scheduleLiveWrite() {
           lng: L.Util.wrapNum(c.lng, [-180, 180], true),
           zoom: guessMap.getZoom(),
         };
-        if (guessMarker) {
+        // G7: once a decoy is planted, the live feed carries the DECOY coords
+        // (frozen where planted) and the real pin never rides the wire — hidden
+        // in play by construction. Before a plant, the real pin broadcasts.
+        if (decoyPin) {
+          live.pin = { lat: decoyPin.lat, lng: decoyPin.lng };
+        } else if (guessMarker) {
           const g = guessMarker.getLatLng();
           live.pin = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
         }
@@ -1233,15 +1315,22 @@ function lockIn(auto = false) {
     forfeited: guess ? null : true,
     superSure: betting ? true : null,
     twistTag: twistRevealTag(twistId),   // G2: reveal result line
+    // G7: the planted decoy, exposed at reveal (readable pre-reveal in devtools,
+    // the same accepted posture as the embedded truth and the bet).
+    decoy: decoyPin ? { lat: decoyPin.lat, lng: decoyPin.lng } : null,
   };
   cancelLiveWrite();
   const patch = {
     [`round/results/${myTeam}`]: result,
     [`teams/${myTeam}/total`]: (room.teams[myTeam].total || 0) + points,
     [`round/live/${myTeam}/stage`]: "locked",
-    [`round/live/${myTeam}/pin`]: null, // final pin stays secret until reveal
+    [`round/live/${myTeam}/pin`]: null, // final pin (and decoy) vanish at lock-in
   };
   if (betting) patch[`teams/${myTeam}/superSureUsed`] = room.round.number;
+  // G7: spending the decoy is recorded on the team row (survives refresh;
+  // carryTeams resets it next game). Consumed even on a forfeit — it did its
+  // work broadcasting to rivals.
+  if (decoyPin) patch[`teams/${myTeam}/decoyUsed`] = room.round.number;
   // Last one in flips the room to reveal and stamps the countdown moment.
   // If two phones race the flip, both write the same phase and revealAt
   // values milliseconds apart — last-write-wins is harmless here. SUPER
@@ -1640,6 +1729,14 @@ function renderRevealMap(round) {
           { permanent: true, direction: "bottom", className: "ss-tooltip" });
     }
   }
+  // G7: expose each planted decoy with a 🎭 marker (muted, no line) — the
+  // reveal is where the bluff pays off.
+  for (const d of revealDecoys(round)) {
+    L.marker(L.latLng(d.lat, d.lng), {
+      icon: L.divIcon({ className: "decoy-marker reveal", html: "🎭" }),
+      interactive: false,
+    }).addTo(revealMap);
+  }
   L.circleMarker(truth, {
     radius: 10, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
   }).addTo(revealMap);
@@ -1888,6 +1985,7 @@ $("btnPStart").addEventListener("click", startRound);
 $("btnOpenMap").addEventListener("click", openGuessMapScreen);
 $("btnBackToStreet").addEventListener("click", backToStreet);
 $("btnSuperSure").addEventListener("click", openSuperSureSheet);
+$("btnDecoy").addEventListener("click", openDecoySheet);
 $("btnLockIn").addEventListener("click", () => lockIn(false));
 $("btnCloseRound").addEventListener("click", sweepAndReveal);
 $("btnPNext").addEventListener("click", nextOrFinish);
