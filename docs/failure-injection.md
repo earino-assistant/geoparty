@@ -100,6 +100,10 @@ sole null-entry case the finish/end paths act on. Covered by the
 
 ## Manual on-device runbook (what CI cannot prove)
 
+> Manual on-device runbook: **not yet executed on a real device** as of
+> 2026-08-20 — no dated results recorded (required by the EM review §8
+> item 5 and stabilization review §5 condition 2).
+
 Run once before trusting the dashboard, on a real phone, consent accepted:
 
 1. **Chain proof (B and G).** Force a dead-image round. In PostHog:

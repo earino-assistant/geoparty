@@ -1,5 +1,13 @@
 # Engineering Manager review — the v0.3 release train
 
+> **HISTORICAL — review of the v0.3 train, 2026-08-20. The §8
+> stabilization gate was executed (`f4d0fee`, `84924b8`) and closed;
+> item 7 (amend the beta plan) is void — the beta lane was removed.**
+> Two known errors of record: the "no `v0.3.0` tag" baseline note is
+> wrong (the tag exists at `28d2b5b`; see
+> `docs/stabilization-review-f4d0fee.md`), and P2-2 critiques a
+> since-retired plan. Left unedited by design.
+
 **Scope reviewed:** `54bf0a5` (S7, the last shipped feature before the
 review/observability/de-clutter arc) through `3e26419` (HEAD at dispatch) —
 ~9,600 insertions across 53 files — with the surrounding system inspected

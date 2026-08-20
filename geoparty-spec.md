@@ -1,5 +1,12 @@
 # GeoParty: Build Specification
 
+> **HISTORICAL — v0.1 build spec (2026-08-19). Superseded by
+> `docs/architecture.md`, `CLAUDE.md` and `README.md`.** The shipped
+> product diverges deliberately: 6-letter room codes, head-to-head player
+> phones, the Daily Challenge, sound, CI/Pages workflows and
+> consent-gated analytics all exist despite §"Out of scope". Read for
+> origin and rationale only; nothing here is normative.
+
 ## Thesis
 
 GeoParty is a Jackbox-style geoguessing party game. One person (the operator) drives street-level imagery from their phone. Everyone else watches a TV showing a clean spectator view of the same imagery and shouts suggestions. The operator drops a guess on a map, the TV reveals the true location, and points are awarded by distance. The entire system is static JavaScript on GitHub Pages, synced through Firebase Realtime Database. There is no server code, no build step, and no cost.

@@ -5,8 +5,9 @@
 > `docs/beta-removal-plan.md`. Kept as history; nothing below is
 > operational.**
 
-Status: **amended spec (v2, 2026-08-20) — awaiting owner approval, then
-Opus implements.** This version **supersedes the original plan text of
+Status: **[historical status at time of writing:] amended spec (v2,
+2026-08-20) — awaiting owner approval, then Opus implements.** This version
+**supersedes the original plan text of
 commit `0f28562` in full**; where any earlier revision, quotation, or
 derived note contradicts this document, this document wins. The amendment
 exists because the EM review (P2-2,

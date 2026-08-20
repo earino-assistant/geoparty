@@ -6,6 +6,12 @@
 behavior, and the minimum reliable alternative—or an explicit recommendation not
 to build beta with current infrastructure.
 
+> **HISTORICAL — audit brief, 2026-08-20.** The beta lane it commissions
+> was audited and then **abandoned** by owner decision; GitHub Pages now
+> publishes from `main` only. Kept as the incident evidence record;
+> §2.6 of `docs/beta-delivery-architecture-audit.md` corrects one detail
+> below. Nothing here is operational.
+
 ## Why this audit exists
 
 We attempted an elegant single-site model:

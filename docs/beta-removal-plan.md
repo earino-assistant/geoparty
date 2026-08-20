@@ -1,11 +1,13 @@
 # Beta infrastructure removal plan — main-only Pages + verify-live gate
 
-**Status:** **Executed 2026-08-20 (this commit)** — the repo change set (§2,
-§4) is implemented locally by pinned Opus 4.8, `npm test` + `npm run check`
-green. Remaining steps are external and owner-owned: §3.3 (Firebase
-`rooms-beta` rules removal) and §3.4 (PostHog fact-check); the phase-3 push
-(§5) is unpushed pending owner approval. This document now joins the
-historical record; nothing in its substantive prescription changed.
+> **Status: EXECUTED and PUSHED — the removal shipped as `2e05e5f` on
+> `main`; Pages is main-only with the verify-live gate.** Historical
+> record. **Both owner-side items are closed** (2026-08-20): §3.3 — the
+> `rooms-beta` console rule was removed by the owner and the live rules
+> REST-verified (six-letter `rooms/` PUT 200, four-letter `rooms/` PUT
+> 401, `rooms-beta/` PUT 401); §3.4 — the PostHog fact-check was
+> API-inspected clean (no `deployment_channel` or `/beta/` filters; no
+> cleanup needed). Everything in §5–§7 is done.
 **Date:** 2026-08-20. **Author:** Fable.
 **Owner decision being executed:** abandon the beta lane. The product flow is:
 reviewed candidate → explicit owner approval → push `main` → production Pages

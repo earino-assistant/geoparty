@@ -2,6 +2,15 @@
 
 **Status:** Complete — audit only; no code, workflow, settings, rules, or branch
 was modified.
+
+> **SUPERSEDED 2026-08-20 — the owner chose Option E (§8.5): the beta
+> lane was abandoned and removed.** GitHub Pages publishes from `main`
+> only, with the verify-live gate this audit's §10 originated
+> (`.github/workflows/pages.yml`). §1's "keep the `/beta/` model"
+> verdict and the §5/§8.1–§8.4/§9 action items were never executed;
+> `js/channel.js` and `tests/channel.test.js` no longer exist. Kept
+> verbatim for the incident record and §10's process learning.
+
 **Date:** 2026-08-20 (evidence gathered 16:53–16:57 UTC).
 **Auditor:** Fable, per `docs/beta-delivery-architecture-audit-spec.md`.
 **Method:** Every load-bearing claim below was re-verified first-hand against

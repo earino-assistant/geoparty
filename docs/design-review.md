@@ -1,9 +1,10 @@
 # GeoParty — design review & product roadmap
 
-*Status: spec / roadmap only. Nothing in this document is implemented by the
-change that adds it; each recommendation is a separate future task. Written
-against the codebase as of 2026-08 (couch + head-to-head, 5,312-location
-pool, GDPR-gated PostHog analytics live).*
+> **HISTORICAL — the roadmap shipped.** All of §3's MUST (M1–M6) and
+> SHOULD (S1–S7) items, plus COULD C5, are live on `main`; only C1–C4
+> remain unbuilt. §1.6 (the SUPER SURE contract) is still normative and
+> cross-cited by `docs/architecture.md`. Read §3 as a record of what was
+> built and why, not as pending work.
 
 The brief: turn a working prototype into a Wordle-grade "game juggernaut" —
 a game a room full of people picks up in seconds and comes back to. This

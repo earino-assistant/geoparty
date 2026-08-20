@@ -1,7 +1,12 @@
 # GeoParty — gameplay design review
 
-*Status: design doc only — nothing here is implemented by the change that
-adds it. Written 2026-08-19, after the full design-review roadmap
+> **PARTIALLY SHIPPED — G1–G8 of §6 are live on `main`** (spec:
+> `docs/g1-g8-gameplay-expansion-spec.md`; authoritative status: its
+> §12). **G9–G13 remain unbuilt ideas** and are the live backlog in this
+> file. §1–§5 describe the pre-G1–G8 product; read them as design
+> rationale, not current state.
+
+*Written 2026-08-19, after the full design-review roadmap
 (M1–M6, S1–S7) shipped. This is the pure-gameplay counterpart to
 `docs/design-review.md`: that doc fixed friction, onboarding, and polish;
 this one asks a single question — **what would make GeoParty more fun, and

@@ -6,6 +6,13 @@
 `docs/engineering-manager-review-v0.3.md` (commit `ef7d7e1`, a review
 document — not reviewed here as production behavior).
 
+> **CLOSED — the candidate shipped and both REQUIRED FOLLOW-UPs are
+> fixed** (RF-1 lexical console-scrub rewrite and RF-2 pool-health
+> cache, both in `84924b8`). Historical record. Still outstanding from
+> §5: the real-device replay/masking runbook
+> (`docs/failure-injection.md` §"Manual on-device runbook",
+> `docs/replay-mask-checklist.md` §5) has no dated results.
+
 ## Recommendation
 
 **APPROVE WITH REQUIRED CHANGES.**

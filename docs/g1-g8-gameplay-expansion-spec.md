@@ -1,11 +1,12 @@
 # G1–G8 gameplay expansion — program specification
 
-*Status: implementation-ready specification, approved scope G1–G8 from
-`docs/gameplay-design-review.md` §6. Written 2026-08-20 against production
-`2e05e5f` (main-only Pages, verify-live gate; the beta lane is removed and
-nothing here assumes it). Nothing in this document is implemented by the
-change that adds it. Owner review checklist: §11. Implementation phases for
-Opus: §8.*
+> **Status: SHIPPED and live on `main` — see §12 for the authoritative
+> what-shipped record.** Everything in §1–§11 is implemented except the
+> Long Haul expert-tier sampler / `lhCursor` (§3.2, deferred; §12).
+> §3.5.6 remains the normative Ghost Duel privacy boundary cited by
+> `CLAUDE.md`. §8 (phases) and §11 (review checklist) are historical
+> planning artifacts. Manual device proof of the h2h TV twist card flip
+> and the ACE burst is still outstanding (§6.2).
 
 *Amended 2026-08-20, owner-approved: execution order is now
 P0 → P2 (Ghost Duels) → P1 → P3 → P4 → P5 → P6 → P7 — Ghost Duels ship

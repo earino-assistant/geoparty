@@ -1,5 +1,12 @@
 # Scaling the GeoParty location pool to 2000+
 
+> **Executed — the pool is at 5,312 entries, built by
+> `tools/scale_location_pool.py`.** §"Results / operations" is the live
+> runbook (including the periodic `--refresh-thumbs` re-run);
+> §"Problem" and §"Research findings" are the rationale record.
+> Difficulty tiers are assigned afterwards by
+> `tools/score_location_pool.py`.
+
 ## Problem
 
 `data/location_pool.json` shipped with 29 entries. The game needs thousands.

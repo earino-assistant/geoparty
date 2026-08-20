@@ -1,7 +1,13 @@
 # GeoParty — UI/UX design review: the de-clutter pass
 
-*Status: design audit only — nothing here is implemented by the change that
-adds it. Written 2026-08-20, after the full M1–M6 / S1–S7 build, against the
+> **PARTIALLY HISTORICAL — the §7 roadmap (P0, P1, P2) shipped in
+> `3e26419`; §9's implementation brief is complete.** Still normative:
+> §4 (the layer/hierarchy design system, enforced by `js/chrome.js` and
+> cited by `CLAUDE.md`), §6.5 (consent moment), and §8 (what not to
+> change). §2's screen inventory describes the pre-de-clutter, pre-G1–G8
+> UI — the diagnosis, not the current state.
+
+*Written 2026-08-20, after the full M1–M6 / S1–S7 build, against the
 live product and the codebase at `28d2b5b`. Companion docs:
 `docs/design-review.md` (product/friction), `docs/gameplay-design-review.md`
 (fun/retention). This one answers the owner's concern: **"the UI is getting
