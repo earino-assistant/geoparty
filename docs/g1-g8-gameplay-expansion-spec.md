@@ -7,6 +7,13 @@ nothing here assumes it). Nothing in this document is implemented by the
 change that adds it. Owner review checklist: §11. Implementation phases for
 Opus: §8.*
 
+*Amended 2026-08-20, owner-approved: execution order is now
+P0 → P2 (Ghost Duels) → P1 → P3 → P4 → P5 → P6 → P7 — Ghost Duels ship
+immediately after the shared foundation, ahead of streak/PBs (§8 has the
+rationale; phase and feature identifiers are unchanged). The ghost-link
+privacy exception is codified in CLAUDE.md ("Daily Ghost Duel links").
+All other scope and defaults are approved as written.*
+
 *Constitution (inherited, non-negotiable): static GitHub Pages, no backend,
 no accounts, no build step, no new vendor. A URL and six letters remain the
 onboarding model. Consent-gated aggregates-only analytics
@@ -33,8 +40,9 @@ in both directions at once:
   daily share carries the sender's run *in the link itself*. The recipient
   plays the same five, the sender's ghost pin lands on every reveal, and
   the verdict card begs to be sent back. Asynchronous head-to-head with
-  zero backend — this is the program's centerpiece and ships early (§8,
-  Phase 2).
+  zero backend — this is the program's centerpiece and, by owner
+  priority, the first thing to ship after the foundation (§8, Phase 2 —
+  the program's first shipping phase).
 - **The party gets variety and stakes-across-games.** Twist rounds (G2)
   give rounds identities and soften blowouts without scripting comebacks;
   the Decoy Pin (G7) weaponizes the game's best emergent mechanic; Crown
@@ -110,6 +118,12 @@ twist.js ──► G2 twists ──► G7 decoy (Blind Duel interaction, §3.7)
 night.js ──► G3 crown night   (independent of twists; touches only the
                                game-over / next-game chain)
 ```
+
+Note the ghost branch: `ghost.js`/G5 hangs **only** off the daily-result
+v2 foundation — `records.js` and G1/G8 are not on its path. That is what
+lets the owner-prioritized order ship Ghost Duels (P2) directly after P0,
+before the records phase P1 (§8): records are valuable but not a
+prerequisite for the first challenge link.
 
 State ownership at a glance (full detail §5):
 
@@ -460,6 +474,10 @@ GeoParty Daily #37 🔥12 · 18,420 pts
 ⚔️ Beat my ghost: <url>
 ```
 
+(The 🔥 segment is G1's share line and the 🎯 square is G4's — the card
+as first shipped by P2 simply omits them; each joins when its phase
+lands, per the §8 order. The challenge link itself is complete from P2.)
+
 **URL format.** `daily.html?utm_source=share&utm_campaign=daily#g=<payload>`
 — the run rides the **fragment**, never the query string: fragments are
 not sent in HTTP requests, don't reach the Pages logs, and are
@@ -801,6 +819,9 @@ the day the feature ships).
 
 **Relationship to Duel scores:** a duel run that is also the daily run
 (§3.5.2 case 6) updates records normally; exhibitions update nothing.
+Execution-order note (§8): P2 ships before the records folds in P1, so
+duels resolved in the gap are simply not counted — the `duels` counter
+starts fresh when P1 lands, consistent with the no-backfill rule above.
 
 ---
 
@@ -1030,7 +1051,11 @@ All events consent-gated through `track()` as ever; every property below
 is an aggregate (counts, flags, scores, day indexes); none matches
 `BANNED_KEY_RE`. Nothing from a ghost payload, a pin, a team name, or a
 coordinate ever rides. Schema + call site + sanitizer test + this catalog
-mirrored into `docs/analytics.md` land together per phase.
+mirrored into `docs/analytics.md` land together per phase. Each extended
+property lands with the phase that introduces it, in the §8 execution
+order: `vs_ghost` and the ghost events with P2, `streak`/`pb` with P1
+(so the ghost funnel reports before streak slicing exists — accepted),
+`hard` with P3, twist/decoy/night properties with their phases.
 
 ### 7.1 New/extended events
 
@@ -1094,26 +1119,37 @@ updated in the same change; `npm test` + `npm run check` green; the §6.2
 manual matrix for the touched surfaces; one commit series per phase,
 shippable and revertible alone. Effort scale as in the design reviews.
 
+The table reads in **execution order** (owner-amended 2026-08-20:
+P2 precedes P1). Phase identifiers are unchanged from the approved spec —
+P1 is still the records phase, P2 still Ghost Duels; only the sequence
+moved.
+
 | Phase | Ships | Builds | Effort | Verify |
 |---|---|---|---|---|
 | **P0** | (foundation, invisible) | `records.js` skeleton + `daysBetweenKeys` + daily result v2 (save pins/elapsed, hard-slot key) | S | unit suites; a saved run round-trips with pins; v1 results still load |
-| **P1** | **G1 + G8** streak, PBs, share lines | records folds + intro/done surfaces + share.js lines + extended daily events | S–M | streak table tests; device check: complete a daily, see 🔥/PB, share carries them |
 | **P2** | **G5 Ghost Duels (normal daily)** — *the first genuinely usable ghost link ships here* | `ghost.js` codec + challenge intro + reveal beats + verdict + default challenge share + scrubUrl fragment layer + funnel events | L | fuzz/hostile/length suites; two-device duel through a real messenger; fragment-leak test; already-played instant verdict |
+| **P1** | **G1 + G8** streak, PBs, share lines | records folds + intro/done surfaces + share.js lines (🔥/PB join the already-shipped challenge card) + extended daily events | S–M | streak table tests; device check: complete a daily, see 🔥/PB, share carries them |
 | **P3** | **G6 Hard Mode** (+ hard duels) | hard slot + unlock flow + `setMoveAllowed` viewer lever + star share + hard flag in codec | S–M | hard runs score on 30 s window; hard link forces hard rules; streak untouched by hard |
 | **P4** | **G4 ACE + medals** | `medalForDistance` + 🎯 grid + stamp/TV burst + captions + ace counters | S | grid/caption tests; both-ACE-and-SUPER-SURE reveal on device |
 | **P5** | **G3 Crown Night** | `night.js` + couch/h2h carry + tally/champion surfaces + masks + `night_champion` | S–M | fold tests; a 3-game two-phone night reaches a champion; TV + no-TV |
 | **P6** | **G2 Twist rounds** | `twist.js` + setting + round-start write + card/HUD/reveal treatment + `lhCursor` + viewer lever reuse + event props | M | determinism/eligibility suites; each twist played on device in both modes; resume mid-twist-round |
 | **P7** | **G7 Decoy Pin** | `decoy.js` + chip/sheet + live-feed switch + reveal exposure + carry reset + `decoy` prop | M | hidden-in-play tests; two-phone bluff session; blind-twist exclusion |
 
-Ordering rationale: P1 first because the streak compounds daily (every
-streak-less day is a lost cohort — the gameplay review's "G1 tomorrow");
-P2 immediately after because Ghost Duels are the owner's stated goal and
-depend only on P0 — **Eduardo can send a real challenge link at the end of
-Phase 2**, roughly week one of the program. P3 rides the codec while it's
-warm. The party arc (P4→P7) orders by blast radius: ACE touches only
-formatting; Crown Night touches the game-over chain; twists touch the
-round lifecycle; the decoy lands last because its one cross-feature rule
-(Blind Duel) needs the deck in the tree first.
+Ordering rationale — the sequence is intentionally owner-prioritized:
+real shareable challenge links are the owner's stated goal, and Ghost
+Duels depend only on P0's daily-result v2 (pins + elapsed, §2.2) —
+nothing in G1/G8 is a prerequisite for the first link. So P2 ships first
+after the foundation: **Eduardo can send a real challenge link at the end
+of the program's first shipping phase**. P1 follows immediately — the
+streak compounds daily (every streak-less day is a lost cohort — the
+gameplay review's "G1 tomorrow"), so records land right behind the link
+and the 🔥/PB lines join the challenge card then; deferring P1 by one
+phase trades a few streak-less days for the duel loop existing at all.
+P3 rides the codec while it's warm. The party arc (P4→P7) orders by
+blast radius: ACE touches only formatting; Crown Night touches the
+game-over chain; twists touch the round lifecycle; the decoy lands last
+because its one cross-feature rule (Blind Duel) needs the deck in the
+tree first.
 
 ---
 

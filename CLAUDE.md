@@ -66,7 +66,30 @@ change:
   change.
 - **Nothing derived from a user's guess may be sent, hashed or otherwise.**
   Pool entries travel as the opaque `poolDiagId` only — never a raw
-  Mapillary image id, never a coordinate.
+  Mapillary image id, never a coordinate. This stays the default rule.
+
+  **The one owner-authorized exception — Daily Ghost Duel links**
+  (approved 2026-08-20; spec `docs/g1-g8-gameplay-expansion-spec.md`
+  §3.5.6). A user may voluntarily share their OWN completed Daily
+  guesses and timings — nothing else — as a Ghost Duel challenge,
+  carried in a client-side URL **fragment** only, person-to-person.
+  Hard boundaries, each test-enforced:
+  - The payload is never sent to GeoParty servers/Pages logs (fragments
+    never ride HTTP requests), Firebase, PostHog, session replay,
+    browser/console logging, or any third party.
+  - The fragment is stripped (`history.replaceState`) **before**
+    analytics initialization; URL sanitization (`scrubUrl` /
+    `sanitizeBeforeSend`) drops fragments entirely; tests assert that
+    no payload byte can reach analytics or replay.
+  - The payload may never contain a name, identity, raw Mapillary image
+    id, truth location, or any analytics property.
+  - Scope is **Daily Ghost Duels only**. Party challenge links, any
+    backend/server transfer, and any other widening of this exception
+    remain forbidden unless the owner explicitly changes this rule
+    again.
+
+  This is a narrow, product-authorized sharing feature — it does not
+  weaken the analytics/replay privacy rules above in any way.
 
 Before finishing any change: `npm test` (all green) and `npm run check`
 (every JS file must pass `node --check`). Both run in CI.
