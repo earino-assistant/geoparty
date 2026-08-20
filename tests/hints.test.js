@@ -7,9 +7,11 @@ import {
   hintSeen,
   claimHint,
   HINT_CARDS,
+  SUPER_SURE_SHEET,
+  LOCK_LABELS,
   guessMapHintLines,
   lockNowEstimate,
-  lockNowLabel,
+  lockButtonLabel,
 } from "../js/hints.js";
 import { scoreForDistance, timeBonus, bonusWindowMs } from "../js/game.js";
 
@@ -94,18 +96,39 @@ test("phonescreen card (S7): teaches the hold-it-up move for no-TV couch", () =>
 });
 
 test("guessMapHintLines: scoring line always; rivals line only in h2h", () => {
-  const couch = guessMapHintLines("couch", false);
-  const h2h = guessMapHintLines("h2h", false);
+  const couch = guessMapHintLines("couch");
+  const h2h = guessMapHintLines("h2h");
   assert.ok(couch[0].includes("Closer = more points"));
   assert.ok(!couch.some((l) => l.includes("Rivals")));
-  assert.ok(h2h.some((l) => l.includes("Rivals can see your pin move")));
+  assert.ok(h2h.some((l) => l.includes("Rivals see your pin move")));
 });
 
-test("guessMapHintLines: SUPER SURE line only while the bet is unspent", () => {
-  const withBet = guessMapHintLines("h2h", true);
-  const spent = guessMapHintLines("h2h", false);
-  assert.ok(withBet.some((l) => l.includes("SUPER SURE")));
-  assert.ok(!spent.some((l) => l.includes("SUPER SURE")));
+test("guessMapHintLines: the guess-map card never explains SUPER SURE", () => {
+  // De-clutter §5/§6.1: each rule is explained in exactly one place, and
+  // SUPER SURE's place is its own sheet. The card used to carry a third
+  // line while a pill, a button label and a toast said the same thing.
+  for (const mode of ["h2h", "couch", "daily"]) {
+    const text = guessMapHintLines(mode).join(" ");
+    assert.ok(!/SUPER SURE/i.test(text), mode);
+    assert.ok(!/double or nothing/i.test(text), mode);
+  }
+  // Extra arguments (the old superSureAvailable flag) can never revive it.
+  assert.deepEqual(guessMapHintLines("h2h", true), guessMapHintLines("h2h"));
+});
+
+test("guessMapHintLines: at most two lines — a card, not a manual", () => {
+  for (const mode of ["h2h", "couch", "daily"]) {
+    assert.ok(guessMapHintLines(mode).length <= 2, mode);
+  }
+});
+
+test("SUPER_SURE_SHEET: the one place the bet is explained (§6.1)", () => {
+  const text = [SUPER_SURE_SHEET.title, ...SUPER_SURE_SHEET.lines].join(" ");
+  assert.ok(text.includes("Double or nothing, once per game"));
+  assert.ok(text.includes("×2"));
+  assert.ok(/you score 0/.test(text));
+  assert.equal(SUPER_SURE_SHEET.armLabel, "Arm the bet");
+  assert.equal(SUPER_SURE_SHEET.cancelLabel, "Not now");
 });
 
 /* ---------------- lock-now estimate ---------------- */
@@ -137,17 +160,60 @@ test("lockNowEstimate: negative elapsed (clock skew) clamps to zero", () => {
   assert.equal(est.bonus, lockNowEstimate(10, 0, 120).bonus);
 });
 
-test("lockNowLabel: plain estimate, with the bolt only when bonus > 0", () => {
-  const withBonus = lockNowLabel({ points: 5100, distancePoints: 4800, bonus: 300 }, false);
-  assert.ok(withBonus.includes("+5,100"));
-  assert.ok(withBonus.includes("⚡+300"));
-  const noBonus = lockNowLabel({ points: 4800, distancePoints: 4800, bonus: 0 }, false);
-  assert.ok(noBonus.includes("+4,800"));
-  assert.ok(!noBonus.includes("⚡"));
+/* ---------------- the primary button's label (§6.1) ---------------- */
+
+test("lockButtonLabel: the estimate rides on the button as a sublabel", () => {
+  const parts = lockButtonLabel(
+    LOCK_LABELS.h2h, { points: 3240, distancePoints: 3100, bonus: 140 }, false);
+  assert.equal(parts.main, "Lock It In");
+  assert.equal(parts.sub, "≈ +3,240");
+  // §6's verbatim one-liner survives as the accessible label.
+  assert.equal(parts.text, "Lock It In · ≈ +3,240");
 });
 
-test("lockNowLabel: an armed SUPER SURE shows the real stakes — ×2 or 0", () => {
-  const label = lockNowLabel({ points: 3200, distancePoints: 3000, bonus: 200 }, true);
-  assert.ok(label.includes("+6,400"), "doubled total");
-  assert.ok(label.includes("or 0"), "and the downside");
+test("lockButtonLabel: each surface keeps its own verb", () => {
+  const est = { points: 5100, distancePoints: 4800, bonus: 300 };
+  assert.equal(lockButtonLabel(LOCK_LABELS.couch, est, false).main, "Confirm Guess");
+  assert.equal(lockButtonLabel(LOCK_LABELS.daily, est, false).main, "Lock It In");
+});
+
+test("lockButtonLabel: no pin yet — the plain verb, no stray separator", () => {
+  const parts = lockButtonLabel(LOCK_LABELS.h2h, null, false);
+  assert.equal(parts.main, "Lock It In");
+  assert.equal(parts.sub, "");
+  assert.equal(parts.text, "Lock It In");
+  assert.ok(!parts.text.includes("≈"));
+});
+
+test("lockButtonLabel: an armed SUPER SURE shows the real stakes — ×2 or 0", () => {
+  const parts = lockButtonLabel(
+    LOCK_LABELS.h2h, { points: 3200, distancePoints: 3000, bonus: 200 }, true);
+  assert.equal(parts.text, "🔥 Lock In ×2 — or 0"); // §6.1, verbatim
+  assert.equal(parts.main, "🔥 Lock In ×2");
+  assert.equal(parts.sub, "or 0");
+  // The armed label must not also quote a single-value estimate: the whole
+  // point is that the number on screen is the bet's number.
+  assert.ok(!parts.text.includes("3,200"));
+});
+
+test("lockButtonLabel: armed with no pin still reads as the bet", () => {
+  assert.equal(lockButtonLabel(LOCK_LABELS.couch, null, true).text,
+    "🔥 Confirm ×2 — or 0");
+});
+
+test("lockButtonLabel: defaults to the h2h verbs when none are given", () => {
+  assert.equal(lockButtonLabel(null, null, false).main, "Lock It In");
+});
+
+test("lockButtonLabel: the label never restates the SUPER SURE rule", () => {
+  // §5: each rule is explained in exactly one place, and that place is the
+  // sheet. The button shows stakes, not instructions.
+  const armed = lockButtonLabel(LOCK_LABELS.h2h, { points: 100 }, true).text;
+  assert.ok(!/once per game/i.test(armed));
+  assert.ok(!/double or nothing/i.test(armed));
+});
+
+test("lockButtonLabel: thousands separators, so 3,240 never reads as 3240", () => {
+  const parts = lockButtonLabel(LOCK_LABELS.h2h, { points: 12345 }, false);
+  assert.equal(parts.sub, `≈ +${(12345).toLocaleString()}`);
 });

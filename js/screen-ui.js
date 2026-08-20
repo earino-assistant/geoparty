@@ -33,6 +33,7 @@ import { TV_VIAS, screenJoinVia } from "./tvlink.js";
 import { countdownTick, motionDuration, animFraction } from "./fx.js";
 import { initSound, playSound, prefersReducedMotion } from "./fx-ui.js";
 import { track } from "./consent.js";
+import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer } from "./viewer-ui.js";
 
 const $ = (id) => document.getElementById(id);
@@ -56,6 +57,10 @@ const escapeHtml = (s) =>
 
 function showScreen(id) {
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
+  // The TV keeps its own chrome untouched (§8), but the deferred first-run
+  // consent ask still needs to know which screen is up (§6.5): a TV must
+  // not be asked while someone is typing a room code onto it.
+  setActiveScreen(id);
 }
 
 let roomCode = null;

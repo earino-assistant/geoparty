@@ -38,17 +38,28 @@ into it, so a future scoreboard row cannot slip through unmasked.
 - `#hudTeam` — active team name in the round HUD
 - `#teamNames` — the setup textarea
 - `#leaderboardList` — stored team names + dates
-- `#revealPlace` — **the round's answer, as a place name**
-- `#revealTotals`, `#finalTotals`, `#hostCrown` — scoreboards, winner line
+- `#revealPlace` — **the round's answer, as a place name** (now the reveal
+  headline rather than a stat card — same element id, same mask)
+- `#revealBoard` — the merged reveal board (round delta → running total),
+  which replaced `#revealTotals`; carries team names
+- `#finalTotals`, `#hostCrown` — scoreboard, winner line
 - `#hostShowdownResults` — injected at runtime; masked in `host-ui.js`
+
+`#revealResult` is deliberately **not** masked: it is the same aggregate
+numbers (points, distance in km, speed bonus) the old `#revealDistance` /
+`#revealPoints` cards carried unmasked. It contains no name, no place and
+no coordinate — `tests/game.test.js` asserts `revealResultLine` never emits
+one.
 
 ### player.html
 - `#pResumeCode`, `#pRoomCodeHuge` — room codes
 - `#pJoinUrl`, `#pTvType` — invite/TV links carrying the room code
 - `#myTeamName` — the team-name input
-- `#pLobbyTeams`, `#pLockedList`, `#pRoundResults`, `#pRevealTotals`,
-  `#pFinalTotals`, `#pLockedRank`, `#pHandoffNote` — team names
-- `#pRevealPlace` — the round's answer
+- `#pLobbyTeams`, `#pLockedList`, `#pRevealBoard`, `#pFinalTotals`,
+  `#pLockedRank`, `#pHandoffNote` — team names. `#pRevealBoard` is the
+  merged board that replaced `#pRoundResults` + `#pRevealTotals`
+- `#pRevealPlace` — the round's answer (now the reveal headline)
+- `#pRevealResult` — unmasked, deliberately: aggregates only (see above)
 
 ### screen.html (TV)
 - `#roomInput`, `#h2hLobbyCode`, `#h2hLobbyUrl` — room codes/links
@@ -59,7 +70,8 @@ into it, so a future scoreboard row cannot slip through unmasked.
   masked in `screen-ui.js`
 
 ### daily.html
-- `#dRevealPlace` — the round's answer
+- `#dRevealPlace` — the round's answer (now the reveal headline)
+- `#dRevealResult` — unmasked, deliberately: aggregates only (see above)
 
 ### Cross-page
 - `.leaflet-tooltip` — Leaflet pin labels carry team names on reveal maps
@@ -69,6 +81,10 @@ into it, so a future scoreboard row cannot slip through unmasked.
 Every Leaflet map (`.leaflet-container`): `#guessMap`, `#hostRevealMap`,
 `#playerGuessMap`, `#pRevealMap`, `#dailyGuessMap`, the daily reveal map,
 `#guessLiveMap`, `#revealMap`, `#h2hRevealMap`, and the h2h TV panel maps.
+
+The reveal maps changed size (36 vh → 52 vh) and gained a `touch-action`
+rule in the de-clutter pass, neither of which affects `blockSelector`: the
+selector matches `.leaflet-container`, which every one of them still is.
 
 **Why blocked and not masked:** Leaflet renders OSM tiles as
 `<img src="…/{z}/{x}/{y}.png">`. A tile path *is* a coordinate. Masking the
@@ -94,7 +110,9 @@ recording in PostHog and confirm:
 
 - [ ] Team names in the lobby list, HUD and scoreboard are asterisks.
 - [ ] The room code (lobby, resume banner, TV line) is asterisks.
-- [ ] The reveal place name is asterisks.
+- [ ] The reveal place name (now the big accent headline) is asterisks.
+- [ ] The merged reveal board's team names are asterisks; the result line
+      beneath the place name shows numbers only.
 - [ ] The panorama area is a blank/black box, not street imagery.
 - [ ] The guess map and reveal map are placeholder boxes, not tiles.
 - [ ] The network tab shows `graph.mapillary.com/<id>`-shaped entries with

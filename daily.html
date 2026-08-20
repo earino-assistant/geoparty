@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <!-- P2.1: pinch/browser zoom restored. The panorama and guess map own
+       their own gestures via `touch-action` in style.css. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GeoParty — Daily Challenge</title>
   <meta name="description" content="Five mystery places, the same for everyone today. One run per day — can you beat the score that sent you here?" />
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
@@ -39,11 +41,11 @@
         <div class="big" id="dDailyNum">#—</div>
         <div id="dDailyDate" class="daily-date"></div>
       </div>
+      <!-- §2.10: two lines. The pano and map hints teach the rest in place,
+           so the intro no longer restates the scoring rule a third time. -->
       <p class="daily-rules">
-        Five mystery places — the <strong>same five for everyone</strong>
-        today. 60 seconds each, move around all you like. Closer and faster
-        = more points.
-        One run per day: make it count, then share your score.
+        Five mystery places — the <strong>same five for everyone</strong> today.<br />
+        One run per day. Closer + faster = more points.
       </p>
       <div id="dIntroErr" class="join-err"></div>
     </div>
@@ -70,34 +72,24 @@
     <div id="dailyGuessMap" class="map-full"></div>
     <div class="guess-hint" id="dGuessHint">Tap the map to drop your pin</div>
     <div class="hud"><div></div><div class="hud-item" id="dGuessTimer"></div></div>
-    <div id="dLockNowHint" class="lock-now-hint"></div>
+    <!-- §6.1: the estimate rides on the primary button's own label. -->
     <div class="action-bar">
-      <button id="btnDBackToStreet">Back to Street</button>
+      <button id="btnDBackToStreet" class="btn-ghost">Back to street</button>
       <button id="btnDLockIn" class="btn-primary" disabled>Lock It In</button>
     </div>
   </section>
 
-  <!-- 4. Reveal: where it was, what it paid, running total -->
+  <!-- 4. Reveal — the §6.4/§2.10 shape: map, place headline, one result
+       line, and "Total so far" as a row rather than a fourth card. -->
   <section id="d-reveal" class="phase-screen hidden">
     <div class="host-wrap">
-      <h1 id="dRevealHeading">Round 1</h1>
+      <div id="dRevealHeading" class="reveal-round">Round 1</div>
       <div id="dRevealMap" class="p-reveal-map"></div>
-      <div class="stat-card">
-        <div class="label">Location</div>
-        <div class="big place" id="dRevealPlace" data-ph-mask>—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Your distance</div>
-        <div class="big" id="dRevealDistance">—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Your points</div>
-        <div class="big" id="dRevealPoints" style="color: var(--accent)">—</div>
-        <div id="dRevealSpeed" class="time-note"></div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Total so far</div>
-        <div class="big" id="dRevealTotal">—</div>
+      <div id="dRevealPlace" class="reveal-headline" data-ph-mask>—</div>
+      <div id="dRevealResult" class="reveal-result">—</div>
+      <div class="total-row">
+        <span class="label">Total so far</span>
+        <span class="val" id="dRevealTotal">—</span>
       </div>
     </div>
     <div class="action-bar">
@@ -118,10 +110,8 @@
         <button id="btnDShare" class="btn-primary">📤 Share your result</button>
       </div>
       <p id="dDoneNote" class="waiting-screen-note">
-        Same five spots for everyone today — a fresh five tomorrow.
-      </p>
-      <p class="waiting-screen-note">
-        Want the full party? <a href="index.html">Start a game with friends</a>.
+        Fresh five tomorrow — or <a href="index.html">start a party</a> with
+        friends.
       </p>
     </div>
     <div class="action-bar">

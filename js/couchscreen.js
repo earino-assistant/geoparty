@@ -58,7 +58,7 @@ export function lobbyReadiness(live, connected) {
   if (live) {
     return {
       canStart: true, ok: true,
-      note: "TV connected — ready when you are.",
+      note: "TV connected ✓",
     };
   }
   if (!connected) {
@@ -70,7 +70,10 @@ export function lobbyReadiness(live, connected) {
   }
   return {
     canStart: true, ok: false,
-    note: "No TV? No problem — the reveal shows right here. Add a TV anytime.",
+    // §6.3: one line. "Add a TV anytime" was the fourth simultaneous
+    // explanation of an optional accessory; the collapsed "📺 Put it on a
+    // TV" module below it now says that by existing.
+    note: "No TV? No problem — the reveal shows right here.",
   };
 }
 

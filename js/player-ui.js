@@ -26,10 +26,10 @@ import {
   scoreForDistance,
   bonusWindowMs,
   timeBonus,
-  formatSeconds,
-  resultRowText,
-  formatDistance,
   formatCountdown,
+  revealResultLine,
+  revealBoardRows,
+  boardRowText,
   teamIds,
   standings,
 } from "./game.js";
@@ -58,16 +58,21 @@ import {
   superSureAvailable,
   resolveSuperSure,
   superSureSettlement,
-  adjustedPoints,
-  superSureLabel,
 } from "./supersure.js";
 import {
   HINT_CARDS,
+  SUPER_SURE_SHEET,
+  LOCK_LABELS,
   guessMapHintLines,
   lockNowEstimate,
-  lockNowLabel,
+  lockButtonLabel,
 } from "./hints.js";
-import { oneShotHint, dismissHintCard } from "./hints-ui.js";
+import {
+  oneShotHint,
+  showHintCard,
+  dismissHintCard,
+  paintLockButton,
+} from "./hints-ui.js";
 import {
   autoAdvancePatch,
   autoAdvanceStatus,
@@ -85,6 +90,7 @@ import { initSound, playSound, buzz } from "./fx-ui.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
+import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
 import { toastWithReport, toastPlain } from "./report-ui.js";
 
@@ -94,8 +100,8 @@ import { toastWithReport, toastPlain } from "./report-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = [
-  "p-home", "p-lobby", "p-round", "p-guess",
-  "p-locked", "p-reveal", "p-gameover", "p-next",
+  "p-home", "p-setup", "p-lobby", "p-round", "p-guess",
+  "p-locked", "p-reveal", "p-gameover",
 ];
 
 const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
@@ -107,6 +113,9 @@ function showScreen(id) {
   shownScreen = id;
   dismissHintCard(); // a hint never outlives the moment it teaches
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
+  // §4.1: the utility corners (🍪/🔊) leave while a play screen is up, and
+  // a deferred first-run consent ask waits for a calm one (§6.5).
+  setActiveScreen(id);
 }
 
 let toastTimer = null;
@@ -244,13 +253,64 @@ function persistActive() {
  * Room lifecycle: create / join / follow / leave
  * ================================================================ */
 
-function collectSettings(prefix) {
+// One settings panel serves both flows now (review §6.2), so there is one
+// set of segment ids instead of the two identical sets this page carried.
+function collectSettings() {
   return {
-    roundCount: parseInt($(`${prefix}SegRounds`).dataset.value, 10),
-    roundSeconds: parseInt($(`${prefix}SegSeconds`).dataset.value, 10),
-    moveAllowed: $(`${prefix}SegMove`).dataset.value === "1",
-    difficulty: normalizeDifficulty($(`${prefix}SegDifficulty`).dataset.value),
+    roundCount: parseInt($("pSegRounds").dataset.value, 10),
+    roundSeconds: parseInt($("pSegSeconds").dataset.value, 10),
+    moveAllowed: $("pSegMove").dataset.value === "1",
+    difficulty: normalizeDifficulty($("pSegDifficulty").dataset.value),
   };
+}
+
+/* The join/create split (review §6.2 / §3 hotspot 2). The joiner — the
+ * majority, arriving from a QR or an invite link — needs two fields, and
+ * used to face the full game-setup wall plus two competing primary buttons.
+ * Now: panel 1 is the join, panel 2 is the settings, and the SAME panel 2
+ * serves the winner's next-game setup (which used to be a third copy of
+ * the same four segment groups).
+ *
+ * The team-name input is one DOM node moved between the panels rather than
+ * duplicated — one field, one value, no sync bug. */
+let setupMode = "new"; // "new" (start a party) | "next" (winner's handoff)
+
+function showHome() {
+  const group = $("pTeamNameGroup");
+  group.classList.remove("hidden"); // the "next game" panel hides it
+  $("p-home").querySelector(".host-wrap").insertBefore(group, $("pJoinGroup"));
+  showScreen("p-home");
+}
+
+function openSetup(mode) {
+  setupMode = mode === "next" ? "next" : "new";
+  const wrap = $("p-setup").querySelector(".host-wrap");
+  const next = setupMode === "next";
+  $("pSetupTitle").textContent = next ? "👑 Your game now" : "Start a new game";
+  $("pSetupNote").textContent = next
+    ? "Same teams, fresh scores. Every phone and the TV follow automatically."
+    : "";
+  $("pSetupNote").classList.toggle("hidden", !next);
+  $("btnSetupBack").classList.toggle("hidden", next);
+  // The winner already has a team name; the party starter still needs one.
+  if (next) {
+    $("pTeamNameGroup").classList.add("hidden");
+  } else {
+    $("pTeamNameGroup").classList.remove("hidden");
+    wrap.insertBefore($("pTeamNameGroup"), $("pSetupTitle").nextSibling);
+  }
+  showScreen("p-setup");
+}
+
+// The ghost "Start a new game →": a deliberate action, and the one place
+// that gates on a team name before the settings are worth filling in.
+function startNewGame() {
+  if (!$("myTeamName").value.trim()) {
+    toast("Give your team a name first");
+    $("myTeamName").focus();
+    return;
+  }
+  openSetup("new");
 }
 
 async function pickFreeRoomCode() {
@@ -271,13 +331,13 @@ async function pickFreeRoomCode() {
 async function createRoom() {
   const name = $("myTeamName").value.trim();
   if (!name) { toast("Give your team a name first"); return; }
-  $("btnCreateRoom").disabled = true;
+  $("btnOpenRoom").disabled = true;
   try {
     const code = await pickFreeRoomCode();
     const teams = {
       t1: { name, total: 0, deviceId, joinedAt: Date.now() },
     };
-    const state = initialH2hRoomState(collectSettings("p"), teams, "t1");
+    const state = initialH2hRoomState(collectSettings(), teams, "t1");
     writeRoom(code, state).catch((e) =>
       console.warn("Firebase write failed:", e));
     const mine = lsGet(LS_MY_ROOMS, []);
@@ -297,7 +357,7 @@ async function createRoom() {
     console.error(e);
     toast("Could not create game — see console");
   } finally {
-    $("btnCreateRoom").disabled = false;
+    $("btnOpenRoom").disabled = false;
   }
 }
 
@@ -398,7 +458,7 @@ async function followNextRoom(code) {
     }
     const mine = state && teamForDevice(state.teams, deviceId);
     if (!mine) { leaveToHome("Couldn't follow into the next game."); return; }
-    toast("Following the winner into the next game…");
+    toast("Following the winner…");
     enterRoom(code, mine);
   } catch (e) {
     console.error(e);
@@ -420,7 +480,7 @@ function leaveToHome(message) {
   myTeam = null;
   room = null;
   switchingRooms = false;
-  showScreen("p-home");
+  showHome();
   renderResumeBanner();
   if (message) toast(message);
 }
@@ -541,16 +601,8 @@ function renderLobby() {
   // A TV is a bonus, never a requirement: remote rivals join by link and
   // every phone carries its own reveal — so the whole affordance collapses
   // to a checkmark the moment a screen attaches.
-  const note = $("pScreenNote");
   const attached = screenAttached(room, Date.now());
   $("pTvAdd").classList.toggle("hidden", attached);
-  if (attached) {
-    note.textContent = "TV connected ✓";
-    note.classList.add("ok");
-  } else {
-    note.textContent = "No TV needed — every phone shows the reveal.";
-    note.classList.remove("ok");
-  }
 
   const list = $("pLobbyTeams");
   list.innerHTML = "";
@@ -573,11 +625,16 @@ function renderLobby() {
   const host = isHost();
   $("btnPStart").classList.toggle("hidden", !host);
   $("btnPLeave").textContent = host ? "Abandon" : "Leave";
-  $("pLobbyNote").textContent = host
+  // §2.4: ONE status line. The TV state used to be a second stacked muted
+  // line above this one; it folds in as a suffix instead.
+  const base = host
     ? (ids.length < 2
-        ? "You can start solo, but it's better with rivals — phones join with the QR."
+        ? "Start solo, or wait for rivals — they join with the QR."
         : `${ids.length} teams in — start when everyone's ready.`)
     : `Waiting for ${room.teams[room.hostTeam] ? room.teams[room.hostTeam].name : "the host"} to start…`;
+  const note = $("pLobbyNote");
+  note.textContent = attached ? `${base} · TV ✓` : base;
+  note.classList.toggle("ok", attached);
 }
 
 // Remote play: the QR only works across a table — a rival across the
@@ -601,7 +658,7 @@ async function shareInvite() {
   }
   try {
     await navigator.clipboard.writeText(url);
-    toast("Invite link copied — send it to your rival");
+    toast("Invite link copied");
     track("invite_shared", { mode: "h2h", method: "copy" });
   } catch {
     toast(`Send this link: ${url}`);
@@ -708,7 +765,9 @@ function renderRoundActive() {
     clearRivalPins();
     if (guessMap) guessMap.setView([25, 10], 2);
     $("btnLockIn").disabled = true;
-    $("lockNowHint").textContent = "";
+    renderSuperSureChip();
+    updateLockButton();
+    updateGuessBanner();
     startTick();
   }
 
@@ -752,7 +811,7 @@ function renderRoundActive() {
       iv.noteReanchor();
       iv.moveTo(target, "anchor").catch((e) => {
         console.warn("player: image load failed", e);
-        toast("Imagery failed to load — you can still guess from the map",
+        toast("Imagery didn’t load — guess from the map.",
           { surface: "player" });
       });
     }
@@ -825,34 +884,47 @@ function ensureGuessMap() {
     } else {
       guessMarker = L.marker(e.latlng, { draggable: true }).addTo(guessMap);
       guessMarker.on("move", scheduleLiveWrite);
-      guessMarker.on("move", updateLockNowHint);
+      guessMarker.on("move", updateLockButton);
     }
     scheduleLiveWrite();
     $("btnLockIn").disabled = false;
-    updateLockNowHint();
+    updateGuessBanner();
+    updateLockButton();
   });
 }
 
-// M3: the live "if you locked in now" pill. Truth rides in the round, so
-// the phone can price its own pin locally — nothing leaves the device.
-// Refreshed by the 250 ms ticker (the bonus decays with time), on pin
-// moves, and on SUPER SURE toggles (armed = show the doubled stakes).
-function updateLockNowHint() {
-  const el = $("lockNowHint");
+// §6.1: one banner, and only until the first pin exists. The old second
+// state ("Drag to adjust, then lock it in") taught what a draggable pin
+// teaches by itself.
+function updateGuessBanner() {
+  $("pGuessHint").classList.toggle("hidden", !!guessMarker);
+}
+
+/* M3's live "if you locked in now" estimate, now ON the primary button
+ * (review §6.1): one element instead of a floating pill stacked above a
+ * second floating pill, and the number sits exactly where the decision is
+ * made. Truth rides in the round, so the phone prices its own pin locally —
+ * nothing leaves the device. Refreshed by the 250 ms ticker (the bonus
+ * decays with time), on pin moves, and on SUPER SURE arm/disarm. */
+function updateLockButton() {
+  const btn = $("btnLockIn");
+  btn.classList.toggle("armed", superSureArmed);
   if (!room || room.phase !== "roundActive" || !room.round ||
       localStage !== "map" || !guessMarker || myResult()) {
-    el.textContent = "";
+    paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, null, superSureArmed));
     return;
   }
   const truth = room.round.truth;
-  if (!truth || typeof truth.lat !== "number") { el.textContent = ""; return; }
+  if (!truth || typeof truth.lat !== "number") {
+    paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, null, superSureArmed));
+    return;
+  }
   const g = guessMarker.getLatLng();
   const km = haversineKm(
     truth.lat, truth.lng, g.lat, L.Util.wrapNum(g.lng, [-180, 180], true));
   const elapsed = Math.max(0, Date.now() - (room.round.startedAt || Date.now()));
   const est = lockNowEstimate(km, elapsed, room.settings.roundSeconds);
-  el.textContent = lockNowLabel(est, superSureArmed);
-  el.classList.toggle("armed", superSureArmed);
+  paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, est, superSureArmed));
 }
 
 // Live rival pins, in team colors, on this phone's own guess map — the
@@ -892,17 +964,16 @@ function openGuessMapScreen() {
   showScreen("p-guess");
   ensureGuessMap();
   $("btnLockIn").disabled = !guessMarker;
-  $("pGuessHint").textContent = guessMarker
-    ? "Drag to adjust, then lock it in"
-    : "Tap the map to drop your pin — rivals can see it move";
-  renderSuperSureToggle();
-  // First guess map ever: the scoring one-liner, the rival-pins warning,
-  // and the SUPER SURE stakes — at the moment they matter (M5 + M3).
+  updateGuessBanner();
+  renderSuperSureChip();
+  // First guess map ever: the scoring one-liner and the rival-pins warning,
+  // at the moment they matter (M5). The SUPER SURE line has left this card
+  // — the bet is explained in exactly one place now, its own sheet (§6.1).
   oneShotHint("guessmap", {
     title: "Drop your pin",
-    lines: guessMapHintLines("h2h", superSureAvailable(room.teams, myTeam)),
+    lines: guessMapHintLines("h2h"),
   });
-  updateLockNowHint();
+  updateLockButton();
   setTimeout(() => guessMap.invalidateSize(), 50);
   updateRivalPins();
   scheduleLiveWrite();
@@ -910,31 +981,45 @@ function openGuessMapScreen() {
 
 /* ---------------- SUPER SURE: arm/disarm the one-per-game bet --------- */
 
-// The toggle lives on this phone's own guess screen only. Arming is purely
-// local state until lock-in commits it — nothing about the bet ever rides
-// on the live feed, so rivals can't learn it before the reveal.
-function toggleSuperSure() {
+/* The chip lives on this phone's own guess screen only. Arming is purely
+ * local state until lock-in commits it — nothing about the bet ever rides
+ * on the live feed, so rivals can't learn it before the reveal. That rule
+ * is untouched by the de-clutter pass; what changed is the presentation:
+ *
+ *   - the full-width pill that restated "double or nothing, once per game"
+ *     every single round is now a 🔥 chip in the action bar;
+ *   - the chip is ABSENT once the bet is spent (a disabled button
+ *     explaining a thing you can no longer do is pure noise — §2.6);
+ *   - the arm/disarm toasts are gone: mechanic rules never live in a 2.5 s
+ *     toast (§5). The rule lives in the sheet; the armed state lives on
+ *     the primary button's own label. */
+function openSuperSureSheet() {
   if (!room || myResult() || !superSureAvailable(room.teams, myTeam)) return;
-  superSureArmed = !superSureArmed;
-  renderSuperSureToggle();
-  updateLockNowHint(); // the pill flips to the bet's doubled stakes
-  toast(superSureArmed
-    ? "SUPER SURE armed: closest pin wins ×2 — anyone closer and you get 0"
-    : "SUPER SURE disarmed — bet saved for later");
+  track("super_sure_sheet_opened", { mode: "h2h" });
+  showHintCard({
+    title: SUPER_SURE_SHEET.title,
+    lines: SUPER_SURE_SHEET.lines,
+    actions: superSureArmed
+      ? [{ label: "Disarm", primary: false, onClick: () => setSuperSure(false) },
+         { label: "Keep it armed", onClick: () => setSuperSure(true) }]
+      : [{ label: SUPER_SURE_SHEET.cancelLabel, primary: false },
+         { label: SUPER_SURE_SHEET.armLabel, onClick: () => setSuperSure(true) }],
+  });
 }
 
-function renderSuperSureToggle() {
+function setSuperSure(armed) {
+  if (!room || myResult() || !superSureAvailable(room.teams, myTeam)) return;
+  superSureArmed = !!armed;
+  renderSuperSureChip();
+  updateLockButton(); // the button flips to the bet's real stakes
+}
+
+function renderSuperSureChip() {
   const btn = $("btnSuperSure");
-  const available = room && superSureAvailable(room.teams, myTeam);
-  btn.disabled = !available;
-  btn.classList.toggle("armed", !!available && superSureArmed);
-  if (!available) {
-    btn.textContent = "SUPER SURE — spent";
-  } else if (superSureArmed) {
-    btn.textContent = "🔥 SUPER SURE ARMED — ×2 or 0";
-  } else {
-    btn.textContent = "🔥 SUPER SURE · double or nothing · once per game";
-  }
+  const available = !!room && superSureAvailable(room.teams, myTeam);
+  btn.classList.toggle("hidden", !available); // spent = gone, not disabled
+  btn.classList.toggle("armed", available && superSureArmed);
+  btn.setAttribute("aria-pressed", String(available && superSureArmed));
 }
 
 function backToStreet() {
@@ -1095,7 +1180,7 @@ function lockIn(auto = false) {
   }
   if (auto && !guess) {
     toast(betting
-      ? "Time! SUPER SURE with no pin — the bet is burned."
+      ? "Time! No pin — SUPER SURE burned."
       : "Time! No pin — no points this round.");
   } else if (auto) {
     toast("Time! Your pin was locked in.");
@@ -1180,7 +1265,7 @@ function stopTick() {
 
 function tick() {
   if (!room || room.phase !== "roundActive" || !room.round) return;
-  updateLockNowHint(); // the speed bonus decays in real time
+  updateLockButton(); // the speed bonus decays in real time
   const endsAt = room.round.endsAt;
   const timerEl = $("pHudTimer");
   const mapTimerEl = $("pGuessTimer"); // timer stays visible on the map too
@@ -1295,64 +1380,33 @@ function renderReveal() {
   // card. Idempotent, so the re-renders this function gets are harmless.
   myBest = foldBestMoment(
     myBest, { me: mine }, round.truth && round.truth.name);
-  if (mine && mine.guess) {
-    $("pRevealDistance").textContent = formatDistance(mine.distanceKm);
-    $("pRevealPoints").textContent = `+${adjustedPoints(mine).toLocaleString()}`;
-  } else {
-    $("pRevealDistance").textContent = "no pin";
-    // A burned bet is not a plain forfeit: "0" (you bet it), not "+0".
-    $("pRevealPoints").textContent = mine && mine.superSure ? "0" : "+0";
-  }
-  // SUPER SURE verdict line under the points card (injected — HTML
-  // untouched). Only the bettor's own card carries it; the round list
-  // below shows everyone's.
-  let ssEl = $("pRevealSuperSure");
-  if (!ssEl) {
-    ssEl = document.createElement("div");
-    ssEl.id = "pRevealSuperSure";
-    ssEl.className = "ss-note";
-    $("pRevealPoints").closest(".stat-card").appendChild(ssEl);
-  }
-  if (mine && mine.superSure) {
-    ssEl.textContent = `🔥 ${superSureLabel(mine)}`;
-    ssEl.classList.toggle("lost", mine.superSureOutcome !== "won");
-  } else {
-    ssEl.textContent = "";
-  }
-  // Speed line under the points card (injected — HTML untouched).
-  let speedEl = $("pRevealSpeed");
-  if (!speedEl) {
-    speedEl = document.createElement("div");
-    speedEl.id = "pRevealSpeed";
-    speedEl.className = "time-note";
-    $("pRevealPoints").closest(".stat-card").appendChild(speedEl);
-  }
-  if (mine && mine.guess && typeof mine.elapsedMs === "number") {
-    speedEl.textContent =
-      `${mine.distancePoints.toLocaleString()} distance` +
-      ` + ⚡${mine.timeBonus.toLocaleString()} speed` +
-      ` · answered in ${formatSeconds(mine.elapsedMs)}`;
-    speedEl.classList.toggle("zero", !mine.timeBonus);
-  } else {
-    speedEl.textContent = "";
-  }
 
-  // This round, closest first (reveal order reversed).
-  const list = $("pRoundResults");
-  list.innerHTML = "";
-  revealOrder(round).slice().reverse().forEach((r, i) => {
+  /* §6.4: ONE result line replaces the Location/Distance/Points cards and
+   * the two sub-lines that used to be injected under them (speed breakdown,
+   * SUPER SURE verdict). The SUPER SURE ceremony is untouched — the verdict
+   * rides here and on the map halo, exactly as before. */
+  const resultEl = $("pRevealResult");
+  resultEl.textContent = revealResultLine(mine);
+  resultEl.classList.toggle(
+    "lost", !!(mine && mine.superSure && mine.superSureOutcome !== "won"));
+
+  /* §6.4: ONE board replaces "This round" + "Totals". The round delta sits
+   * next to the running total instead of the eye having to join two lists,
+   * and the crown still marks the round's closest pin. */
+  const board = $("pRevealBoard");
+  board.innerHTML = "";
+  for (const row of revealBoardRows(room.teams, round.results)) {
     const li = document.createElement("li");
-    if (i === 0 && r.guess) li.classList.add("active");
+    if (row.crown) li.classList.add("active");
     const name = document.createElement("span");
-    name.textContent = (i === 0 && r.guess ? "👑 " : "") + room.teams[r.id].name;
-    name.style.color = teamHex(room.teams, r.id);
+    name.textContent = (row.crown ? "👑 " : "") + row.name +
+      (row.id === myTeam ? " (you)" : "");
+    name.style.color = teamHex(room.teams, row.id);
     const val = document.createElement("span");
-    val.textContent = resultRowText(r);
+    val.textContent = boardRowText(row);
     li.append(name, val);
-    list.appendChild(li);
-  });
-
-  renderTotalsList($("pRevealTotals"));
+    board.appendChild(li);
+  }
 
   const host = isHost();
   $("btnPNext").classList.toggle("hidden", !host);
@@ -1535,7 +1589,12 @@ function renderGameOver() {
   const iWon = winner === myTeam;
   $("pGameOverTitle").textContent = iWon ? "🏆 You won!" : "Game over!";
   renderTotalsList($("pFinalTotals"));
+  // §2.9 / §4.1: exactly one primary per state. The winner's primary is the
+  // next game; for everyone else Share becomes the primary, so the bar is
+  // never two filled peers and never a lone unstyled button. Leave is the
+  // third action and has moved to a ghost link in the content above.
   $("btnPNextGame").classList.toggle("hidden", !iWon);
+  $("btnPShareResult").classList.toggle("btn-primary", !iWon);
   $("pHandoffNote").textContent = iWon
     ? "Winner runs the table: your phone is the host now. Set up the next game and everyone follows automatically."
     : `${winnerName} won — their phone is the host now. Stay here; you'll follow into their next game automatically.`;
@@ -1557,13 +1616,14 @@ function shareMyResult() {
   );
 }
 
+// The winner's handoff reuses the ONE settings panel (§2.3): the four
+// segment groups used to exist a third time on this page just for this.
 function openNextGameSetup() {
-  // Carry the current settings into the setup segs.
   for (const [seg, val] of [
-    ["nSegRounds", String(room.settings.roundCount)],
-    ["nSegSeconds", String(room.settings.roundSeconds)],
-    ["nSegMove", room.settings.moveAllowed ? "1" : "0"],
-    ["nSegDifficulty", normalizeDifficulty(room.settings.difficulty)],
+    ["pSegRounds", String(room.settings.roundCount)],
+    ["pSegSeconds", String(room.settings.roundSeconds)],
+    ["pSegMove", room.settings.moveAllowed ? "1" : "0"],
+    ["pSegDifficulty", normalizeDifficulty(room.settings.difficulty)],
   ]) {
     const el = $(seg);
     el.dataset.value = val;
@@ -1571,17 +1631,17 @@ function openNextGameSetup() {
       b.classList.toggle("sel", b.dataset.v === val);
     }
   }
-  showScreen("p-next");
+  openSetup("next");
 }
 
 async function createNextGame() {
   if (!isHost() || !room || room.phase !== "gameOver") return;
-  $("btnNextCreate").disabled = true;
+  $("btnOpenRoom").disabled = true;
   try {
     const oldCode = roomCode;
     const code = await pickFreeRoomCode();
     const teams = carryTeams(room.teams);
-    const state = initialH2hRoomState(collectSettings("n"), teams, myTeam);
+    const state = initialH2hRoomState(collectSettings(), teams, myTeam);
     switchingRooms = true; // stop reacting to the old room mid-handoff
     writeRoom(code, state).catch((e) =>
       console.warn("Firebase write failed:", e));
@@ -1607,7 +1667,7 @@ async function createNextGame() {
     switchingRooms = false;
     toast("Could not create the next game");
   } finally {
-    $("btnNextCreate").disabled = false;
+    $("btnOpenRoom").disabled = false;
   }
 }
 
@@ -1654,12 +1714,14 @@ wireSeg("pSegRounds");
 wireSeg("pSegSeconds");
 wireSeg("pSegMove");
 wireSeg("pSegDifficulty");
-wireSeg("nSegRounds");
-wireSeg("nSegSeconds");
-wireSeg("nSegMove");
-wireSeg("nSegDifficulty");
 
-$("btnCreateRoom").addEventListener("click", createRoom);
+$("btnStartNew").addEventListener("click", startNewGame);
+$("btnSetupBack").addEventListener("click", showHome);
+// One primary on the settings panel, two possible meanings: start this
+// device's party, or spawn the winner's next game.
+$("btnOpenRoom").addEventListener("click", () => {
+  if (setupMode === "next") createNextGame(); else createRoom();
+});
 $("btnJoin").addEventListener("click", joinRoom);
 $("btnPShare").addEventListener("click", shareInvite);
 $("btnPTvLink").addEventListener("click", () => {
@@ -1670,7 +1732,7 @@ $("btnPLeave").addEventListener("click", leaveOrAbandon);
 $("btnPStart").addEventListener("click", startRound);
 $("btnOpenMap").addEventListener("click", openGuessMapScreen);
 $("btnBackToStreet").addEventListener("click", backToStreet);
-$("btnSuperSure").addEventListener("click", toggleSuperSure);
+$("btnSuperSure").addEventListener("click", openSuperSureSheet);
 $("btnLockIn").addEventListener("click", () => lockIn(false));
 $("btnCloseRound").addEventListener("click", sweepAndReveal);
 $("btnPNext").addEventListener("click", nextOrFinish);
@@ -1678,7 +1740,6 @@ $("btnPHold").addEventListener("click", holdAdvance);
 $("btnPHome").addEventListener("click", () => leaveToHome());
 $("btnPShareResult").addEventListener("click", shareMyResult);
 $("btnPNextGame").addEventListener("click", openNextGameSetup);
-$("btnNextCreate").addEventListener("click", createNextGame);
 
 $("joinCode").addEventListener("input", () => {
   $("joinCode").value = $("joinCode").value.toUpperCase()
@@ -1695,14 +1756,21 @@ onConnectionChange((isConnected) => {
 // arrives with ?create=1 instead — a party starter, not a joiner.
 const urlParams = new URLSearchParams(location.search);
 const urlCode = (urlParams.get("room") || "").toUpperCase();
+initSound("player"); // S4: muted by default on phones; 🔇 toggle persists
 if (isValidRoomCode(urlCode)) {
+  // A joiner: panel 1 is the only panel this arrival ever sees (§6.2).
+  showHome();
   $("joinCode").value = urlCode;
   $("myTeamName").focus();
 } else if (urlParams.get("create") === "1") {
+  // The landing's chooser already committed this visitor to starting a
+  // party, so the deliberate action happened one page ago — go straight to
+  // the settings panel (which carries the team-name field with it) rather
+  // than charging the create funnel an extra tap.
+  openSetup("new");
   $("myTeamName").focus();
+} else {
+  showHome();
 }
-
-initSound("player"); // S4: muted by default on phones; 🔇 toggle persists
-showScreen("p-home");
 janitor();
 renderResumeBanner();

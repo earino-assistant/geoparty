@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <!-- P2.1: pinch/browser zoom restored. The panorama and guess map own
+       their own gestures via `touch-action` in style.css. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GeoParty — One phone + the TV</title>
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
   <link rel="icon" href="assets/favicon-48.png" type="image/png" sizes="48x48" />
@@ -43,38 +45,20 @@
       </div>
 
       <div class="settings-group">
-        <div class="label">Rounds</div>
-        <div class="seg" id="segRounds" data-value="5">
-          <button data-v="3">3</button>
-          <button data-v="5" class="sel">5</button>
-          <button data-v="10">10</button>
-        </div>
-      </div>
-
-      <div class="settings-group">
-        <div class="label">Seconds per round</div>
-        <div class="seg" id="segSeconds" data-value="120">
-          <button data-v="60">60</button>
-          <button data-v="120" class="sel">120</button>
-          <button data-v="180">180</button>
-          <button data-v="0">No limit</button>
-        </div>
-      </div>
-
-      <div class="settings-group">
-        <div class="label">Movement</div>
-        <div class="seg" id="segMove" data-value="1">
-          <button data-v="1" class="sel">Allowed</button>
-          <button data-v="0">No moving</button>
-        </div>
-      </div>
-
-      <div class="settings-group">
         <div class="label">Difficulty</div>
         <div class="seg" id="segDifficulty" data-value="world">
           <button data-v="casual">Casual</button>
           <button data-v="world" class="sel">World tour</button>
           <button data-v="expert">Expert</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="label">Rounds</div>
+        <div class="seg" id="segRounds" data-value="5">
+          <button data-v="3">3</button>
+          <button data-v="5" class="sel">5</button>
+          <button data-v="10">10</button>
         </div>
       </div>
 
@@ -89,29 +73,63 @@
         <div class="team-names" id="teamNames" data-ph-mask style="margin-top: 10px"></div>
       </div>
 
-      <h2>All-time top 10</h2>
-      <ul id="leaderboardList" data-ph-mask class="leaderboard-list"></ul>
+      <!-- Review §2.2: the two settings whose defaults are already right
+           (120 s, movement on) stop spending eight tap targets on the
+           default path. Nothing is removed — one tap reveals them. -->
+      <details class="more-options">
+        <summary>More options</summary>
+        <div class="settings-group">
+          <div class="label">Seconds per round</div>
+          <div class="seg" id="segSeconds" data-value="120">
+            <button data-v="60">60</button>
+            <button data-v="120" class="sel">120</button>
+            <button data-v="180">180</button>
+            <button data-v="0">No limit</button>
+          </div>
+        </div>
+        <div class="settings-group">
+          <div class="label">Movement</div>
+          <div class="seg" id="segMove" data-value="1">
+            <button data-v="1" class="sel">Allowed</button>
+            <button data-v="0">No moving</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- Demoted (§2.2): nobody needs game history while configuring a
+           party. Games now auto-save at game over, so this is pure recall. -->
+      <details class="past-games">
+        <summary>Past games</summary>
+        <ul id="leaderboardList" data-ph-mask class="leaderboard-list"></ul>
+      </details>
     </div>
     <div class="action-bar">
       <button id="btnNewGame" class="btn-primary">New Game</button>
     </div>
   </section>
 
-  <!-- 2. Lobby: room code, QR, waiting for screen -->
+  <!-- 2. Lobby (review §6.3). Three ways to attach a TV used to be
+       explained simultaneously — QR + caption + send button + typing line —
+       followed by a note saying you don't need one. Now: the code, one
+       status line, and ONE collapsed module for the optional accessory
+       (the same `.tv-add` details pattern the h2h lobby already proved). -->
   <section id="h-lobby" class="phase-screen hidden">
     <div class="host-wrap">
-      <h1>Room</h1>
+      <p class="eyebrow">Room code</p>
       <div id="roomCodeHuge" class="room-code-huge" data-ph-mask>······</div>
-      <div class="qr-box"><canvas id="qrCanvas"></canvas></div>
-      <p class="tv-add-hint">Scan with a spare phone or tablet, then cast or
-        AirPlay it to the TV.</p>
-      <div class="share-row"><button id="btnTvLink">📤 Send the TV link</button></div>
-      <p id="tvType" data-ph-mask class="tv-add-alt"></p>
       <!-- S7: a screen is optional — the note names the mode, never a gate. -->
-      <div id="waitingNote" class="waiting-screen-note">No TV? No problem — the reveal shows right here. Add a TV anytime.</div>
+      <div id="waitingNote" class="waiting-screen-note">No TV? No problem — the reveal shows right here.</div>
+      <details id="hTvAdd" class="tv-add">
+        <summary>📺 Put it on a TV</summary>
+        <div class="qr-box qr-small"><canvas id="qrCanvas"></canvas></div>
+        <p class="tv-add-hint">Scan with any spare phone or tablet, then cast
+          it to the TV.</p>
+        <div class="share-row"><button id="btnTvLink">📤 Send the TV link</button></div>
+        <p id="tvType" data-ph-mask class="tv-add-alt"></p>
+      </details>
     </div>
     <div class="action-bar">
-      <button id="btnAbandon">Abandon</button>
+      <button id="btnAbandon" class="btn-ghost">Abandon</button>
       <button id="btnStartRound" class="btn-primary">Start Round</button>
     </div>
   </section>
@@ -133,40 +151,31 @@
   <section id="h-guess" class="phase-screen hidden">
     <div id="guessMap" class="map-full"></div>
     <div class="guess-hint">Tap the map to drop your pin</div>
-    <!-- M3: live "if you locked in now" points while aiming -->
-    <div id="lockNowHint" class="lock-now-hint"></div>
-    <!-- SUPER SURE: the active team's once-per-game double-or-nothing -->
-    <button id="btnSuperSure" class="super-sure-toggle">🔥 SUPER SURE</button>
+    <!-- §6.1: the estimate rides on the primary button's label; SUPER SURE
+         is a 🔥 chip docked to the bar (unspent only) opening one sheet. -->
     <div class="action-bar">
+      <button id="btnSuperSure" class="ss-chip hidden" type="button"
+              aria-label="SUPER SURE — double or nothing">🔥</button>
       <button id="btnConfirmGuess" class="btn-primary" disabled>Confirm Guess</button>
     </div>
   </section>
 
-  <!-- 5. Reveal -->
+  <!-- 5. Reveal — the §6.4 shape, shared with the h2h phone: map, place
+       headline, one result line, one merged board. The couch showdown
+       round injects its per-team list in place of the result line. -->
   <section id="h-reveal" class="phase-screen hidden">
     <div class="host-wrap">
-      <h1 id="revealHeading">Round 1</h1>
+      <div id="revealHeading" class="reveal-round">Round 1</div>
       <!-- S7 couch without a TV: with no live screen, the host phone shows
            the big reveal itself — all pins, distances, the answer. -->
       <div id="hostRevealMap" class="p-reveal-map hidden"></div>
-      <div class="stat-card">
-        <div class="label">Location</div>
-        <div class="big place" id="revealPlace" data-ph-mask>—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Distance</div>
-        <div class="big" id="revealDistance">—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Points</div>
-        <div class="big" id="revealPoints" style="color: var(--accent)">—</div>
-      </div>
-      <h2>Totals</h2>
-      <ul id="revealTotals" data-ph-mask class="totals-list"></ul>
+      <div id="revealPlace" class="reveal-headline" data-ph-mask>—</div>
+      <div id="revealResult" class="reveal-result">—</div>
+      <ul id="revealBoard" data-ph-mask class="totals-list reveal-board-list"></ul>
       <div id="hostAdvanceNote" class="waiting-screen-note advance-note"></div>
     </div>
     <div class="action-bar">
-      <button id="btnHoldAdvance" class="hidden">✋ Hold</button>
+      <button id="btnHoldAdvance" class="btn-ghost hidden">✋ Hold</button>
       <button id="btnNextRound" class="btn-primary">Next Round</button>
     </div>
   </section>
@@ -178,10 +187,12 @@
       <!-- S7: the crown, when this phone is the shared screen. -->
       <div id="hostCrown" data-ph-mask class="host-crown hidden"></div>
       <ul id="finalTotals" data-ph-mask class="totals-list"></ul>
+      <!-- §2.9: saving to a localStorage leaderboard is not a decision a
+           human should have to make — the game saves itself and says so. -->
+      <p id="hSavedNote" class="waiting-screen-note"></p>
     </div>
     <div class="action-bar">
       <button id="btnShareResult">📤 Share</button>
-      <button id="btnSaveLeaderboard">Save to leaderboard</button>
       <button id="btnNewGameOver" class="btn-primary">New Game</button>
     </div>
   </section>

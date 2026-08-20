@@ -10,7 +10,10 @@ which mode people pick, how many rounds get finished, how close and how fast
 guesses are — so we can make better product decisions.
 
 **Nothing is collected unless you explicitly accept the consent banner.**
-Until you tap "Sounds good", the PostHog script is not even loaded. If you
+Until you tap "Sounds good", the PostHog script is not even loaded. (The
+banner waits for a calm moment on the game pages — it never lands on top of
+a join form or a running round — but that is only about *when* you are
+asked. Nothing loads, fires or records before your accept either way.) If you
 decline, the only thing stored is your "no" (a `localStorage` flag on your
 device), and no analytics code ever runs.
 

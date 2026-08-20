@@ -27,6 +27,9 @@ import {
   defaultTeams,
   initialRoomState,
   standings,
+  revealResultLine,
+  revealBoardRows,
+  boardRowText,
 } from "../js/game.js";
 
 /* ---------------- haversine ---------------- */
@@ -316,4 +319,141 @@ test("initialRoomState: lobby, cursor zero, active team assigned", () => {
   assert.equal(state.round, null);
   assert.equal(state.activeTeam, "t1");
   assert.ok(typeof state.createdAt === "number");
+});
+
+/* ================================================================
+ * The de-cluttered phone reveal (design review §2.8 / §6.4)
+ * ================================================================ */
+
+test("revealResultLine: the whole personal result on one line", () => {
+  const line = revealResultLine({
+    guess: { lat: 1, lng: 2 }, distanceKm: 812, points: 3120,
+    distancePoints: 2980, timeBonus: 140, elapsedMs: 23_000,
+  });
+  assert.equal(line, "+3,120 pts · 812 km · ⚡+140 fast");
+});
+
+test("revealResultLine: no speed bonus, no bolt segment", () => {
+  const line = revealResultLine({
+    guess: { lat: 1, lng: 2 }, distanceKm: 4000, points: 350,
+    distancePoints: 350, timeBonus: 0, elapsedMs: 119_000,
+  });
+  assert.equal(line, "+350 pts · 4,000 km");
+  assert.ok(!line.includes("⚡"));
+});
+
+test("revealResultLine: a forfeit reads as a forfeit", () => {
+  assert.equal(revealResultLine({ guess: null, points: 0, forfeited: true }),
+    "+0 pts · no pin");
+  assert.equal(revealResultLine(null), "+0 pts · no pin");
+});
+
+test("revealResultLine: a won bet shows the doubled total and its verdict", () => {
+  const line = revealResultLine({
+    guess: { lat: 1, lng: 2 }, distanceKm: 12.4, points: 4800,
+    distancePoints: 4300, timeBonus: 500,
+    superSure: true, superSureOutcome: "won",
+  });
+  assert.ok(line.startsWith("+9,600 pts"), line); // adjustedPoints × 2
+  assert.ok(line.endsWith("🔥 SUPER SURE ×2"), line);
+});
+
+test("revealResultLine: a lost bet scores zero and says so", () => {
+  const line = revealResultLine({
+    guess: { lat: 1, lng: 2 }, distanceKm: 900, points: 2400,
+    distancePoints: 2400, timeBonus: 0,
+    superSure: true, superSureOutcome: "lost",
+  });
+  assert.ok(line.startsWith("+0 pts"), line);
+  assert.ok(line.includes("🔥 SUPER SURE — 0"), line);
+});
+
+test("revealResultLine: a burned bet is not a plain forfeit", () => {
+  const burned = revealResultLine({
+    guess: null, points: 0, superSure: true, superSureOutcome: "burned",
+  });
+  assert.ok(burned.includes("SUPER SURE"), burned);
+  assert.notEqual(burned, revealResultLine({ guess: null, points: 0 }));
+});
+
+test("revealResultLine: never leaks a coordinate or a place name", () => {
+  const line = revealResultLine({
+    guess: { lat: 48.85, lng: 2.35 }, distanceKm: 5, points: 4900,
+    distancePoints: 4900, timeBonus: 0, name: "Paris, France",
+  });
+  assert.ok(!line.includes("48.85") && !line.includes("2.35"), line);
+  assert.ok(!/Paris/.test(line), line);
+});
+
+test("revealBoardRows: one board replaces 'This round' + 'Totals'", () => {
+  const teams = {
+    t1: { name: "Atlas Cats", total: 9480 },
+    t2: { name: "Pin Pals", total: 8910 },
+  };
+  const results = {
+    t1: { guess: {}, distanceKm: 812, points: 3120 },
+    t2: { guess: {}, distanceKm: 1500, points: 1870 },
+  };
+  const rows = revealBoardRows(teams, results);
+  assert.deepEqual(rows.map((r) => r.id), ["t1", "t2"]); // standings order
+  assert.equal(boardRowText(rows[0]), "+3,120 → 9,480");
+  assert.equal(boardRowText(rows[1]), "+1,870 → 8,910");
+});
+
+test("revealBoardRows: the crown marks the round's CLOSEST pin", () => {
+  // …which is not necessarily the leader — the merged board must keep the
+  // one signal the old "This round" list existed to show.
+  const teams = {
+    t1: { name: "Leader", total: 9000 },
+    t2: { name: "Underdog", total: 4000 },
+  };
+  const results = {
+    t1: { guess: {}, distanceKm: 900, points: 1200 },
+    t2: { guess: {}, distanceKm: 12, points: 4800 },
+  };
+  const rows = revealBoardRows(teams, results);
+  assert.equal(rows[0].id, "t1");        // standings order unchanged
+  assert.equal(rows[0].crown, false);
+  assert.equal(rows[1].crown, true);     // the closest pin wears the crown
+});
+
+test("revealBoardRows: a forfeit never wins the crown", () => {
+  const teams = { t1: { name: "A", total: 100 }, t2: { name: "B", total: 50 } };
+  const rows = revealBoardRows(teams, {
+    t1: { guess: null, points: 0, distanceKm: null },
+    t2: { guess: {}, distanceKm: 4000, points: 50 },
+  });
+  assert.equal(rows.find((r) => r.id === "t1").crown, false);
+  assert.equal(rows.find((r) => r.id === "t2").crown, true);
+});
+
+test("revealBoardRows: couch solo rounds — teams with no result carry +0", () => {
+  const teams = {
+    t1: { name: "A", total: 3200 }, t2: { name: "B", total: 1000 },
+  };
+  const rows = revealBoardRows(teams, { t1: { guess: {}, distanceKm: 8, points: 3200 } });
+  assert.equal(boardRowText(rows.find((r) => r.id === "t2")), "+0 → 1,000");
+});
+
+test("revealBoardRows: the delta is the SETTLED score, not the raw one", () => {
+  const teams = { t1: { name: "A", total: 6000 } };
+  const won = revealBoardRows(teams, {
+    t1: { guess: {}, distanceKm: 5, points: 3000,
+          superSure: true, superSureOutcome: "won" },
+  });
+  assert.equal(won[0].delta, 6000);
+  const lost = revealBoardRows(teams, {
+    t1: { guess: {}, distanceKm: 5, points: 3000,
+          superSure: true, superSureOutcome: "lost" },
+  });
+  assert.equal(lost[0].delta, 0);
+});
+
+test("revealBoardRows: an empty round is a board of zero-deltas", () => {
+  const teams = { t1: { name: "A", total: 0 }, t2: { name: "B", total: 0 } };
+  for (const results of [null, undefined, {}]) {
+    const rows = revealBoardRows(teams, results);
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every((r) => r.delta === 0 && r.crown === false));
+  }
 });

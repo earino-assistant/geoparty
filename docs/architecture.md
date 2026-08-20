@@ -14,7 +14,13 @@ js/h2h.js          Pure head-to-head logic: slots, submissions, winner     ← t
 js/supersure.js    Pure SUPER SURE bet logic: resolution + settlement      ← tested
 js/frontdoor.js    Pure front-door logic: join routing, chooser targets    ← tested
 js/tvlink.js       Pure "Add a TV" logic: screen links, typeable address   ← tested
-js/hints.js        Pure education logic: one-shot flags, lock-now estimate ← tested
+js/hints.js        Pure education logic: one-shot flags, guess-map card,
+                   SUPER SURE sheet copy, lock-now estimate + the primary
+                   button's label composition                              ← tested
+js/chrome.js       Pure UI-chrome rules (docs/ui-ux-design-review.md §4.1,
+                   §6.5): is this screen calm or mid-play (utility corners
+                   hide during play), and may the consent banner ask on
+                   this surface right now                                  ← tested
 js/autoadvance.js  Pure S6 soft auto-advance: countdown, hold, firing      ← tested
 js/couchscreen.js  Pure S7 couch-without-a-TV: screen-liveness fold,
                    ungated lobby, phone-as-screen reveal pins, crown        ← tested
@@ -32,7 +38,10 @@ js/imagery.js      Pure field observability: imagery error taxonomy,
 js/qr.js           Self-contained QR encoder (join/screen URLs)            ← tested
 js/firebase.js     Firebase init + thin typed helpers (the only SDK import)
 js/landing-ui.js   The one front door: hero pano, chooser, code routing
-js/hints-ui.js     One-shot hint overlay renderer (shared by both phones)
+js/hints-ui.js     One-shot hint / bottom-sheet renderer, one sheet at a
+                   time (shared by both phones and the Daily)
+js/chrome-ui.js    Stamps body[data-play] from each page's showScreen() and
+                   notifies consent.js — the browser half of chrome.js
 js/fx-ui.js        Web Audio synth + gesture unlock, 🔊/🔇 toggle, haptics,
                    stamp overlay, reduced-motion probe (all game pages)
 js/share-ui.js     Web Share / clipboard glue for the result card (S1)

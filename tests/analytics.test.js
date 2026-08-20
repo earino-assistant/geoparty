@@ -321,6 +321,32 @@ test("sanitizeEvent: super_sure_resolved keeps its aggregates, strips the rest",
   });
 });
 
+test("sanitizeEvent: super_sure_sheet_opened carries the mode and nothing else", () => {
+  // The de-clutter pass (review §6.1) replaced the always-on SUPER SURE
+  // pill with a 🔥 chip + sheet; this event is the pair that tells us
+  // whether a chip you must tap is still discovered as often as a pill you
+  // could not miss (against super_sure_resolved's deployment rate).
+  const out = sanitizeEvent("super_sure_sheet_opened", {
+    mode: "h2h",
+    // Nothing else may ride along, including the aimed pin's distance —
+    // the sheet opens while the player is still aiming.
+    room: "KWPFRT", team_id: "t2", team_name: "The Atlas Cats",
+    distance_km: 812, lat: 48.85, lng: 2.35, guess: { lat: 1, lng: 2 },
+    deviceId: "d-1", pin: { lat: 1, lng: 2 },
+  });
+  assert.deepEqual(out, {
+    event: "super_sure_sheet_opened",
+    props: { mode: "h2h" },
+  });
+});
+
+test("sanitizeEvent: super_sure_sheet_opened drops a non-string mode", () => {
+  for (const bad of [1, null, undefined, true, { mode: "h2h" }]) {
+    const out = sanitizeEvent("super_sure_sheet_opened", { mode: bad });
+    assert.deepEqual(out.props, {});
+  }
+});
+
 test("sanitizeEvent: party_choice keeps only the chooser value", () => {
   const out = sanitizeEvent("party_choice", {
     choice: "phones",

@@ -77,19 +77,32 @@ export const HINT_CARDS = Object.freeze({
   },
 });
 
-// First guess map (id "guessmap"): the scoring one-liner always; the
-// rival-pins warning only where rivals can actually watch (h2h); the
-// SUPER SURE line only while the bet is still unspent.
-export function guessMapHintLines(mode, superSureAvailable) {
-  const lines = ["🎯 Closer = more points. Fast = bonus."];
+// First guess map (id "guessmap"): the scoring one-liner always, plus the
+// rival-pins warning where rivals can actually watch (h2h). The SUPER SURE
+// line is deliberately absent — after the de-clutter pass the bet is
+// explained in exactly one place, its own sheet (SUPER_SURE_SHEET below;
+// review §5, "each rule of the game is explained in exactly one place").
+export function guessMapHintLines(mode) {
+  const lines = ["Closer = more points. Faster = bonus."];
   if (mode === "h2h") {
-    lines.push("👀 Rivals can see your pin move. Bluff away.");
-  }
-  if (superSureAvailable) {
-    lines.push("🔥 Feeling certain? SUPER SURE: double or nothing, once per game.");
+    lines.push("Rivals see your pin move — bluff away.");
   }
   return lines;
 }
+
+/* The one place SUPER SURE is explained (review §6.1). Opened from the 🔥
+ * chip docked to the guess map's action bar — never from a pill, a button
+ * label, a toast, or the guess-map hint card, all four of which used to
+ * carry a copy of the rule at the same time. */
+export const SUPER_SURE_SHEET = Object.freeze({
+  title: "SUPER SURE",
+  lines: Object.freeze([
+    "Double or nothing, once per game. Closest pin this round: your " +
+    "points ×2. Anyone closer: you score 0.",
+  ]),
+  armLabel: "Arm the bet",
+  cancelLabel: "Not now",
+});
 
 /* ================================================================
  * "If you locked in now" (M3): the live point hint while aiming.
@@ -104,13 +117,30 @@ export function lockNowEstimate(distanceKm, elapsedMs, roundSeconds) {
   return { distancePoints, bonus, points: distancePoints + bonus };
 }
 
-// Pill label. With SUPER SURE armed the pill shows the bet's real stakes —
-// double the round total, or zero — which is what makes the bet legible at
-// the moment of decision (§1.4).
-export function lockNowLabel(est, superSureArmed) {
+/* The primary button's label (review §6.1). The estimate used to float on
+ * its own pill above a SECOND pill for SUPER SURE; both pills are gone and
+ * the number now rides on the button — exactly where the decision is made,
+ * one element instead of three. With the bet armed the label shows its real
+ * stakes (×2 or nothing), which is what makes it legible at the moment of
+ * decision (§1.4). Each surface passes its own verbs. */
+export const LOCK_LABELS = Object.freeze({
+  h2h: Object.freeze({ idle: "Lock It In", armed: "Lock In" }),
+  couch: Object.freeze({ idle: "Confirm Guess", armed: "Confirm" }),
+  daily: Object.freeze({ idle: "Lock It In", armed: "Lock In" }),
+});
+
+/* Returns the button's parts, not a flat string: at 360 px the guess bar
+ * carries a 🔥 chip, a ghost secondary AND this primary, and §6.1 calls the
+ * estimate a "sublabel" — so the verb and the number stack, and the button
+ * only needs to be as wide as its widest LINE. `text` is §6.1's verbatim
+ * one-line string, used as the accessible label. */
+export function lockButtonLabel(labels, est, superSureArmed) {
+  const l = labels || LOCK_LABELS.h2h;
   if (superSureArmed) {
-    return `🔥 Lock in now ≈ +${(est.points * 2).toLocaleString()} — or 0`;
+    const main = `🔥 ${l.armed} ×2`;
+    return { main, sub: "or 0", text: `${main} — or 0` };
   }
-  const bolt = est.bonus > 0 ? ` (⚡+${est.bonus.toLocaleString()})` : "";
-  return `Lock in now ≈ +${est.points.toLocaleString()}${bolt}`;
+  if (!est) return { main: l.idle, sub: "", text: l.idle };
+  const sub = `≈ +${est.points.toLocaleString()}`;
+  return { main: l.idle, sub, text: `${l.idle} · ${sub}` };
 }

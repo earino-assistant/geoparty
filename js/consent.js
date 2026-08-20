@@ -13,6 +13,8 @@ import {
   CONSENT_ACCEPTED,
   POSTHOG_SCRIPT_URL,
 } from "./analytics.js";
+import { mayPromptConsent } from "./chrome.js";
+import { currentScreen, onScreenChange } from "./chrome-ui.js";
 
 // §9.3 remote kill switch: recording is linked to this PostHog feature flag
 // project-side; the client honours it too, so flipping it off stops replay
@@ -162,14 +164,22 @@ function ensureBanner() {
   banner.setAttribute("role", "dialog");
   banner.setAttribute("aria-label", "Analytics consent");
 
+  // Copy per review §6.5, merged with the disclosure the field-observability
+  // work requires. §6.5's draft names only "scores, distances, and modes",
+  // but this build also records an anonymised session replay and technical
+  // diagnostics, and consent must disclose that BEFORE the accept. So §6.5's
+  // headline and tightening are adopted and the replay + diagnostics clause
+  // is kept in substance. The timing and the layout moved; the promise did
+  // not (see PRIVACY.md).
   const text = document.createElement("p");
+  const lead = document.createElement("strong");
+  lead.textContent = "\u{1F30D} Share anonymous play stats?";
   text.append(
-    "\u{1F30D} Help make GeoParty better? We’d like to collect ",
-    "anonymous play stats — game mode, rounds, scores, distances — ",
-    "plus technical diagnostics and an anonymised session replay of the ",
-    "screens you see, so we can fix broken imagery. Never your map guesses, ",
-    "names, anything you type, or the street view itself. ",
-    "EU-hosted, no ads, change your mind anytime.",
+    lead,
+    " Scores, distances and modes, plus technical diagnostics and an ",
+    "anonymised replay of the screens you see, so we can fix broken ",
+    "imagery. Never your guesses, your names, anything you type, or the ",
+    "street view itself. EU-hosted, change anytime.",
   );
   const status = document.createElement("span");
   status.className = "consent-status";
@@ -263,10 +273,35 @@ function ensureGear() {
   return gear;
 }
 
-// Boot: first-timers get the banner; returning visitors get their prior
-// choice honored (init() only loads PostHog if they had accepted).
+/* Boot.
+ *
+ * Returning visitors get their prior choice honored immediately (init()
+ * only loads PostHog if they had accepted) — unchanged.
+ *
+ * First-timers still get the banner, but WHEN is now a question (review
+ * §6.5). On a first-visit `player.html?room=CODE` the banner used to sit
+ * over the join form at z3000: the very first GeoParty experience was a
+ * cookie dialog. Nothing loads or fires before an explicit accept either
+ * way, so the ASK can wait for the first calm state without weakening the
+ * gate by one pixel. The landing and the Daily intro stay first-contact
+ * surfaces and ask right away; the game pages wait for a lobby, a locked
+ * screen or a reveal. chrome.js owns the predicate (pure, tested) and
+ * chrome-ui.js reports the screen changes.
+ *
+ * A player who never reaches a calm state is simply never asked — the
+ * privacy-safe outcome by construction: no consent means no capture. */
 if (getConsent(window.localStorage) === null) {
-  openBanner();
+  const page = surfaceName();
+  if (mayPromptConsent(page, currentScreen())) {
+    openBanner();
+  } else {
+    const stopWatching = onScreenChange((screenId) => {
+      if (getConsent(window.localStorage) !== null) { stopWatching(); return; }
+      if (!mayPromptConsent(page, screenId)) return;
+      stopWatching();
+      openBanner();
+    });
+  }
 } else {
   analytics.init().then(stampRelease);
   ensureGear();

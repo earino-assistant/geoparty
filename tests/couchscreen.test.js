@@ -95,14 +95,16 @@ test("lobbyReadiness: the note names the mode the couch is in", () => {
   const tv = lobbyReadiness(true, true);
   assert.ok(tv.ok);
   assert.ok(tv.note.includes("TV connected"));
+  // §6.3: the status line is a status line, not a sentence about readiness.
+  assert.ok(tv.note.length <= 20, tv.note);
   const offline = lobbyReadiness(false, false);
   assert.ok(!offline.ok);
   assert.ok(offline.note.includes("Offline"));
-  // No TV online: the phone-as-screen promise, and the TV stays on offer.
+  // No TV online: the phone-as-screen promise. The "Add a TV" offer moved
+  // out of this line and into the collapsed module beneath it (§6.3).
   const solo = lobbyReadiness(false, true);
   assert.ok(!solo.ok);
   assert.ok(solo.note.includes("No TV"));
-  assert.ok(solo.note.includes("Add a TV"));
 });
 
 /* ---------------- couchRevealPins ---------------- */
@@ -181,4 +183,14 @@ test("crownLine: a tie crowns the first-ranked team, like the TV podium", () => 
   };
   // standings() ranks stably over sorted team ids — t1 leads the tie.
   assert.equal(crownLine(teams), "👑 Wolves wins!");
+});
+
+test("lobbyReadiness: the no-TV line explains the mode once, and stops", () => {
+  // Review §6.3 / §5: notes about absent things get one line, once. The
+  // "Add a TV anytime" tail was a fourth simultaneous explanation of an
+  // optional accessory that the collapsed module below already offers.
+  const none = lobbyReadiness(false, true);
+  assert.equal(none.note, "No TV? No problem — the reveal shows right here.");
+  assert.ok(!/add a tv/i.test(none.note));
+  assert.equal(none.canStart, true); // never a gate (S7)
 });

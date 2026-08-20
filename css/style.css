@@ -86,7 +86,13 @@ button:disabled { opacity: 0.4; cursor: default; }
   opacity: 0;
   transition: opacity 0.3s;
   pointer-events: none;
-  white-space: nowrap;
+  /* Review §2.12 / §4.1: toasts wrap instead of clipping. `nowrap` used to
+     truncate long status lines on a 360 px phone — and mechanic rules used
+     to ride in them, which they no longer do (they live in sheets now). */
+  white-space: normal;
+  max-width: min(92vw, 420px);
+  text-align: center;
+  line-height: 1.35;
 }
 .toast.show { opacity: 1; }
 
@@ -340,13 +346,6 @@ button:disabled { opacity: 0.4; cursor: default; }
   color: var(--accent);
   margin: 12px 0 4px;
 }
-.screen-url {
-  text-align: center;
-  color: var(--muted);
-  word-break: break-all;
-  font-size: 0.9rem;
-  margin-bottom: 16px;
-}
 .qr-box {
   display: flex;
   justify-content: center;
@@ -499,36 +498,31 @@ button:disabled { opacity: 0.4; cursor: default; }
 .time-note:empty { display: none; }
 .reveal-num .time-note { margin-top: 0.6vh; font-size: 2.2vh; }
 
-/* SUPER SURE (M6): the once-per-game double-or-nothing bet. The toggle
-   floats above the action bar on the guess map — visible only to the
-   guessing player/team, never mirrored to any rival surface. */
-.super-sure-toggle {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(84px + env(safe-area-inset-bottom));
-  z-index: 600;
-  max-width: min(92vw, 440px);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 10px 16px;
-  font-size: 0.9rem;
-  font-weight: 700;
+/* SUPER SURE (M6), de-cluttered (review §2.6 / §6.1). It used to be a
+   full-width labelled pill on the floating context layer that restated the
+   whole rule every round — and stayed on screen, disabled, once spent. Now:
+   a 🔥 chip docked INTO the action bar, present only while the bet is
+   unspent, whose only job is to open the one sheet that explains it.
+   Absence communicates spent; the armed state shows on the primary button's
+   own label. Still local-only — nothing about the bet reaches any rival
+   surface before the reveal. */
+.ss-chip {
+  flex: 0 0 auto;
+  width: 58px;
+  max-width: 58px;
+  min-height: 44px;
+  padding: 0;
+  font-size: 1.3rem;
+  line-height: 1;
   background: rgba(17, 17, 17, 0.85);
   border: 1px solid var(--accent);
   color: var(--accent);
-  border-radius: 999px;
+  border-radius: 14px;
 }
-.super-sure-toggle.armed {
+.ss-chip.armed {
   background: var(--accent);
   color: #111;
   box-shadow: 0 0 18px rgba(255, 207, 63, 0.6);
-}
-.super-sure-toggle:disabled {
-  border-color: var(--panel-2);
-  color: var(--muted);
-  opacity: 0.8;
 }
 /* Verdict line injected under points cards/tiles at reveal. */
 .ss-note {
@@ -594,31 +588,55 @@ button:disabled { opacity: 0.4; cursor: default; }
   text-align: center;
 }
 
-/* ---------- "If you locked in now" pill (M3) ---------- */
+/* ---------- The context-pill layer, now down to one (review §4.1) -------
 
-/* Floats above the SUPER SURE toggle on the guess map; shows the points a
-   lock-in this instant would bank (doubled stakes while a bet is armed). */
-.lock-now-hint {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(134px + env(safe-area-inset-bottom));
-  z-index: 600;
-  background: rgba(17, 17, 17, 0.85);
-  border-radius: 999px;
-  padding: 6px 14px;
+   THREE things used to float here at z600 on the guess map: the "tap the
+   map" banner, the M3 "if you locked in now" estimate, and the M6 SUPER
+   SURE toggle. The estimate moved INTO the primary button
+   (hints.lockButtonLabel) and the bet moved into the action-bar chip and
+   its sheet, so the only occupant left is `.guess-hint` — and that one
+   leaves as soon as a pin exists. The rule for this layer is now literal:
+   at most ONE pill, and it is a slot, not a stack. */
+
+/* The guess map's primary carries a live number, so its digits must not
+   jitter as the speed bonus decays — and §6.1 calls that number a
+   "sublabel", so the verb and the estimate stack. That matters at 360 px:
+   the bar holds a 🔥 chip, a ghost secondary and this primary, and a
+   two-line button only has to be as wide as its widest LINE.
+
+   Budget at 360 px (308 px of bar after padding): chip 48 + gap 10 +
+   ghost "Back to street" ≈ 119 + gap 10 + primary ≥ 102 = 289 ≤ 308. */
+#btnLockIn, #btnConfirmGuess, #btnDLockIn {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+  padding: 9px 8px;
+  line-height: 1.15;
+}
+.btn-main { display: block; }
+.btn-sub {
+  display: block;
+  font-size: 0.8rem;
   font-weight: 700;
-  font-size: 0.9rem;
-  color: var(--fg);
-  pointer-events: none;
-  white-space: nowrap;
+  opacity: 0.72;
   font-variant-numeric: tabular-nums;
 }
-.lock-now-hint:empty { display: none; }
-.lock-now-hint.armed {
-  color: #111;
-  background: var(--accent);
-  box-shadow: 0 0 18px rgba(255, 207, 63, 0.6);
+.btn-sub:empty { display: none; }
+
+/* The chip and the ghost yield space to the primary, never the reverse
+   (§4.1: "primary always rightmost/widest"). */
+#p-guess .ss-chip, #h-guess .ss-chip { width: 48px; max-width: 48px; }
+#p-guess .btn-ghost, #d-guess .btn-ghost {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 0.9rem;
+  padding: 16px 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#p-guess .btn-primary, #d-guess .btn-primary, #h-guess .btn-primary {
+  flex: 1 1 auto;
+  flex-shrink: 0;
 }
 .totals-list { list-style: none; padding: 0; margin: 0; }
 .totals-list li {
@@ -922,17 +940,28 @@ button:disabled { opacity: 0.4; cursor: default; }
   font-weight: 800;
   color: #111;
 }
+/* §2.11: a TV is not a touch surface. The game-over "New game" control was
+   a full accent button plus an explanatory line; the real path is "the
+   screen follows the host", so both collapse into one quiet line with the
+   code-entry escape hatch demoted to a text button inside it. */
 .tv-newgame {
-  margin-top: 6vh;
-  font-size: 2.6vh;
-  padding: 1.4vh 2.5vw;
-  border-radius: 1.5vh;
+  margin-top: 4vh;
+  font-size: 1.9vh;
+  padding: 0.6vh 1.2vw;
+  border-radius: 1vh;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-weight: 600;
+  text-decoration: underline;
 }
-.tv-newgame-hint {
-  margin: 1.5vh 0 0;
+.tv-newgame:hover, .tv-newgame:focus-visible { color: var(--fg); }
+.tv-newgame-line {
+  margin: 4vh 0 0;
   font-size: 1.9vh;
   color: var(--muted);
 }
+.tv-newgame-line .tv-newgame { margin: 0 0 0 0.6vw; }
 
 .podium .slot:nth-child(1) .bar { height: 28vh; background: var(--accent); }
 .podium .slot:nth-child(2) .bar { height: 19vh; background: var(--team-2); }
@@ -992,14 +1021,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 .join-row button { flex: 1; }
 .join-err { color: var(--bad); font-size: 0.9rem; margin-top: 8px; min-height: 1.2em; }
-.home-divider {
-  text-align: center;
-  color: var(--muted);
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin: 20px 0 16px;
-}
 
 /* ---------- Player phone: locked-in screen ---------- */
 
@@ -1231,7 +1252,7 @@ button:disabled { opacity: 0.4; cursor: default; }
   background: rgba(28, 28, 34, 0.7);
   font-size: 16px;
   line-height: 1;
-  opacity: 0.5;
+  opacity: 0.75;
 }
 .consent-settings:hover, .consent-settings:focus-visible { opacity: 1; }
 /* Keep the control clear of the bottom action bar on the phone pages. */
@@ -1294,27 +1315,34 @@ body:has(.action-bar) .consent-settings {
 .tv-countdown.low,
 .h2h-countdown.low { animation: count-beat 1s ease-out infinite; }
 
-/* Phone-side reveal: the map, cards, and result rows land in a quick
-   cascade — the phone's version of the TV's reveal drama. */
-#p-reveal .p-reveal-map, #h-reveal .p-reveal-map,
-#p-reveal .stat-card, #h-reveal .stat-card, #d-reveal .stat-card,
+/* Phone-side reveal: the map, the place headline, the result line and the
+   board rows land in a quick cascade — the phone's version of the TV's
+   reveal drama. Review §4.5 caps the TOTAL stagger at 0.35 s; with the
+   three stat cards and second list gone there are fewer things to stagger,
+   so the last row now starts at 0.24 s (was 0.34 s) and the whole cascade
+   is over sooner than it used to begin its tail. */
+#p-reveal .p-reveal-map, #h-reveal .p-reveal-map, #d-reveal .p-reveal-map,
+#p-reveal .reveal-headline, #h-reveal .reveal-headline,
+#d-reveal .reveal-headline,
+#p-reveal .reveal-result, #h-reveal .reveal-result, #d-reveal .reveal-result,
 #p-reveal .totals-list li, #h-reveal .totals-list li,
-#d-reveal .p-reveal-map, #d-reveal .totals-list li {
-  animation: rise-in 0.35s ease-out both;
+#d-reveal .total-row, #d-reveal .totals-list li,
+#h-reveal .stat-card, #h-reveal .showdown-results li {
+  animation: rise-in 0.3s ease-out both;
 }
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: none; }
 }
-#p-reveal .stat-card:nth-of-type(2), #h-reveal .stat-card:nth-of-type(2),
-#d-reveal .stat-card:nth-of-type(2) { animation-delay: 0.06s; }
-#p-reveal .stat-card:nth-of-type(3), #h-reveal .stat-card:nth-of-type(3),
-#d-reveal .stat-card:nth-of-type(3) { animation-delay: 0.12s; }
-#d-reveal .stat-card:nth-of-type(4) { animation-delay: 0.18s; }
-#p-reveal .totals-list li:nth-child(1), #h-reveal .totals-list li:nth-child(1) { animation-delay: 0.16s; }
-#p-reveal .totals-list li:nth-child(2), #h-reveal .totals-list li:nth-child(2) { animation-delay: 0.22s; }
-#p-reveal .totals-list li:nth-child(3), #h-reveal .totals-list li:nth-child(3) { animation-delay: 0.28s; }
-#p-reveal .totals-list li:nth-child(4), #h-reveal .totals-list li:nth-child(4) { animation-delay: 0.34s; }
+#p-reveal .reveal-headline, #h-reveal .reveal-headline,
+#d-reveal .reveal-headline { animation-delay: 0.05s; }
+#p-reveal .reveal-result, #h-reveal .reveal-result,
+#d-reveal .reveal-result { animation-delay: 0.1s; }
+#p-reveal .totals-list li:nth-child(1), #h-reveal .totals-list li:nth-child(1),
+#d-reveal .total-row { animation-delay: 0.15s; }
+#p-reveal .totals-list li:nth-child(2), #h-reveal .totals-list li:nth-child(2) { animation-delay: 0.18s; }
+#p-reveal .totals-list li:nth-child(3), #h-reveal .totals-list li:nth-child(3) { animation-delay: 0.21s; }
+#p-reveal .totals-list li:nth-child(4), #h-reveal .totals-list li:nth-child(4) { animation-delay: 0.24s; }
 
 /* Transient lock-in stamp for surfaces with no locked screen of their own
    (couch host, daily): slams in, holds a beat, fades. Injected by fx-ui. */
@@ -1364,6 +1392,40 @@ body:has(.action-bar) .consent-settings {
 body:has(.action-bar) .sound-toggle {
   bottom: calc(84px + env(safe-area-inset-bottom));
 }
+
+/* ---------- §4.1 utility corners: calm states only ----------
+
+   The 🍪 and 🔊 controls are 34 px of visual weight that used to sit over
+   the panorama and the guess map through entire rounds. chrome-ui.js stamps
+   body[data-play="1"] while a play screen is up (chrome.js owns the
+   predicate, under test); here they simply leave. Nothing about the consent
+   GATE changes — the control still reopens the banner in every calm state,
+   and revoking is never more than one tap away from a moment that matters.
+
+   Review §4.3 also wants a 44×44 minimum target without visually enlarging
+   the button: a transparent pseudo-element does exactly that (34 + 2×5 =
+   44), so the touch box grows and the ink does not. */
+body[data-play="1"] .consent-settings,
+body[data-play="1"] .sound-toggle { display: none !important; }
+
+/* The joiner's home panel (§6.2) is the one phone screen with no action
+   bar, so the corners sit low rather than dodging a bar that isn't there. */
+body[data-screen="p-home"] .consent-settings,
+body[data-screen="p-home"] .sound-toggle {
+  bottom: calc(10px + env(safe-area-inset-bottom));
+}
+
+.consent-settings, .sound-toggle { position: fixed; }
+.consent-settings::before, .sound-toggle::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+}
+
+/* The sound toggle sits at 0.5 on the TV, where it is 4 m away and purely
+   decorative; on a phone it is a control and needs to be legible. */
+.sound-toggle { opacity: 0.75; }
 
 /* Reduced motion: collapse every CSS animation/transition to a single
    instant frame (states still land — nothing depends on motion), and drop
@@ -1449,3 +1511,178 @@ body:has(.action-bar) .sound-toggle {
 }
 .report-actions { display: flex; gap: 10px; }
 .report-actions button { flex: 1; padding: 12px 0; font-size: 1rem; }
+
+
+/* ================================================================
+   The de-clutter pass (docs/ui-ux-design-review.md)
+   ================================================================ */
+
+/* ---------- §4.3 controls: ghost actions, 44 px targets ---------- */
+
+/* Destructive/exit actions (Abandon, Leave, Back) are ghosts — never
+   filled peers of the primary. §4.1 forbids two filled buttons in one bar
+   and forbids three buttons outright. */
+.btn-ghost {
+  background: none;
+  color: var(--muted);
+  font-weight: 600;
+  border: 1px solid var(--panel-2);
+}
+.btn-ghost:hover, .btn-ghost:focus-visible { color: var(--fg); }
+/* In the action bar a ghost never claims the width of the primary. */
+.action-bar .btn-ghost { flex: 0 1 34%; font-size: 1rem; }
+
+/* A quiet in-content exit — the "third action" §4.1 sends to overflow, so
+   the bar itself stays at one primary + one secondary. */
+.exit-link {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  text-decoration: underline;
+}
+.exit-link:hover, .exit-link:focus-visible { color: var(--fg); }
+
+/* Minimum touch target, applied to the controls that were under 44 px. */
+.seg button { min-height: 44px; }
+.daily-back-link { min-height: 44px; display: flex; align-items: center; }
+.tv-add summary, .more-options summary, .past-games summary { min-height: 44px; }
+.toast-action { min-height: 44px; }
+
+/* ---------- §4.3 progressive disclosure: "More options" ---------- */
+
+/* Segmented controls are default-visible only where the choice defines the
+   experience (Difficulty, Rounds, Teams). Convenience settings — seconds
+   per round, movement — live behind one disclosure, and the all-time
+   leaderboard behind another: nobody needs game history while configuring
+   a party (§2.2). Same visual language as the proven `.tv-add` details. */
+.more-options, .past-games {
+  border: 1px solid var(--panel-2);
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 0 14px;
+  margin: 0 0 18px;
+}
+.more-options summary, .past-games summary {
+  cursor: pointer;
+  padding: 12px 2px;
+  color: var(--muted);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+.more-options[open] summary, .past-games[open] summary { color: var(--fg); }
+.more-options .settings-group:last-child,
+.past-games > :last-child { margin-bottom: 14px; }
+
+/* ---------- §6.3 lobby: the room code gets an eyebrow, not an <h1> ------ */
+
+.eyebrow {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 8px 0 0;
+}
+
+/* ---------- §6.4 the phone reveal ----------
+
+   The payoff is the map; everything else is commentary. Map grows from
+   36 vh to 52 vh, the place name becomes the headline (the TV's
+   `reveal-place` treatment, phone-sized), and the personal outcome
+   collapses from three stat cards + two injected sub-lines to one line. */
+
+#p-reveal .p-reveal-map,
+#h-reveal .p-reveal-map,
+#d-reveal .p-reveal-map {
+  height: 52vh;
+  min-height: 240px;
+  margin-bottom: 10px;
+}
+
+/* A small heading, not a title: "Round 3 of 5" is context, not the story. */
+.reveal-round {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 4px 0 10px;
+  text-align: center;
+}
+
+.reveal-headline {
+  text-align: center;
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--accent);
+  margin: 0 0 6px;
+}
+
+.reveal-result {
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 16px;
+  line-height: 1.4;
+}
+.reveal-result.lost { color: var(--muted); }
+
+/* One board replaces "This round" + "Totals": the delta sits next to the
+   running total, which is more legible than two lists the eye must join. */
+.reveal-board-list li { font-variant-numeric: tabular-nums; }
+.reveal-board-list li .delta { color: var(--accent); font-weight: 700; }
+.reveal-board-list li .delta.zero { color: var(--muted); }
+
+/* Daily's "Total so far" is a row, never a fourth card (§2.10). */
+.total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.total-row .label { margin-bottom: 0; }
+.total-row .val { color: var(--accent); font-size: 1.2rem; }
+
+/* ---------- §4.2 tabular numbers wherever a number ticks ---------- */
+
+.room-code-huge, .locked-rank, .stat-card .big,
+.totals-list li span:last-child, .leaderboard-list li .pts,
+.hud-item, .h2h-lobby-code {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- §4.4 sheets: the one-at-a-time teaching layer ---------- */
+
+.hint-actions { display: flex; gap: 10px; }
+.hint-actions .hint-dismiss { flex: 1; min-height: 44px; }
+.hint-dismiss:not(.btn-primary) {
+  background: none;
+  border: 1px solid var(--panel-2);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* ---------- §P2.1 pinch-zoom restored, gestures preserved ----------
+
+   `user-scalable=no` is gone from every page, so the browser's own zoom
+   (and iOS/Android accessibility zoom) works everywhere again. The two
+   surfaces that own their gestures declare it: the panorama and the guess
+   map consume touch themselves, so the browser must not also pan/zoom the
+   page under them. The reveal maps are non-interactive (dragging, zoom and
+   touchZoom are all disabled in JS), so they explicitly ALLOW vertical
+   scrolling and pinch — otherwise a finger landing on the map would trap
+   the page's scroll. */
+.viewer-full, .map-full, .guess-live-map, .h2h-grid { touch-action: none; }
+.p-reveal-map, .reveal-map { touch-action: pan-y pinch-zoom; }

@@ -109,6 +109,73 @@ export function resultRowText(r) {
   return `${dist} · ${tail}`;
 }
 
+/* ================================================================
+ * Phone reveal, de-cluttered (design review §2.8 / §6.4)
+ * ================================================================
+ * Before: three stat cards (Location / Distance / Points) plus two injected
+ * sub-lines, then TWO lists ("This round" and "Totals"). After: the place
+ * name is the headline under the map, ONE result line carries the whole
+ * personal outcome, and ONE board merges the two lists so the round delta
+ * sits next to the running total instead of the eye having to join them.
+ * Both formatters are pure so the copy is testable; the DOM glue lives in
+ * player-ui.js / host-ui.js / daily-ui.js. */
+
+// "+3,120 pts · 812 km · ⚡+140 fast" — one line for the whole personal
+// result, SUPER SURE verdict appended when the round carried a bet.
+export function revealResultLine(result) {
+  if (!result || !result.guess) {
+    // A burned bet is not a plain forfeit: it spent something.
+    return result && result.superSure
+      ? "+0 pts · no pin · 🔥 SUPER SURE — 0"
+      : "+0 pts · no pin";
+  }
+  const parts = [
+    `+${adjustedPoints(result).toLocaleString()} pts`,
+    formatDistance(result.distanceKm),
+  ];
+  if (result.timeBonus > 0) {
+    parts.push(`⚡+${result.timeBonus.toLocaleString()} fast`);
+  }
+  if (result.superSure) {
+    parts.push(result.superSureOutcome === "won"
+      ? "🔥 SUPER SURE ×2"
+      : "🔥 SUPER SURE — 0");
+  }
+  return parts.join(" · ");
+}
+
+/* The merged board: standings order (the running score is the persistent
+ * truth), with the crown on the round's CLOSEST pin — so the one row the
+ * old "This round" list existed to show survives the merge. Teams with no
+ * result this round (couch solo rounds, where only the active team guessed)
+ * simply carry a +0 delta. */
+export function revealBoardRows(teams, results) {
+  const res = results || {};
+  let closestId = null;
+  let closest = Infinity;
+  for (const id of Object.keys(res)) {
+    const r = res[id];
+    if (r && r.guess && typeof r.distanceKm === "number" &&
+        r.distanceKm < closest) {
+      closest = r.distanceKm;
+      closestId = id;
+    }
+  }
+  return standings(teams).map((t) => ({
+    id: t.id,
+    name: t.name,
+    delta: adjustedPoints(res[t.id]),
+    total: t.total,
+    crown: t.id === closestId,
+  }));
+}
+
+// "+3,120 → 9,480": this round's delta, then where it leaves you.
+export function boardRowText(row) {
+  return `+${(row.delta || 0).toLocaleString()} → ` +
+    `${(row.total || 0).toLocaleString()}`;
+}
+
 // One decimal under 100km, integer km above (spec §8).
 export function formatDistance(km) {
   if (km < 100) return `${km.toFixed(1)} km`;

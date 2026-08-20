@@ -8,9 +8,8 @@
 
 import {
   haversineKm,
-  formatDistance,
-  formatSeconds,
   formatCountdown,
+  revealResultLine,
 } from "./game.js";
 import {
   DAILY_ROUNDS,
@@ -32,13 +31,15 @@ import {
   HINT_CARDS,
   guessMapHintLines,
   lockNowEstimate,
-  lockNowLabel,
+  lockButtonLabel,
+  LOCK_LABELS,
 } from "./hints.js";
-import { oneShotHint, dismissHintCard } from "./hints-ui.js";
+import { oneShotHint, dismissHintCard, paintLockButton } from "./hints-ui.js";
 import { countdownTick } from "./fx.js";
 import { initSound, playSound, buzz } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { track } from "./consent.js";
+import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
 import { toastWithReport, toastPlain } from "./report-ui.js";
 
@@ -54,6 +55,9 @@ function showScreen(id) {
   shownScreen = id;
   dismissHintCard();
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
+  // §4.1: the utility corners (🍪/🔊) leave while a play screen is up, and
+  // a deferred first-run consent ask waits for a calm one (§6.5).
+  setActiveScreen(id);
 }
 
 let toastTimer = null;
@@ -130,6 +134,9 @@ async function startRound() {
   lastTickSecond = null;
   if (guessMarker) { guessMarker.remove(); guessMarker = null; }
   if (guessMap) guessMap.setView([25, 10], 2);
+  $("btnDLockIn").disabled = true;
+  updateGuessBanner();
+  updateLockButton();
   destroyRevealMap();
   showScreen("d-round");
   oneShotHint("pano", HINT_CARDS.pano);
@@ -194,8 +201,8 @@ function ensureGuessMap() {
       guessMarker.on("move", updateLockNowHint);
     }
     $("btnDLockIn").disabled = false;
-    $("dGuessHint").textContent = "Drag to adjust, then lock it in";
-    updateLockNowHint();
+    updateGuessBanner();
+    updateLockButton();
   });
 }
 
@@ -205,16 +212,14 @@ function openGuessMap() {
   showScreen("d-guess");
   ensureGuessMap();
   $("btnDLockIn").disabled = !guessMarker;
-  $("dGuessHint").textContent = guessMarker
-    ? "Drag to adjust, then lock it in"
-    : "Tap the map to drop your pin";
+  updateGuessBanner();
   // First guess map ever on this device: the scoring one-liner (M5) — the
   // daily is solo, so no rival-pins or SUPER SURE lines.
   oneShotHint("guessmap", {
     title: "Drop your pin",
-    lines: guessMapHintLines("daily", false),
+    lines: guessMapHintLines("daily"),
   });
-  updateLockNowHint();
+  updateLockButton();
   setTimeout(() => guessMap.invalidateSize(), 50);
 }
 
@@ -225,12 +230,19 @@ function backToStreet() {
   if (viewer) viewer.resize();
 }
 
-// M3's "if you locked in now" pill — same pure estimator as the party
-// phones, priced locally against the current entry's coordinates.
-function updateLockNowHint() {
-  const el = $("dLockNowHint");
+// §6.1: one banner, and only until the first pin exists — a draggable pin
+// teaches itself, so there is no second "drag to adjust" state.
+function updateGuessBanner() {
+  $("dGuessHint").classList.toggle("hidden", !!guessMarker);
+}
+
+// M3's "if you locked in now" estimate, now ON the primary button (§6.1) —
+// same pure estimator as the party phones, priced locally against the
+// current entry's coordinates.
+function updateLockButton() {
+  const btn = $("btnDLockIn");
   if (locked || stage !== "map" || !guessMarker || !current) {
-    el.textContent = "";
+    paintLockButton(btn, lockButtonLabel(LOCK_LABELS.daily, null, false));
     return;
   }
   const g = guessMarker.getLatLng();
@@ -238,8 +250,10 @@ function updateLockNowHint() {
     current.lat, current.lng,
     g.lat, L.Util.wrapNum(g.lng, [-180, 180], true));
   const elapsed = Math.max(0, Date.now() - roundStartedAt);
-  el.textContent =
-    lockNowLabel(lockNowEstimate(km, elapsed, DAILY_ROUND_SECONDS), false);
+  paintLockButton(btn, lockButtonLabel(
+    LOCK_LABELS.daily,
+    lockNowEstimate(km, elapsed, DAILY_ROUND_SECONDS),
+    false));
 }
 
 /* ---------------- Ticker: countdown + auto-lock ---------------- */
@@ -256,7 +270,7 @@ function stopTick() {
 
 function tick() {
   if (locked) return;
-  updateLockNowHint();
+  updateLockButton();
   const left = endsAt - Date.now();
   $("dHudTimer").textContent = formatCountdown(left);
   $("dGuessTimer").textContent = formatCountdown(left);
@@ -295,10 +309,10 @@ function lockIn(auto = false) {
       ? "Time! Your pin was locked in."
       : "Time! No pin — no points this round.");
   }
-  renderReveal(guess, elapsedMs);
+  renderReveal(guess);
 }
 
-function renderReveal(guess, elapsedMs) {
+function renderReveal(guess) {
   showScreen("d-reveal");
   playSound("sting"); // S4: the reveal beat (called once per round)
   oneShotHint("reveal", HINT_CARDS.reveal);
@@ -306,14 +320,13 @@ function renderReveal(guess, elapsedMs) {
   $("dRevealHeading").textContent =
     `Round ${run.rounds.length} of ${DAILY_ROUNDS}`;
   $("dRevealPlace").textContent = current.name || "—";
-  $("dRevealDistance").textContent =
-    r.distanceKm != null ? formatDistance(r.distanceKm) : "no pin";
-  $("dRevealPoints").textContent = `+${r.points.toLocaleString()}`;
-  $("dRevealSpeed").textContent = r.distanceKm != null
-    ? `${r.distancePoints.toLocaleString()} distance` +
-      ` + ⚡${r.timeBonus.toLocaleString()} speed` +
-      ` · answered in ${formatSeconds(elapsedMs)}`
-    : "";
+  // §2.10: the four stat cards collapse to the §6.4 shape — map, place
+  // headline, one result line, and "Total so far" as a row.
+  $("dRevealResult").textContent = revealResultLine(
+    r.distanceKm != null
+      ? { guess: true, distanceKm: r.distanceKm, points: r.points,
+          timeBonus: r.timeBonus }
+      : null);
   $("dRevealTotal").textContent = run.score.toLocaleString();
   $("btnDNext").textContent =
     dailyRunComplete(run) ? "See My Score" : "Next Round";

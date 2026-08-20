@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <!-- P2.1: pinch/browser zoom restored. The panorama and guess map own
+       their own gestures via `touch-action` in style.css. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GeoParty — Everyone on their own phone</title>
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
   <link rel="icon" href="assets/favicon-48.png" type="image/png" sizes="48x48" />
@@ -28,7 +30,10 @@
   <div id="connPill" class="conn-pill hidden">reconnecting…</div>
   <div id="toast" class="toast"></div>
 
-  <!-- 1. Home: join a room, or start a new head-to-head game -->
+  <!-- 1. Home: the joiner's whole world (review §6.2). The majority of
+       arrivals come from a QR or an invite link and need exactly two
+       fields; game creation is one deliberate tap away, not a scrolling
+       wall of settings under a second competing primary button. -->
   <section id="p-home" class="phase-screen">
     <div class="host-wrap">
       <h1><span style="color: var(--accent)">Geo</span>Party <span class="h2h-tag">everyone on their own phone</span></h1>
@@ -43,63 +48,25 @@
         <button id="btnPResume" class="btn-primary">Rejoin</button>
       </div>
 
-      <div class="settings-group">
+      <!-- Both flows share this one input; player-ui.js moves the node
+           between the two panels rather than duplicating the field. -->
+      <div class="settings-group" id="pTeamNameGroup">
         <div class="label">Your team name</div>
         <div class="team-names">
-          <input id="myTeamName" data-ph-mask maxlength="24" placeholder="e.g. The Atlas Cats" autocomplete="off" />
+          <input id="myTeamName" data-ph-mask maxlength="24" placeholder="The Atlas Cats" autocomplete="off" />
         </div>
       </div>
 
-      <div class="settings-group">
-        <div class="label">Join a game</div>
+      <div class="settings-group" id="pJoinGroup">
+        <div class="label">Have a code?</div>
         <div class="join-row">
           <input id="joinCode" maxlength="6" placeholder="CODE" autocomplete="off"
                  autocapitalize="characters" spellcheck="false" class="code-input" />
           <button id="btnJoin" class="btn-primary">Join</button>
         </div>
         <div id="joinErr" class="join-err"></div>
+        <button id="btnStartNew" class="exit-link">Start a new game →</button>
       </div>
-
-      <div class="home-divider">or start a new game</div>
-
-      <div class="settings-group">
-        <div class="label">Rounds</div>
-        <div class="seg" id="pSegRounds" data-value="5">
-          <button data-v="3">3</button>
-          <button data-v="5" class="sel">5</button>
-          <button data-v="10">10</button>
-        </div>
-      </div>
-
-      <div class="settings-group">
-        <div class="label">Seconds per round</div>
-        <div class="seg" id="pSegSeconds" data-value="120">
-          <button data-v="60">60</button>
-          <button data-v="120" class="sel">120</button>
-          <button data-v="180">180</button>
-          <button data-v="0">No limit</button>
-        </div>
-      </div>
-
-      <div class="settings-group">
-        <div class="label">Movement</div>
-        <div class="seg" id="pSegMove" data-value="1">
-          <button data-v="1" class="sel">Allowed</button>
-          <button data-v="0">No moving</button>
-        </div>
-      </div>
-
-      <div class="settings-group">
-        <div class="label">Difficulty</div>
-        <div class="seg" id="pSegDifficulty" data-value="world">
-          <button data-v="casual">Casual</button>
-          <button data-v="world" class="sel">World tour</button>
-          <button data-v="expert">Expert</button>
-        </div>
-      </div>
-    </div>
-    <div class="action-bar">
-      <button id="btnCreateRoom" class="btn-primary">Start a New Game</button>
     </div>
   </section>
 
@@ -109,11 +76,11 @@
       <h1>Room</h1>
       <div id="pRoomCodeHuge" class="room-code-huge" data-ph-mask>······</div>
       <div class="qr-box"><canvas id="pQrCanvas"></canvas></div>
-      <div id="pJoinUrl" data-ph-mask class="screen-url"></div>
+      <p id="pJoinUrl" data-ph-mask class="tv-add-alt"></p>
       <div class="share-row">
         <button id="btnPShare" class="btn-primary">📤 Send invite link</button>
       </div>
-      <div id="pScreenNote" class="waiting-screen-note"></div>
+
       <!-- Add a TV: collapsed by default — the TV is a bonus, never homework.
            QR → any spare device becomes the screen, then cast/AirPlay it. -->
       <details id="pTvAdd" class="tv-add">
@@ -129,7 +96,7 @@
       <div id="pLobbyNote" class="waiting-screen-note"></div>
     </div>
     <div class="action-bar">
-      <button id="btnPLeave">Leave</button>
+      <button id="btnPLeave" class="btn-ghost">Leave</button>
       <button id="btnPStart" class="btn-primary hidden">Start Game</button>
     </div>
   </section>
@@ -150,14 +117,18 @@
   <!-- 4. Guess map: drop the pin, lock it in — or duck back to the street -->
   <section id="p-guess" class="phase-screen hidden">
     <div id="playerGuessMap" class="map-full"></div>
+    <!-- One banner, until the first pin exists — a draggable pin teaches
+         itself, so there is no second "drag to adjust" state (§6.1). -->
     <div class="guess-hint" id="pGuessHint">Tap the map to drop your pin</div>
     <div class="hud"><div></div><div class="hud-item" id="pGuessTimer"></div></div>
-    <!-- M3: live "if you locked in now" points while aiming -->
-    <div id="lockNowHint" class="lock-now-hint"></div>
-    <!-- SUPER SURE: once-per-game double-or-nothing, armed locally only -->
-    <button id="btnSuperSure" class="super-sure-toggle">🔥 SUPER SURE</button>
+    <!-- §6.1: the M3 estimate now rides on the primary button's label and
+         SUPER SURE is a 🔥 chip docked to the bar (shown only while the bet
+         is unspent) that opens the one sheet explaining it. The floating
+         context-pill layer is empty on this screen. -->
     <div class="action-bar">
-      <button id="btnBackToStreet">Back to Street</button>
+      <button id="btnSuperSure" class="ss-chip hidden" type="button"
+              aria-label="SUPER SURE — double or nothing">🔥</button>
+      <button id="btnBackToStreet" class="btn-ghost">Back to street</button>
       <button id="btnLockIn" class="btn-primary" disabled>Lock It In</button>
     </div>
   </section>
@@ -172,35 +143,24 @@
       <ul id="pLockedList" data-ph-mask class="totals-list"></ul>
     </div>
     <div class="action-bar">
-      <button id="btnCloseRound" class="hidden">Close Round (forfeit stragglers)</button>
+      <button id="btnCloseRound" class="btn-ghost hidden">Close Round</button>
     </div>
   </section>
 
-  <!-- 6. Reveal: your result + standings -->
+  <!-- 6. Reveal (review §6.4): the map is the payoff, everything else is
+       commentary. Was 36 vh of map buried under three stat cards, two
+       injected sub-lines and two separate lists. -->
   <section id="p-reveal" class="phase-screen hidden">
     <div class="host-wrap">
-      <h1 id="pRevealHeading">Round 1</h1>
+      <div id="pRevealHeading" class="reveal-round">Round 1</div>
       <div id="pRevealMap" class="p-reveal-map"></div>
-      <div class="stat-card">
-        <div class="label">Location</div>
-        <div class="big place" id="pRevealPlace" data-ph-mask>—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Your distance</div>
-        <div class="big" id="pRevealDistance">—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Your points</div>
-        <div class="big" id="pRevealPoints" style="color: var(--accent)">—</div>
-      </div>
-      <h2>This round</h2>
-      <ul id="pRoundResults" data-ph-mask class="totals-list"></ul>
-      <h2>Totals</h2>
-      <ul id="pRevealTotals" data-ph-mask class="totals-list"></ul>
+      <div id="pRevealPlace" class="reveal-headline" data-ph-mask>—</div>
+      <div id="pRevealResult" class="reveal-result">—</div>
+      <ul id="pRevealBoard" data-ph-mask class="totals-list reveal-board-list"></ul>
       <div id="pRevealNote" class="waiting-screen-note advance-note"></div>
     </div>
     <div class="action-bar">
-      <button id="btnPHold" class="hidden">✋ Hold</button>
+      <button id="btnPHold" class="btn-ghost hidden">✋ Hold</button>
       <button id="btnPNext" class="btn-primary hidden">Next Round</button>
     </div>
   </section>
@@ -211,55 +171,68 @@
       <h1 id="pGameOverTitle">Game over!</h1>
       <ul id="pFinalTotals" data-ph-mask class="totals-list"></ul>
       <div id="pHandoffNote" data-ph-mask class="handoff-note"></div>
+      <!-- §4.1 forbids a three-button bar; the exit is the third action, so
+           it becomes a quiet in-content link and the bar keeps one primary
+           plus one secondary. -->
+      <button id="btnPHome" class="exit-link">Leave the game</button>
     </div>
     <div class="action-bar">
-      <button id="btnPHome">Leave</button>
       <button id="btnPShareResult">📤 Share</button>
       <button id="btnPNextGame" class="btn-primary hidden">Set Up the Next Game</button>
     </div>
   </section>
 
-  <!-- 8. Next-game setup (winner only): settings carry over, teams carry over -->
-  <section id="p-next" class="phase-screen hidden">
+  <!-- 8. Settings panel (review §6.2). ONE panel serves both the party
+       starter and the winner setting up the next game — the four segment
+       groups used to appear twice on this page. Difficulty and Rounds are
+       default-visible because they change the felt game; seconds and
+       movement have sane defaults and live behind one disclosure. -->
+  <section id="p-setup" class="phase-screen hidden">
     <div class="host-wrap">
-      <h1>👑 Your game now</h1>
-      <p style="color: var(--muted)">Same teams, fresh scores. Everyone's phone
-        and the TV will follow automatically.</p>
-      <div class="settings-group">
-        <div class="label">Rounds</div>
-        <div class="seg" id="nSegRounds" data-value="5">
-          <button data-v="3">3</button>
-          <button data-v="5" class="sel">5</button>
-          <button data-v="10">10</button>
-        </div>
-      </div>
-      <div class="settings-group">
-        <div class="label">Seconds per round</div>
-        <div class="seg" id="nSegSeconds" data-value="120">
-          <button data-v="60">60</button>
-          <button data-v="120" class="sel">120</button>
-          <button data-v="180">180</button>
-          <button data-v="0">No limit</button>
-        </div>
-      </div>
-      <div class="settings-group">
-        <div class="label">Movement</div>
-        <div class="seg" id="nSegMove" data-value="1">
-          <button data-v="1" class="sel">Allowed</button>
-          <button data-v="0">No moving</button>
-        </div>
-      </div>
+      <h1 id="pSetupTitle">Start a new game</h1>
+      <p id="pSetupNote" class="waiting-screen-note hidden"></p>
+
       <div class="settings-group">
         <div class="label">Difficulty</div>
-        <div class="seg" id="nSegDifficulty" data-value="world">
+        <div class="seg" id="pSegDifficulty" data-value="world">
           <button data-v="casual">Casual</button>
           <button data-v="world" class="sel">World tour</button>
           <button data-v="expert">Expert</button>
         </div>
       </div>
+
+      <div class="settings-group">
+        <div class="label">Rounds</div>
+        <div class="seg" id="pSegRounds" data-value="5">
+          <button data-v="3">3</button>
+          <button data-v="5" class="sel">5</button>
+          <button data-v="10">10</button>
+        </div>
+      </div>
+
+      <details class="more-options">
+        <summary>More options</summary>
+        <div class="settings-group">
+          <div class="label">Seconds per round</div>
+          <div class="seg" id="pSegSeconds" data-value="120">
+            <button data-v="60">60</button>
+            <button data-v="120" class="sel">120</button>
+            <button data-v="180">180</button>
+            <button data-v="0">No limit</button>
+          </div>
+        </div>
+        <div class="settings-group">
+          <div class="label">Movement</div>
+          <div class="seg" id="pSegMove" data-value="1">
+            <button data-v="1" class="sel">Allowed</button>
+            <button data-v="0">No moving</button>
+          </div>
+        </div>
+      </details>
     </div>
     <div class="action-bar">
-      <button id="btnNextCreate" class="btn-primary">Open the Room</button>
+      <button id="btnSetupBack" class="btn-ghost">← Back</button>
+      <button id="btnOpenRoom" class="btn-primary">Open the Room</button>
     </div>
   </section>
 

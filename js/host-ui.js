@@ -16,10 +16,11 @@ import {
   scoreForDistance,
   bonusWindowMs,
   timeBonus,
-  formatSeconds,
   resultRowText,
-  formatDistance,
   formatCountdown,
+  revealResultLine,
+  revealBoardRows,
+  boardRowText,
   teamForRound,
   teamIds,
   defaultTeams,
@@ -35,15 +36,21 @@ import {
   resolveSuperSure,
   superSureSettlement,
   adjustedPoints,
-  superSureLabel,
 } from "./supersure.js";
 import {
   HINT_CARDS,
+  SUPER_SURE_SHEET,
+  LOCK_LABELS,
   guessMapHintLines,
   lockNowEstimate,
-  lockNowLabel,
+  lockButtonLabel,
 } from "./hints.js";
-import { oneShotHint, dismissHintCard } from "./hints-ui.js";
+import {
+  oneShotHint,
+  showHintCard,
+  dismissHintCard,
+  paintLockButton,
+} from "./hints-ui.js";
 import { withUtm, partyShareText, foldBestMoment } from "./share.js";
 import { shareResult, shareTvLink } from "./share-ui.js";
 import { screenLink, tvBrowserLine } from "./tvlink.js";
@@ -69,6 +76,7 @@ import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
+import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
 import { toastWithReport, toastPlain } from "./report-ui.js";
 
@@ -92,6 +100,9 @@ const escapeHtml = (s) =>
 function showScreen(id) {
   dismissHintCard(); // a hint never outlives the moment it teaches
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
+  // §4.1: the utility corners (🍪/🔊) leave while a play screen is up, and
+  // a deferred first-run consent ask waits for a calm one (§6.5).
+  setActiveScreen(id);
 }
 
 let toastTimer = null;
@@ -329,6 +340,10 @@ async function newGame() {
 function enterLobby() {
   showScreen("h-lobby");
   $("roomCodeHuge").textContent = roomCode;
+  // §6.3: the TV seminar (QR + caption + send button + typing line, all at
+  // once, under a note saying you don't need one) is now ONE collapsed
+  // module. Collapsed is the honest default — a TV is optional.
+  $("hTvAdd").open = false;
   // The Add a TV affordance: scan-and-cast QR (any spare device becomes the
   // screen), one-tap link share, and the typing fallback line — never a raw
   // URL. The line hides itself on file://, where nothing is typeable.
@@ -668,11 +683,12 @@ function ensureGuessMap() {
       // "move" fires both while dragging and on setLatLng, so this one
       // listener keeps the live preview in sync for taps and drags alike.
       guessMarker.on("move", scheduleLiveGuessWrite);
-      guessMarker.on("move", updateLockNowHint);
+      guessMarker.on("move", updateLockButton);
     }
     scheduleLiveGuessWrite();
     $("btnConfirmGuess").disabled = false;
-    updateLockNowHint();
+    updateGuessHint();
+    updateLockButton();
   });
 }
 
@@ -682,11 +698,15 @@ function ensureGuessMap() {
 // half-second ticker while the guessing phase lasts (the speed bonus keeps
 // decaying on the confirm clock).
 let lockNowTimer = null;
-function updateLockNowHint() {
-  const el = $("lockNowHint");
+// Review §6.1: the estimate rides on the primary button instead of a
+// floating pill stacked above a second floating pill. Same arithmetic,
+// same local pricing — one element instead of three.
+function updateLockButton() {
+  const btn = $("btnConfirmGuess");
+  btn.classList.toggle("armed", superSureArmed);
   if (!room || room.phase !== "guessing" || !room.round ||
       !guessMarker || !currentTruth) {
-    el.textContent = "";
+    paintLockButton(btn, lockButtonLabel(LOCK_LABELS.couch, null, superSureArmed));
     return;
   }
   const g = guessMarker.getLatLng();
@@ -695,20 +715,17 @@ function updateLockNowHint() {
   const elapsed = Math.max(0, Date.now() -
     (room.round.turnStartedAt || room.round.startedAt || Date.now()));
   const est = lockNowEstimate(km, elapsed, room.settings.roundSeconds);
-  el.textContent = lockNowLabel(est, superSureArmed);
-  el.classList.toggle("armed", superSureArmed);
+  paintLockButton(btn, lockButtonLabel(LOCK_LABELS.couch, est, superSureArmed));
 }
 
 function startLockNowTicker() {
   stopLockNowTicker();
-  lockNowTimer = setInterval(updateLockNowHint, 500);
-  updateLockNowHint();
+  lockNowTimer = setInterval(updateLockButton, 500);
+  updateLockButton();
 }
 
 function stopLockNowTicker() {
   if (lockNowTimer) { clearInterval(lockNowTimer); lockNowTimer = null; }
-  const el = $("lockNowHint");
-  if (el) el.textContent = "";
 }
 
 // The static "drop your pin" hint doubles as the whose-turn banner: solo
@@ -716,9 +733,14 @@ function stopLockNowTicker() {
 function updateGuessHint() {
   const el = document.querySelector("#h-guess .guess-hint");
   if (!room || teamIds(room.teams).length <= 1) {
+    // §6.1: with nothing but the instruction to convey, the banner leaves
+    // as soon as the pin exists — a draggable pin teaches itself. In a
+    // multi-team game the same banner is the whose-turn line, which stays.
     el.textContent = "Tap the map to drop your pin";
+    el.classList.toggle("hidden", !!guessMarker);
     return;
   }
+  el.classList.remove("hidden");
   const name = room.teams[room.activeTeam].name;
   if (room.round && room.round.showdown) {
     const order = room.round.order || [];
@@ -767,13 +789,12 @@ function openGuessMap() {
   renderPlacedPins();
   updateGuessHint();
   superSureArmed = false;
-  renderSuperSureToggle();
+  renderSuperSureChip();
   // First guess map ever on this device: the scoring one-liner and the
   // SUPER SURE stakes, at the moment they matter (M5 + M3).
   oneShotHint("guessmap", {
     title: "Drop your pin",
-    lines: guessMapHintLines(
-      "couch", superSureAvailable(room.teams, room.activeTeam)),
+    lines: guessMapHintLines("couch"),
   });
   startLockNowTicker();
   // Leaflet needs a size pass after the container becomes visible.
@@ -785,28 +806,39 @@ function openGuessMap() {
 // Couch version of the h2h toggle: it belongs to whichever team holds the
 // phone (the active team), and the TV never mirrors it — the bet stays
 // hidden from the couch until the reveal.
-function toggleSuperSure() {
+/* De-cluttered per §2.6/§6.1, exactly as on the h2h phone: a 🔥 chip in
+ * the action bar that opens the ONE sheet explaining the bet, absent once
+ * the bet is spent, with the armed state shown on the primary button's own
+ * label. The arm/disarm toasts are gone — mechanic rules never live in a
+ * 2.5 s toast. The TV still never mirrors any of it: the bet stays hidden
+ * from the couch until the reveal. */
+function openSuperSureSheet() {
   if (!room || !superSureAvailable(room.teams, room.activeTeam)) return;
-  superSureArmed = !superSureArmed;
-  renderSuperSureToggle();
-  updateLockNowHint(); // the pill flips to the bet's doubled stakes
-  toast(superSureArmed
-    ? "SUPER SURE armed: closest pin wins ×2 — anyone closer and you get 0"
-    : "SUPER SURE disarmed — bet saved for later");
+  track("super_sure_sheet_opened", { mode: "couch" });
+  showHintCard({
+    title: SUPER_SURE_SHEET.title,
+    lines: SUPER_SURE_SHEET.lines,
+    actions: superSureArmed
+      ? [{ label: "Disarm", primary: false, onClick: () => setSuperSure(false) },
+         { label: "Keep it armed", onClick: () => setSuperSure(true) }]
+      : [{ label: SUPER_SURE_SHEET.cancelLabel, primary: false },
+         { label: SUPER_SURE_SHEET.armLabel, onClick: () => setSuperSure(true) }],
+  });
 }
 
-function renderSuperSureToggle() {
+function setSuperSure(armed) {
+  if (!room || !superSureAvailable(room.teams, room.activeTeam)) return;
+  superSureArmed = !!armed;
+  renderSuperSureChip();
+  updateLockButton();
+}
+
+function renderSuperSureChip() {
   const btn = $("btnSuperSure");
-  const available = room && superSureAvailable(room.teams, room.activeTeam);
-  btn.disabled = !available;
-  btn.classList.toggle("armed", !!available && superSureArmed);
-  if (!available) {
-    btn.textContent = "SUPER SURE — spent";
-  } else if (superSureArmed) {
-    btn.textContent = "🔥 SUPER SURE ARMED — ×2 or 0";
-  } else {
-    btn.textContent = "🔥 SUPER SURE · double or nothing · once per game";
-  }
+  const available = !!room && superSureAvailable(room.teams, room.activeTeam);
+  btn.classList.toggle("hidden", !available); // spent = gone, not disabled
+  btn.classList.toggle("armed", available && superSureArmed);
+  btn.setAttribute("aria-pressed", String(available && superSureArmed));
 }
 
 function confirmGuess() {
@@ -952,7 +984,7 @@ function confirmShowdownGuess(result) {
     renderPlacedPins();
     updateGuessHint();
     superSureArmed = false; // the next team arms (or not) for itself
-    renderSuperSureToggle();
+    renderSuperSureChip();
     // S4: a mid-showdown turn has no reveal to punctuate it — the stamp
     // overlay marks the handoff instead.
     stampFlash("LOCKED IN");
@@ -1181,20 +1213,23 @@ function enterReveal() {
   $("revealPlace").textContent =
     (room.round.truth && room.round.truth.name) || "—";
 
-  // Solo rounds keep the Distance/Points cards; the showdown swaps them for
-  // a closest-first list of every team's result (injected — HTML untouched).
-  const distCard = $("revealDistance").closest(".stat-card");
-  const ptsCard = $("revealPoints").closest(".stat-card");
+  /* §6.4, shared with the h2h phone: the three stat cards and their two
+   * injected sub-lines collapse into ONE result line, and the totals list
+   * becomes ONE board carrying each team's round delta next to its running
+   * total. Solo rounds price the active team's pin; the showdown keeps its
+   * closest-first per-team list (every team guessed the same spot, so the
+   * per-team detail is the content) and the board carries the standings. */
+  const resultEl = $("revealResult");
   let list = $("hostShowdownResults");
-  distCard.classList.toggle("hidden", !!showdown);
-  ptsCard.classList.toggle("hidden", !!showdown);
   if (showdown) {
+    resultEl.textContent = "";
+    resultEl.classList.add("hidden");
     if (!list) {
       list = document.createElement("ul");
       list.id = "hostShowdownResults";
       list.className = "totals-list showdown-results";
       list.dataset.phMask = "";   // team names — replay masking (plan §9.4)
-      ptsCard.after(list);
+      resultEl.after(list);
     }
     list.classList.remove("hidden");
     list.innerHTML = "";
@@ -1211,41 +1246,29 @@ function enterReveal() {
   } else {
     if (list) list.classList.add("hidden");
     const score = room.round.score;
-    $("revealDistance").textContent = formatDistance(score.distanceKm);
-    $("revealPoints").textContent = adjustedPoints(score).toLocaleString();
-    // Speed line under the points card (injected — HTML untouched).
-    let speedEl = $("hostRevealSpeed");
-    if (!speedEl) {
-      speedEl = document.createElement("div");
-      speedEl.id = "hostRevealSpeed";
-      speedEl.className = "time-note";
-      ptsCard.appendChild(speedEl);
-    }
-    if (typeof score.elapsedMs === "number") {
-      speedEl.textContent =
-        `${score.distancePoints.toLocaleString()} distance` +
-        ` + ⚡${score.timeBonus.toLocaleString()} speed` +
-        ` · answered in ${formatSeconds(score.elapsedMs)}`;
-      speedEl.classList.toggle("zero", !score.timeBonus);
-    } else {
-      speedEl.textContent = "";
-    }
-    // SUPER SURE verdict line (injected — HTML untouched).
-    let ssEl = $("hostRevealSuperSure");
-    if (!ssEl) {
-      ssEl = document.createElement("div");
-      ssEl.id = "hostRevealSuperSure";
-      ssEl.className = "ss-note";
-      ptsCard.appendChild(ssEl);
-    }
-    if (score.superSure) {
-      ssEl.textContent = `🔥 ${superSureLabel(score)}`;
-      ssEl.classList.toggle("lost", score.superSureOutcome !== "won");
-    } else {
-      ssEl.textContent = "";
-    }
+    resultEl.classList.remove("hidden");
+    resultEl.textContent = revealResultLine(score);
+    resultEl.classList.toggle(
+      "lost", !!(score && score.superSure && score.superSureOutcome !== "won"));
   }
-  renderTotals($("revealTotals"));
+
+  // The merged board: this round's delta → the running total, per team.
+  const results = showdown
+    ? (room.round.results || {})
+    : (room.round.score ? { [room.activeTeam]: room.round.score } : {});
+  const board = $("revealBoard");
+  board.innerHTML = "";
+  for (const row of revealBoardRows(room.teams, results)) {
+    const li = document.createElement("li");
+    if (row.crown) li.classList.add("active");
+    const name = document.createElement("span");
+    name.textContent = (row.crown ? "👑 " : "") + row.name;
+    const val = document.createElement("span");
+    val.textContent = boardRowText(row);
+    li.append(name, val);
+    board.appendChild(li);
+  }
+
   $("btnNextRound").textContent =
     number >= room.settings.roundCount ? "Finish" : "Next Round";
   startAdvanceTicker();
@@ -1311,8 +1334,10 @@ function finishGame(advance) {
   playSound("fanfare"); // S4
   updateCrown(); // S7: no TV podium — this phone crowns the winner
   renderTotals($("finalTotals"));
-  $("btnSaveLeaderboard").disabled = false;
-  $("btnSaveLeaderboard").textContent = "Save to leaderboard";
+  // §2.9: it is localStorage — there is no reason to make a human press a
+  // database button. The game saves itself and says so in one quiet line,
+  // and the setup screen's "Past games" disclosure is where it resurfaces.
+  saveToLeaderboard();
 }
 
 // S1: the post-game result card — the game's closest moment plus the
@@ -1333,21 +1358,26 @@ function shareGameResult() {
   );
 }
 
+/* Auto-save at game over (§2.9). Idempotency is keyed on the room code
+ * stored alongside each entry rather than an in-memory flag, so a refresh
+ * that resumes straight back into gameOver re-renders the note without
+ * writing the standings a second time. */
 function saveToLeaderboard() {
   const board = lsGet(LS_LEADERBOARD, []);
-  const date = new Date().toISOString().slice(0, 10);
-  for (const t of standings(room.teams)) {
-    board.push({
-      teamName: t.name,
-      totalScore: t.total,
-      rounds: room.settings.roundCount,
-      date,
-    });
+  if (!board.some((e) => e && e.room === roomCode)) {
+    const date = new Date().toISOString().slice(0, 10);
+    for (const t of standings(room.teams)) {
+      board.push({
+        room: roomCode,
+        teamName: t.name,
+        totalScore: t.total,
+        rounds: room.settings.roundCount,
+        date,
+      });
+    }
+    lsSet(LS_LEADERBOARD, board);
   }
-  lsSet(LS_LEADERBOARD, board);
-  $("btnSaveLeaderboard").disabled = true;
-  $("btnSaveLeaderboard").textContent = "Saved ✓";
-  toast("Saved to leaderboard");
+  $("hSavedNote").textContent = "Saved to your past games ✓";
 }
 
 function newGameFromOver() {
@@ -1431,7 +1461,7 @@ async function resumeGame(code, state) {
       try { await iv.moveTo(room.round.imageId, "resume"); }
       catch (e) {
         console.warn("resume: image failed to load", e);
-        toast("Imagery didn’t load — the round still works from the map.",
+        toast("Imagery didn’t load — guess from the map.",
           { surface: "host" });
       }
       $("hudRound").textContent =
@@ -1447,7 +1477,7 @@ async function resumeGame(code, state) {
       $("btnConfirmGuess").disabled = true;
       renderPlacedPins(); // mid-showdown resume: restore locked-in pins
       updateGuessHint();
-      renderSuperSureToggle(); // armed state is local; a refresh disarms
+      renderSuperSureChip(); // armed state is local; a refresh disarms
       startLockNowTicker();
       setTimeout(() => guessMap.invalidateSize(), 50);
       break;
@@ -1458,6 +1488,7 @@ async function resumeGame(code, state) {
       showScreen("h-gameover");
       updateCrown(); // S7 — re-checked when the first heartbeat lands
       renderTotals($("finalTotals"));
+      saveToLeaderboard(); // idempotent per room (§2.9)
       break;
     default:
       enterSetup();
@@ -1487,12 +1518,11 @@ $("btnTvLink").addEventListener("click", () => {
   shareTvLink(screenLink(location.href, roomCode, "link"), roomCode, "couch", toast);
 });
 $("btnMakeGuess").addEventListener("click", openGuessMap);
-$("btnSuperSure").addEventListener("click", toggleSuperSure);
+$("btnSuperSure").addEventListener("click", openSuperSureSheet);
 $("btnConfirmGuess").addEventListener("click", confirmGuess);
 $("btnNextRound").addEventListener("click", nextOrFinish);
 $("btnHoldAdvance").addEventListener("click", holdAdvance);
 $("btnShareResult").addEventListener("click", shareGameResult);
-$("btnSaveLeaderboard").addEventListener("click", saveToLeaderboard);
 $("btnNewGameOver").addEventListener("click", newGameFromOver);
 
 onConnectionChange((isConnected) => {

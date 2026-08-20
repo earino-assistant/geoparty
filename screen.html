@@ -126,8 +126,12 @@
       <h1 class="tv-title">Game over!</h1>
       <div id="podium" data-ph-mask class="podium"></div>
       <div id="tvNextHost" data-ph-mask class="tv-next-host hidden"></div>
-      <button id="btnNewEntry" class="btn-primary tv-newgame">New game — enter a room code</button>
-      <p class="tv-newgame-hint">or start a new game on the host's phone and the screen will follow</p>
+      <!-- §2.11: a TV is not a touch surface. The real path is "the screen
+           follows the host", so the accent button + its explanatory line
+           collapse into one quiet line with the code-entry escape hatch
+           demoted to a text button inside it. -->
+      <p class="tv-newgame-line">Start a new game on the host's phone — this
+        screen follows.<button id="btnNewEntry" class="tv-newgame" type="button">Enter a code</button></p>
     </div>
   </section>
 

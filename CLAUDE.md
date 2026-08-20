@@ -3,11 +3,14 @@
 Static, no-build Jackbox-style geoguessing party game (GitHub Pages). Plain
 ES modules, no framework, no bundler, no runtime dependencies. Pure logic
 lives in `js/game.js` / `js/h2h.js` / `js/pool.js` / `js/qr.js` /
-`js/imagery.js` / `js/analytics.js` (no DOM, no network — these are the
-unit-tested layer); DOM/Firebase glue lives in the `*-ui.js` modules and
-`js/consent.js`.
+`js/imagery.js` / `js/analytics.js` / `js/chrome.js` (no DOM, no network —
+these are the unit-tested layer); DOM/Firebase glue lives in the `*-ui.js`
+modules and `js/consent.js`.
 Architecture: `docs/architecture.md`. Analytics catalog: `docs/analytics.md`.
 Field observability: `docs/field-observability-plan.md`.
+UI hierarchy rules (what may occupy which layer, and when):
+`docs/ui-ux-design-review.md` §4 — `js/chrome.js` enforces the calm-state
+and consent-moment halves of it.
 
 ## MANDATORY: every feature ships with tests AND instrumentation
 
