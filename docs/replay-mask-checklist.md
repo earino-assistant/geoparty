@@ -129,8 +129,38 @@ token (review P1-1). Two rules, both enforced by
   caught-error `console.warn`/`console.error` in the page controllers logs
   `scrubErrorMessage(e)` (from `js/imagery.js`) — never the raw `Error`.
   `scrubErrorMessage` strips query strings (tokens) and 10+ digit runs
-  (image ids). The static scan asserts no controller passes a bare caught
-  error to `console.*`.
+  (image ids). `chrome-ui.js` (the listener-failure log) and
+  `analytics.js` (the PostHog-load-failure log) route through it too.
+
+**What the static scan actually proves (and what it does not).**
+`tests/console-scrub.test.js` lexes **every** `js/*.js` file (auto-discovered,
+not a hand-picked list) with a small JS tokenizer — comments, string and
+template literals, `${…}` interpolations and regex literals are all parsed,
+so an apostrophe in a comment can no longer blind it (the old bug behind
+review RF-1). For each `console.warn`/`console.error` call it asserts no
+un-scrubbed error alias (`…, e)`, `${e}`, `e.message`, `e.stack`,
+`String(e)`, and `err`/`error`/`ex` aliases) reaches the console. A per-file
+**raw-vs-scanned count parity** check plus a total-sites floor make the scan
+non-vacuous: if a real call is ever silently dropped from the parse (or a
+guarded file disappears), the suite fails.
+
+This is a **lexical, single-file** guarantee: it proves each `console.*` call
+*as written* does not name a bare caught-error value, and that the check
+itself cannot be silently blinded. It is **not** a whole-program data-flow
+proof — it cannot follow an error copied into an intermediate variable first
+(`const m = e.message; console.warn(m)`), and it deliberately does **not**
+touch third-party SDK console output (see §4.1). Those residuals are called
+out honestly rather than papered over.
+
+### 4.1 Residual: third-party SDK console output (advisory, review A2)
+Console capture is left **on** (`enable_recording_console_log: true`) because
+our own skip-loop warnings are the story of a failing round. The trade-off:
+the Firebase and Mapillary SDKs' *own* `console.*` lines ride into replay
+unscrubbed, and a Firebase warning can embed a database path containing a
+room code. This is pre-existing, consent-gated, and room codes are
+24-hour-lived; monkey-patching SDK console output is explicitly out of scope
+for the RF-1 guardrail work. Options if ever scheduled: scrub console entries
+in a replay `before_send`, or accept and document (current stance).
 
 ## 5. Verify on a real recording (do this, don't assume)
 
