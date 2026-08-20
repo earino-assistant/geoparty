@@ -540,7 +540,11 @@ export function createAnalytics({ storage, loadPosthog, loadPosthogOneShot }) {
           loadPromise = null;
           queue.length = 0;
           if (typeof console !== "undefined") {
-            console.warn("analytics: PostHog failed to load", e);
+            // Scrubbed for parity with the controllers: this fires only when
+            // PostHog never loaded (so no replay can capture it today), but the
+            // console-scrub guard covers every production file uniformly and a
+            // bare error here would be an un-scrubbed leak shape (review RF-1).
+            console.warn("analytics: PostHog failed to load:", scrubErrorMessage(e));
           }
           return null;
         });

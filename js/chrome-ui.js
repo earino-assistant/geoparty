@@ -8,6 +8,7 @@
 // but the attribute and the listener set.
 
 import { utilitiesVisible } from "./chrome.js";
+import { scrubErrorMessage } from "./imagery.js";
 
 let current = null;
 const listeners = new Set();
@@ -33,7 +34,10 @@ export function setActiveScreen(screenId) {
   current = id;
   applyChrome();
   for (const fn of listeners) {
-    try { fn(id); } catch (e) { console.warn("chrome listener failed", e); }
+    // Scrubbed like every other controller catch-log: console output rides
+    // into session replay, and a listener callback could carry an SDK-flavoured
+    // payload (review RF-1 / A1).
+    try { fn(id); } catch (e) { console.warn("chrome listener failed:", scrubErrorMessage(e)); }
   }
 }
 

@@ -7,13 +7,24 @@
 #
 # Politeness: ≤250 requests, one per ~1.2 s (≈5 minutes of traffic a week),
 # and the run aborts cleanly on the third 429 without writing anything.
+#
+# Two schedules (review RF-2):
+#   - Monday  04:13 UTC — the real check: hit the API, fold state, maybe PR.
+#   - Thursday 04:13 UTC — a CHEAP cache-refresh only. It makes NO Mapillary
+#     requests and opens NO PR; it just restores the newest failure-counter
+#     state and re-saves it under a fresh key. That touches the Actions cache
+#     every 3–4 days, keeping it comfortably inside GitHub's 7-day eviction
+#     window so a delayed Monday run can never silently lose the two-strike
+#     streak (the P1-4 regression the review flagged as sitting exactly on
+#     the eviction boundary).
 name: Pool health
 
 on:
   schedule:
-    # Monday 04:13 UTC — an odd minute, deliberately off the top-of-hour
-    # stampede that every other cron in the world fires on.
-    - cron: "13 4 * * 1"
+    # Odd minute, deliberately off the top-of-hour stampede every other cron
+    # fires on. Monday = full check; Thursday = cache-refresh only.
+    - cron: "13 4 * * 1"   # Monday   — API check + quarantine proposal
+    - cron: "13 4 * * 4"   # Thursday — cache refresh only, no API, no PR
   workflow_dispatch:
     inputs:
       dry_run:
@@ -36,20 +47,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A2/A4 guard: a manual dispatch from a non-default branch would save
+      # state into THAT ref's cache scope, invisible to later main runs — a
+      # silent state fork. Refuse it outright; dispatch from main only.
+      - name: Guard — manual dispatch must run from main
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error title=pool-health::Manual dispatch must run from 'main' (got '${{ github.ref }}'). A dispatch from another ref saves failure-counter state into that ref's cache scope, invisible to main's weekly runs (review A4). Re-run this workflow from the main branch."
+          exit 1
+
+      # Thursday's cron only refreshes the cache; Monday's cron and every
+      # manual dispatch run the full API check. `github.event.schedule` is the
+      # exact cron string that triggered a scheduled run (empty on dispatch).
+      - name: Determine run mode
+        id: mode
+        run: |
+          if [ "${{ github.event.schedule }}" = "13 4 * * 4" ]; then
+            echo "mode=refresh" >> "$GITHUB_OUTPUT"
+            echo "::notice title=pool-health::Midweek cache-refresh run — no Mapillary requests, no PR. Restoring and re-saving the failure-counter state to reset its 7-day eviction clock."
+          else
+            echo "mode=check" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.mode.outputs.mode == 'check'
         with:
           node-version: 22
 
       # State persistence WITHOUT pushing bookkeeping to main. The two-strike
       # quarantine needs a first dead run's failure counter to survive into the
-      # next weekly run; committing that to main every week is noise (and the
-      # old "Commit state only" branch just echoed a notice, so `fails` never
-      # passed 1 and no PR could ever open — the structurally-unreachable bug,
-      # review P1-4). The Actions cache is the smallest GitHub-native store for
-      # it: restore the newest state before the check, save a fresh immutable
-      # entry after. run_id makes every save key unique, so concurrent/manual
-      # runs and same-day reruns never collide on the cache key.
+      # next weekly run. The Actions cache is the smallest GitHub-native store
+      # for it: restore the newest state before the check, save a fresh
+      # immutable entry after. run_id makes every save key unique, so
+      # concurrent/manual runs and same-day reruns never collide on the key.
       - name: Restore pool-health state
+        id: restore
         uses: actions/cache/restore@v4
         with:
           path: tools/pool-health-state.json
@@ -57,8 +89,18 @@ jobs:
           restore-keys: |
             pool-health-state-
 
+      # Make a state reset LOUD instead of silent (review RF-2). An empty
+      # cache-matched-key means no prior pool-health-state-* cache existed to
+      # restore, so we fell back to the committed baseline and any in-progress
+      # two-strike streak is lost.
+      - name: Warn on cache miss / baseline fallback
+        if: steps.restore.outputs.cache-matched-key == ''
+        run: |
+          echo "::warning title=pool-health state reset::No pool-health-state-* cache was found. The two-strike failure counters fell back to the committed baseline (tools/pool-health-state.json) and any in-progress streak is lost. If this recurs, the state cache is being evicted inside GitHub's 7-day window — check that the midweek (Thursday) refresh run is firing."
+
       - name: Check pool entries against the Mapillary Graph API
         id: health
+        if: steps.mode.outputs.mode == 'check'
         env:
           # The same public, embeddable token that ships in config.js — this
           # workflow needs no secret of its own.
@@ -72,7 +114,7 @@ jobs:
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
       - name: Open a quarantine proposal PR
-        if: steps.health.outputs.added != '0' && steps.health.outputs.added != ''
+        if: steps.mode.outputs.mode == 'check' && steps.health.outputs.added != '0' && steps.health.outputs.added != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -99,7 +141,8 @@ jobs:
           - newly proposed for quarantine: ${{ steps.health.outputs.added }}
 
           Every id here failed to resolve on **two consecutive weekly runs**
-          (the failure counter persists between runs via the Actions cache).
+          (the failure counter persists between runs via the Actions cache;
+          a cheap midweek refresh run keeps that cache from being evicted).
           `js/pool.js` filters `data/pool_quarantine.json` at load time, so
           merging removes them from play; the runtime dead-image skip stays as
           the belt to this suspender.
@@ -121,13 +164,15 @@ jobs:
           BODY
           )"
 
-      # Persist the (already-written) state file so the next weekly run sees
-      # this run's failure counters — the whole point of the two-strike rule.
-      # `always()` so a run that quarantined nothing (added == 0) still saves
-      # its incremented counters; the immutable run_id key means this never
-      # races the restore above. No push to main, ever.
+      # Persist the state file so the next run sees this run's failure counters
+      # — the whole point of the two-strike rule, and (on the Thursday refresh)
+      # the whole point of the run. `always()` so a run that quarantined
+      # nothing still re-saves; the immutable run_id key never races the
+      # restore above. Skipped only when the dispatch guard already failed
+      # (restore did not run), so a refused non-main dispatch writes nothing.
+      # No push to main, ever.
       - name: Save pool-health state
-        if: always()
+        if: always() && steps.restore.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: tools/pool-health-state.json
