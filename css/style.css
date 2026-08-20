@@ -1686,3 +1686,33 @@ body[data-screen="p-home"] .sound-toggle {
    the page's scroll. */
 .viewer-full, .map-full, .guess-live-map, .h2h-grid { touch-action: none; }
 .p-reveal-map, .reveal-map { touch-action: pan-y pinch-zoom; }
+
+
+/* ================================================================
+   Retryable imagery-degraded overlay (stabilization: review P1-3/P2-1)
+   ================================================================ */
+
+/* Shown when a stub viewer (SDK blocked / no WebGL) or a transient timeout
+   left the round with no playable panorama. It is deliberately NOT pool
+   exhaustion: nothing is scored, saved or pushed — the player retries. */
+.imagery-degraded {
+  position: fixed;
+  inset: 0;
+  z-index: 3100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.82);
+}
+.imagery-degraded p {
+  margin: 0;
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.imagery-degraded button { min-width: 160px; padding: 12px 0; font-size: 1rem; }

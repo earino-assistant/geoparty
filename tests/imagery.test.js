@@ -8,6 +8,8 @@ import { readFileSync } from "node:fs";
 import {
   ERROR_CLASSES,
   HARD_FAILURE_CLASSES,
+  DEAD_ENTRY_CLASSES,
+  isDeadEntryClass,
   isFailureClass,
   errorMessage,
   classifyImageryError,
@@ -591,5 +593,20 @@ test("chaosAllowed: dev hosts only — production can never be told to fail", ()
   for (const h of ["geoparty.example", "earino.github.io", "evil.localhost.com",
     "localhost.attacker.net", "10.0.0.5"]) {
     assert.equal(chaosAllowed(h), false, h);
+  }
+});
+
+test("isDeadEntryClass: ONLY image_dead is a deterministic pool skip", () => {
+  // Skipping past a live seeded entry on anything but a provably-dead entry
+  // desyncs the Daily's shared order (review P2-5) and burns the pool for
+  // nothing (P1-3), so the sampler advances on image_dead alone.
+  assert.deepEqual(DEAD_ENTRY_CLASSES, ["image_dead"]);
+  assert.equal(isDeadEntryClass("image_dead"), true);
+  for (const cls of [
+    "network_timeout", "network_offline", "http_rate_limit", "http_server",
+    "http_auth", "webgl_unavailable", "webgl_context_lost", "viewer_init",
+    "no_neighbors", "sdk_unknown", "cancelled", undefined, null, "",
+  ]) {
+    assert.equal(isDeadEntryClass(cls), false, `${cls} must not skip a live entry`);
   }
 });

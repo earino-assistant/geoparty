@@ -70,6 +70,34 @@ gate on `trackError`, the one-shot diagnostic path and the `before_send` /
 network sanitizers; `tests/report-ui.test.js` (13) covers the report sheet
 including the decliner branch.
 
+## Dead entry vs transient failure — the `degraded` retry contract
+
+`loadRoundImage` distinguishes two kinds of round-start failure, because they
+must be handled differently (stabilization: review P1-3, P2-1, P2-5):
+
+- **A provably dead entry** (`image_dead` — a 404 / "does not exist" / "not
+  found") is a property of the *content*: it is dead for everyone, so the
+  seeded sampler **skips** it deterministically. Every device on the same seed
+  skips the same entry to the same next spot, which is what keeps the Daily's
+  "same five for everyone" intact.
+- **Any other failure** (`network_timeout`, `network_offline`,
+  `http_rate_limit`, `http_server`, `http_auth`, `webgl_*`, `sdk_unknown`, or a
+  **stub viewer** with `iv.ok === false`) is transient or environmental — a
+  property of *this device/moment*, not of the entry. Advancing the seeded
+  sampler past a **live** entry on a slow-network timeout would silently give
+  that device a different location than everyone else (the old P2-5 bug), and
+  grinding the whole pool on a stub viewer would zero a Daily run at score 0
+  (P1-3). So `loadRoundImage` keeps the same entry, consumes nothing, and
+  returns `{ entry: null, degraded: true }`.
+
+The `degraded` flag is the caller contract. On `degraded: true` no caller may
+finish a Daily run, `finishGame()` a couch game, or push `{phase:"gameOver"}`
+to an h2h room — each shows a retryable "couldn't load the imagery, nothing
+was counted" overlay instead. Only a genuinely exhausted pool (every remaining
+entry provably dead) returns `{ entry: null, degraded: false }`, which is the
+sole null-entry case the finish/end paths act on. Covered by the
+`degraded` scenarios in `tests/viewer-ui.test.js`.
+
 ## Manual on-device runbook (what CI cannot prove)
 
 Run once before trusting the dashboard, on a real phone, consent accepted:

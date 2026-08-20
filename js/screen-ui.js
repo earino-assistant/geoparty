@@ -35,6 +35,7 @@ import { initSound, playSound, prefersReducedMotion } from "./fx-ui.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer } from "./viewer-ui.js";
+import { scrubErrorMessage } from "./imagery.js";
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = [
@@ -318,7 +319,9 @@ function renderRound(state) {
           applyPose(latestState.round.pose);
         }
       })
-      .catch((e) => console.warn("screen: image load failed", e));
+      // Scrubbed: a raw SDK rejection carries the image id / a tokened URL,
+      // and console capture rides into replays (review P1-1).
+      .catch((e) => console.warn("screen: image load failed —", scrubErrorMessage(e)));
   } else {
     applyPose(round.pose);
   }

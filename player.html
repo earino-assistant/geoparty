@@ -28,7 +28,9 @@
 </head>
 <body>
   <div id="connPill" class="conn-pill hidden">reconnecting…</div>
-  <div id="toast" class="toast"></div>
+  <!-- Masked wholesale: team-name toasts flow through here ("Blue locked
+       in!") — replay masking (review P1-2). -->
+  <div id="toast" class="toast" data-ph-mask></div>
 
   <!-- 1. Home: the joiner's whole world (review §6.2). The majority of
        arrivals come from a QR or an invite link and need exactly two
@@ -93,7 +95,7 @@
       </details>
       <h2>Teams</h2>
       <ul id="pLobbyTeams" data-ph-mask class="totals-list lobby-teams"></ul>
-      <div id="pLobbyNote" class="waiting-screen-note"></div>
+      <div id="pLobbyNote" class="waiting-screen-note" data-ph-mask></div>
     </div>
     <div class="action-bar">
       <button id="btnPLeave" class="btn-ghost">Leave</button>
@@ -157,7 +159,7 @@
       <div id="pRevealPlace" class="reveal-headline" data-ph-mask>—</div>
       <div id="pRevealResult" class="reveal-result">—</div>
       <ul id="pRevealBoard" data-ph-mask class="totals-list reveal-board-list"></ul>
-      <div id="pRevealNote" class="waiting-screen-note advance-note"></div>
+      <div id="pRevealNote" class="waiting-screen-note advance-note" data-ph-mask></div>
     </div>
     <div class="action-bar">
       <button id="btnPHold" class="btn-ghost hidden">✋ Hold</button>

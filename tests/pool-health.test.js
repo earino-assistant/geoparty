@@ -121,3 +121,49 @@ test("proposeQuarantine: the output is a plain sorted string array", () => {
   assert.deepEqual(out, ["123"]);
   for (const id of out) assert.equal(typeof id, "string");
 });
+
+/* ================================================================
+ * Two-strike progression ACROSS runs (review P1-4). The fold + proposal are
+ * correct; the shipped bug was that the failure counter never survived from
+ * one weekly run to the next (the "Commit state only" branch just echoed a
+ * notice), so `fails` maxed at 1 forever and no PR could ever open. The
+ * workflow now persists tools/pool-health-state.json via the Actions cache.
+ * These model that restore → fold → propose → save cycle in pure code, so a
+ * regression that breaks the two-strike math fails here.
+ * ================================================================ */
+
+test("two consecutive dead runs cross the threshold when state persists", () => {
+  const dead = (at) => [{ id: "ghost", status: "dead", checked_at: at }];
+
+  // Run 1 (first run ever / cache miss): fresh state.
+  let persisted = foldState({ entries: {} }, dead("2026-08-17T04:13:00Z"));
+  assert.equal(persisted.ghost.fails, 1);
+  assert.deepEqual(proposeQuarantine(persisted, []), [],
+    "one dead run must NOT propose — a 404 can be transient");
+
+  // Run 2: the SAME persisted state is restored (the fix) and folded again.
+  persisted = foldState({ entries: persisted }, dead("2026-08-24T04:13:00Z"));
+  assert.equal(persisted.ghost.fails, 2);
+  assert.deepEqual(proposeQuarantine(persisted, []), ["ghost"],
+    "the second consecutive dead run proposes the quarantine");
+});
+
+test("a live run between two deaths resets the streak — no proposal", () => {
+  const one = (id, status, at) => [{ id, status, checked_at: at }];
+  let s = foldState({ entries: {} }, one("x", "dead", "t1"));
+  s = foldState({ entries: s }, one("x", "alive", "t2"));
+  s = foldState({ entries: s }, one("x", "dead", "t3"));
+  assert.equal(s.x.fails, 1, "the streak reset on the live check");
+  assert.deepEqual(proposeQuarantine(s, []), [],
+    "non-consecutive deaths never reach two strikes");
+});
+
+test("an inconclusive run does not break an in-progress streak", () => {
+  // fails=1 from last week, this week's check is a 429/timeout: the counter is
+  // preserved (neither advanced nor reset), so next week can still be strike 2.
+  let s = { entries: { y: { fails: 1 } } };
+  s = { entries: foldState(s, [{ id: "y", status: "rate_limited", checked_at: "t" }]) };
+  assert.equal(s.entries.y.fails, 1);
+  s = { entries: foldState(s, [{ id: "y", status: "dead", checked_at: "t2" }]) };
+  assert.deepEqual(proposeQuarantine(s.entries, []), ["y"]);
+});

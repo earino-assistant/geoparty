@@ -823,7 +823,12 @@ field-reported entries and a rotating sample, and *propose* quarantine.
      requests ≈ 5 min of polite traffic weekly). On the third 429:
      abort the run cleanly (exit 0, log a notice) — never hammer.
   4. Update per-id consecutive-failure counts in
-     `tools/pool-health-state.json` (committed via the PR below).
+     `tools/pool-health-state.json`, persisted between runs via the **Actions
+     cache** (restored before the check, saved after with `if: always()` under
+     a `run_id`-unique key). Persisting the counter — rather than committing
+     bookkeeping to `main` — is what makes the two-strike threshold reachable
+     at all; the original workflow only echoed a notice, so `fails` maxed at 1
+     forever and no PR could ever open (fixed in the v0.3 stabilization pass).
 - **Quarantine proposal:** ids dead on ≥ 2 consecutive runs go into a PR
   adding them to `data/pool_quarantine.json` (a plain id array). The PR
   is opened with `gh`, never auto-merged — the owner reviews (a 404 can

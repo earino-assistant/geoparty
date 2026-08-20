@@ -27,7 +27,9 @@
 </head>
 <body>
   <div id="connPill" class="conn-pill hidden">reconnecting…</div>
-  <div id="toast" class="toast"></div>
+  <!-- Masked wholesale: team-name toasts flow through here ("Pass the phone
+       — Blue is up!") — replay masking (review P1-2). -->
+  <div id="toast" class="toast" data-ph-mask></div>
 
   <!-- 1. Setup -->
   <section id="h-setup" class="phase-screen">
@@ -150,7 +152,9 @@
   <!-- 4. Guess: world map, tap to pin -->
   <section id="h-guess" class="phase-screen hidden">
     <div id="guessMap" class="map-full"></div>
-    <div class="guess-hint">Tap the map to drop your pin</div>
+    <!-- The whose-turn banner interpolates the active team's name
+         (host-ui.updateGuessHint) — replay masking (review P1-2). -->
+    <div id="hGuessHint" class="guess-hint" data-ph-mask>Tap the map to drop your pin</div>
     <!-- §6.1: the estimate rides on the primary button's label; SUPER SURE
          is a 🔥 chip docked to the bar (unspent only) opening one sheet. -->
     <div class="action-bar">

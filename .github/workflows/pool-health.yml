@@ -40,6 +40,23 @@ jobs:
         with:
           node-version: 22
 
+      # State persistence WITHOUT pushing bookkeeping to main. The two-strike
+      # quarantine needs a first dead run's failure counter to survive into the
+      # next weekly run; committing that to main every week is noise (and the
+      # old "Commit state only" branch just echoed a notice, so `fails` never
+      # passed 1 and no PR could ever open — the structurally-unreachable bug,
+      # review P1-4). The Actions cache is the smallest GitHub-native store for
+      # it: restore the newest state before the check, save a fresh immutable
+      # entry after. run_id makes every save key unique, so concurrent/manual
+      # runs and same-day reruns never collide on the cache key.
+      - name: Restore pool-health state
+        uses: actions/cache/restore@v4
+        with:
+          path: tools/pool-health-state.json
+          key: pool-health-state-${{ github.run_id }}
+          restore-keys: |
+            pool-health-state-
+
       - name: Check pool entries against the Mapillary Graph API
         id: health
         env:
@@ -59,11 +76,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          BRANCH="pool-health/$(date -u +%Y-%m-%d)"
+          # run_id in the branch name so same-day reruns (and manual dispatches
+          # racing the schedule) never collide on an existing branch.
+          BRANCH="pool-health/$(date -u +%Y-%m-%d)-${{ github.run_id }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add data/pool_quarantine.json tools/pool-health-state.json
+          # Only the quarantine PROPOSAL is committed — the failure-counter
+          # state file is bookkeeping and lives in the Actions cache, never on
+          # main. Keeping it out of the PR makes the review purely about which
+          # ids leave the game.
+          git add data/pool_quarantine.json
           git commit -m "Pool health: propose quarantining ${{ steps.health.outputs.added }} dead entr(y/ies)"
           git push -u origin "$BRANCH"
           gh pr create \
@@ -75,10 +98,22 @@ jobs:
           - dead this run: ${{ steps.health.outputs.dead }}
           - newly proposed for quarantine: ${{ steps.health.outputs.added }}
 
-          Every id here failed to resolve on **two consecutive weekly runs**.
+          Every id here failed to resolve on **two consecutive weekly runs**
+          (the failure counter persists between runs via the Actions cache).
           `js/pool.js` filters `data/pool_quarantine.json` at load time, so
           merging removes them from play; the runtime dead-image skip stays as
           the belt to this suspender.
+
+          **⚠️ CI does not run on this PR.** It was created by the workflow's
+          `github.token`, and GitHub deliberately does not trigger workflows
+          on pushes/PRs made with that token — so there are **no green checks**
+          here even though the repo has them. Before merging, check out this
+          PR's branch and run the checks locally:
+
+          ```
+          gh pr checkout <this PR number>
+          npm test && npm run check
+          ```
 
           **Review before merging** — a 404 can be transient. Spot-check an id
           with `node tools/diag_lookup.mjs --id <image_id>` and open its
@@ -86,16 +121,14 @@ jobs:
           BODY
           )"
 
-      - name: Commit state only (nothing new to quarantine)
-        if: steps.health.outputs.added == '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if git diff --quiet tools/pool-health-state.json; then
-            echo "no state change"
-            exit 0
-          fi
-          # Failure counters still moved (an id died once, or recovered).
-          # That is bookkeeping, not a game change: land it on a branch and
-          # let the next run's PR carry it, rather than pushing to main.
-          echo "::notice::state updated but nothing crossed the quarantine threshold"
+      # Persist the (already-written) state file so the next weekly run sees
+      # this run's failure counters — the whole point of the two-strike rule.
+      # `always()` so a run that quarantined nothing (added == 0) still saves
+      # its incremented counters; the immutable run_id key means this never
+      # races the restore above. No push to main, ever.
+      - name: Save pool-health state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: tools/pool-health-state.json
+          key: pool-health-state-${{ github.run_id }}

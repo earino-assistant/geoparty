@@ -74,6 +74,7 @@ import {
 import { countdownTick } from "./fx.js";
 import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
+import { scrubErrorMessage } from "./imagery.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
@@ -127,6 +128,39 @@ function noticeDegradedImagery(skips) {
   toast("Some images wouldn’t load — we skipped ahead.", { surface: "host" });
 }
 
+// Retryable imagery-degraded overlay (stabilization: review P2-1). A stub
+// viewer (SDK blocked / no WebGL) or a transient timeout at round start hands
+// back NO entry with `degraded: true`. That is NOT pool exhaustion, so the
+// host must NOT finish the game and save a 0-score leaderboard row — nothing
+// is pushed to Firebase, the room stays where it was, and the host retries.
+// Injected (no HTML id lookup); carries no team name, so nothing new to mask.
+let degradedEl = null;
+function showImageryDegraded(onRetry) {
+  if (!degradedEl) {
+    degradedEl = document.createElement("div");
+    degradedEl.className = "imagery-degraded";
+    const p = document.createElement("p");
+    p.textContent =
+      "Couldn’t load the imagery. Nobody was scored — check your connection " +
+      "and try again.";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-primary";
+    btn.textContent = "Retry";
+    btn.addEventListener("click", () => {
+      hideImageryDegraded();
+      if (typeof degradedEl._retry === "function") degradedEl._retry();
+    });
+    degradedEl.append(p, btn);
+    document.body.appendChild(degradedEl);
+  }
+  degradedEl._retry = onRetry;
+  degradedEl.classList.remove("hidden");
+}
+function hideImageryDegraded() {
+  if (degradedEl) degradedEl.classList.add("hidden");
+}
+
 /* ================================================================
  * localStorage: leaderboard, active room, janitor bookkeeping
  * ================================================================ */
@@ -173,7 +207,7 @@ async function janitor() {
   for (const entry of mine) {
     if (Date.now() - entry.createdAt > 86_400_000) {
       try { await deleteRoom(entry.code); }
-      catch (e) { console.warn("janitor: could not delete", entry.code, e); }
+      catch (e) { console.warn("janitor: could not delete", scrubErrorMessage(e)); }
     } else {
       keep.push(entry);
     }
@@ -212,7 +246,7 @@ function persistActive() {
 // await them (degraded single-screen mode, spec §12).
 function push(patch) {
   updateRoom(roomCode, patch).catch((e) => {
-    console.warn("Firebase write failed (continuing locally):", e);
+    console.warn("Firebase write failed (continuing locally):", scrubErrorMessage(e));
   });
 }
 
@@ -302,14 +336,14 @@ async function newGame() {
     currentTruth = null;
     gameBest = null;
     writeRoom(roomCode, room).catch((e) =>
-      console.warn("Firebase write failed (continuing locally):", e));
+      console.warn("Firebase write failed (continuing locally):", scrubErrorMessage(e)));
     if (prevRoomCode && prevRoomCode !== roomCode) {
       // Queued after the new room's write on the same connection, so by the
       // time any subscriber of the old room sees the pointer, the new room
       // exists. The pointer lives inside the old room and is cleaned up
       // with it by the janitor.
       updateRoom(prevRoomCode, { nextRoom: roomCode }).catch((e) =>
-        console.warn("nextRoom pointer write failed:", e));
+        console.warn("nextRoom pointer write failed:", scrubErrorMessage(e)));
     }
     prevRoomCode = null;
     persistActive();
@@ -326,7 +360,7 @@ async function newGame() {
     });
     enterLobby();
   } catch (e) {
-    console.error(e);
+    console.error(scrubErrorMessage(e));
     toast("Could not create game — see console");
   } finally {
     $("btnNewGame").disabled = false;
@@ -403,7 +437,7 @@ async function abandonGame() {
   destroyHostRevealMap();
   screenBeat = null;
   if (unsubHeartbeat) { unsubHeartbeat(); unsubHeartbeat = null; }
-  try { await deleteRoom(roomCode); } catch (e) { console.warn(e); }
+  try { await deleteRoom(roomCode); } catch (e) { console.warn(scrubErrorMessage(e)); }
   localStorage.removeItem(LS_ACTIVE);
   destroyViewer();
   room = null;
@@ -480,6 +514,9 @@ function schedulePoseWrite() {
 }
 
 async function startRound(advance) {
+  // Captured so a retryable imagery failure can put the room back exactly
+  // where it was (nothing is pushed before the entry is confirmed).
+  const prevPhase = room.phase;
   if (!setPhase("roundActive")) return;
   stopAdvanceTicker();
   stopLobbyTicker();
@@ -495,8 +532,20 @@ async function startRound(advance) {
   // Sample the pool, skipping dead imagery silently (spec §9). The loop is
   // unchanged — it just lives in viewer-ui.js now, where each skip is timed,
   // classified and (once per pool entry) reported.
-  const { entry, skips } = await loadRoundImage(sampler, iv, "anchor");
+  const { entry, skips, degraded } = await loadRoundImage(sampler, iv, "anchor");
   if (!entry) {
+    if (degraded) {
+      // Retryable imagery failure (stub viewer / transient timeout), NOT pool
+      // exhaustion: nothing was pushed, so put the room back where it was and
+      // let the host retry. Never finishGame here (review P2-1) — that would
+      // save a fabricated 0-score game to the leaderboard.
+      room.phase = prevPhase;
+      // A stub viewer is dropped so the retry rebuilds it (the SDK may load
+      // late); a transient timeout keeps its working viewer.
+      if (iv && iv.ok === false) destroyViewer();
+      showImageryDegraded(() => startRound(advance));
+      return;
+    }
     toast("Location pool exhausted!", { surface: "host" });
     room.phase = "reveal"; // allow reveal -> gameOver transition
     finishGame();
@@ -1460,7 +1509,9 @@ async function resumeGame(code, state) {
       iv.beginRound(room.round.number);
       try { await iv.moveTo(room.round.imageId, "resume"); }
       catch (e) {
-        console.warn("resume: image failed to load", e);
+        // Raw SDK rejections carry the image id / a tokened URL, and console
+        // capture rides into replays — log only the scrubbed message (P1-1).
+        console.warn("resume: image failed to load —", scrubErrorMessage(e));
         toast("Imagery didn’t load — guess from the map.",
           { surface: "host" });
       }

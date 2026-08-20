@@ -38,6 +38,7 @@ import { oneShotHint, dismissHintCard, paintLockButton } from "./hints-ui.js";
 import { countdownTick } from "./fx.js";
 import { initSound, playSound, buzz } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
+import { scrubErrorMessage } from "./imagery.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
@@ -80,6 +81,34 @@ function noticeDegradedImagery(skips) {
   toast("Some images wouldn’t load — we skipped ahead.", { surface: "daily" });
 }
 
+// Retryable imagery-degraded overlay (stabilization: review P1-3). A stub
+// viewer (SDK blocked / no WebGL / offline) or a transient timeout hands back
+// NO entry with `degraded: true` — the run is not scored, nothing is saved,
+// and the player simply retries the same round. Injected (no HTML id lookup),
+// carries no team name or place, so nothing new to mask.
+let degradedEl = null;
+function showImageryDegraded() {
+  if (!degradedEl) {
+    degradedEl = document.createElement("div");
+    degradedEl.className = "imagery-degraded";
+    const p = document.createElement("p");
+    p.textContent =
+      "Couldn’t load today’s imagery. Nothing was counted — check your " +
+      "connection and try again.";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-primary";
+    btn.textContent = "Retry";
+    btn.addEventListener("click", () => { hideImageryDegraded(); startRound(); });
+    degradedEl.append(p, btn);
+    document.body.appendChild(degradedEl);
+  }
+  degradedEl.classList.remove("hidden");
+}
+function hideImageryDegraded() {
+  if (degradedEl) degradedEl.classList.add("hidden");
+}
+
 /* ================================================================
  * Session state — one run, no peers
  * ================================================================ */
@@ -118,7 +147,9 @@ async function startChallenge() {
     track("daily_challenge_started", { day_number: dayNum });
     await startRound();
   } catch (e) {
-    console.error(e);
+    // Scrub before logging: console capture rides into replays, and an SDK
+    // rejection can carry a raw image id / tokened URL (review P1-1).
+    console.error(scrubErrorMessage(e));
     $("dIntroErr").textContent = "Couldn't load today's places — try again.";
     $("btnDailyStart").disabled = false;
   }
@@ -141,11 +172,30 @@ async function startRound() {
   showScreen("d-round");
   oneShotHint("pano", HINT_CARDS.pano);
   if (!iv) makeViewer();
+  hideImageryDegraded();
   iv.beginRound(run.rounds.length + 1);
-  // Same dead-image skip as the party hosts: everyone shares the seeded
-  // order, so everyone skips the same dead entries to the same five spots.
-  const { entry, skips } = await loadRoundImage(sampler, iv, "anchor");
-  if (!entry) { finishRun(); return; } // pool exhausted — score what we have
+  // Same DEAD-image skip as the party hosts: everyone shares the seeded order
+  // and skips the same provably-dead entries to the same five spots. A
+  // transient timeout is NOT a dead entry, so loadRoundImage keeps the seeded
+  // entry and hands back `degraded` rather than advancing to a different live
+  // spot — that is what preserves "the same five for everyone" on a slow
+  // network (review P2-5).
+  const { entry, skips, degraded } = await loadRoundImage(sampler, iv, "anchor");
+  if (!entry) {
+    // A stub viewer or a transient failure must NOT burn the Daily's one run
+    // of the day (review P1-3): show a retryable state and consume nothing.
+    // Only a genuinely exhausted pool scores what we have so far.
+    if (degraded) {
+      // If the viewer itself is a stub (SDK blocked / no WebGL), drop it so a
+      // retry rebuilds from scratch — the SDK may have finished loading since.
+      // A transient timeout keeps its working viewer and just re-attempts.
+      if (iv && iv.ok === false) destroyViewer();
+      showImageryDegraded();
+      return;
+    }
+    finishRun();
+    return;
+  }
   noticeDegradedImagery(skips);
   sampler.advance();
   current = entry;
@@ -198,7 +248,7 @@ function ensureGuessMap() {
       guessMarker.setLatLng(e.latlng);
     } else {
       guessMarker = L.marker(e.latlng, { draggable: true }).addTo(guessMap);
-      guessMarker.on("move", updateLockNowHint);
+      guessMarker.on("move", updateLockButton);
     }
     $("btnDLockIn").disabled = false;
     updateGuessBanner();

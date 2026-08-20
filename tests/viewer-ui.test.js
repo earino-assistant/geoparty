@@ -169,6 +169,10 @@ before(async () => {
 
 beforeEach(() => {
   env.posthog.reset();
+  // Rebuild the module's per-session singletons (budget/dedup/log/facts) so
+  // tests are order-independent (review P2-3): without this the cumulative
+  // image_dead budget and leftover health facts leak across tests.
+  viewerUi.__resetSessionForTests();
   mly.supported = true;
   mly.constructThrows = null;
   globalThis.navigator.onLine = true;
@@ -396,12 +400,89 @@ test("G: an exhausted pool reports a failed load and stops the loop", async () =
   window.__gpChaos.moveTo = () => Promise.reject(new Error("Node does not exist"));
   const iv = makeHostViewer();
   const s = sampler("x1", "x2", "x3");
-  const { entry, skips } = await viewerUi.loadRoundImage(s, iv, "anchor");
+  const { entry, skips, degraded } = await viewerUi.loadRoundImage(s, iv, "anchor");
   assert.equal(entry, null, "the caller's pool-exhausted path takes over");
   assert.equal(skips, 3);
+  assert.equal(degraded, false,
+    "genuine exhaustion is NOT degraded — the finish/end paths must act on it");
   const ev = lastEvent("imagery_load");
   assert.equal(ev.props.ok, false);
   assert.equal(ev.props.skips, 3);
+  iv.destroy();
+});
+
+/* ================================================================
+ * degraded — the retryable-vs-exhausted contract (P1-3 / P2-1 / P2-5)
+ * ================================================================ */
+
+test("degraded: a transient timeout keeps the seeded entry and does NOT advance",
+  async () => {
+    // The Daily's "same five for everyone" invariant: a slow-network timeout
+    // must not skip a LIVE entry to a different one (review P2-5).
+    window.__gpChaos.timeoutMs = 5;
+    window.__gpChaos.moveTo = () => new Promise(() => {}); // never settles
+    const iv = makeHostViewer();
+    const s = sampler("live-1", "live-2", "live-3");
+
+    const { entry, skips, degraded } =
+      await viewerUi.loadRoundImage(s, iv, "anchor");
+    assert.equal(entry, null, "no entry to score");
+    assert.equal(degraded, true, "retryable — the caller must not consume the run");
+    assert.equal(skips, 0);
+    assert.equal(s.cursor, 0, "the seeded entry is untouched — no live spot skipped");
+    const ev = lastEvent("imagery_load");
+    assert.equal(ev.props.ok, false);
+    assert.equal(ev.props.error_class, "network_timeout");
+    assert.ok(!("exhausted" in ev.props), "a transient failure is not exhaustion");
+    iv.destroy();
+  });
+
+test("degraded: a rate-limited anchor is retryable, not a pool skip", async () => {
+  window.__gpChaos.moveTo = () =>
+    Promise.reject(new Error("Request failed with status 429"));
+  const iv = makeHostViewer();
+  const s = sampler("a", "b", "c");
+  const { entry, degraded } = await viewerUi.loadRoundImage(s, iv, "anchor");
+  assert.equal(entry, null);
+  assert.equal(degraded, true, "http_rate_limit is environmental, never a dead entry");
+  assert.equal(s.cursor, 0, "the pool is not burned on a transient class");
+  iv.destroy();
+});
+
+test("degraded: dead entries still skip; only the transient one degrades",
+  async () => {
+    // A live pool with a dead first entry then a timeout on the (live) second:
+    // the dead one is skipped deterministically, the timeout degrades.
+    let calls = 0;
+    window.__gpChaos.timeoutMs = 5;
+    window.__gpChaos.moveTo = () => {
+      calls += 1;
+      if (calls === 1) return Promise.reject(new Error("Node does not exist"));
+      return new Promise(() => {}); // second entry: transient timeout
+    };
+    const iv = makeHostViewer();
+    const s = sampler("dead-1", "live-2", "live-3");
+    const { entry, skips, degraded } =
+      await viewerUi.loadRoundImage(s, iv, "anchor");
+    assert.equal(entry, null);
+    assert.equal(degraded, true);
+    assert.equal(skips, 1, "the dead entry was skipped");
+    assert.equal(s.cursor, 1, "and the sampler advanced past ONLY the dead one");
+    iv.destroy();
+  });
+
+test("degraded: a stub viewer is retryable, never exhaustion", async () => {
+  mly.supported = false; // no WebGL → stub viewer
+  const iv = makeHostViewer();
+  const s = sampler("a", "b", "c");
+  const { entry, skips, degraded } = await viewerUi.loadRoundImage(s, iv, "anchor");
+  assert.equal(entry, null);
+  assert.equal(skips, 0);
+  assert.equal(degraded, true, "a stub viewer must not zero a Daily run (P1-3)");
+  assert.equal(s.cursor, 0, "not one pool entry consumed");
+  const ev = lastEvent("imagery_load");
+  assert.ok(!("exhausted" in ev.props),
+    "the stub load is not tagged exhausted — viewer_init already carries the failure");
   iv.destroy();
 });
 
@@ -532,10 +613,19 @@ test("pano_session: beginRound flushes the previous round's fold", () => {
  * ================================================================ */
 
 test("imagerySession: the health fold sees what the wrapper recorded", async () => {
+  // Prove causation, not coincidence (review P2-3): a CLEAN session reads
+  // healthy, and it is the http_auth failure THIS test injects that flips it
+  // to failed. (The old assertion passed on leftover facts from earlier
+  // tests, so the path under test could have been broken and gone unnoticed.)
+  assert.equal(viewerUi.imagerySession().health(), "healthy",
+    "the reset gives every test a clean session to start from");
+
   window.__gpChaos.moveTo = () => Promise.reject(new Error("401 Unauthorized"));
   const iv = makeHostViewer();
   await iv.moveTo("666666666666666", "anchor").catch(() => {});
-  assert.equal(viewerUi.imagerySession().health(), "failed");
+
+  assert.equal(viewerUi.imagerySession().health(), "failed",
+    "the injected http_auth failure is what flips health to failed");
   assert.equal(viewerUi.imagerySession().log.failures().slice(-1)[0].error_class,
     "http_auth");
   iv.destroy();
@@ -545,21 +635,23 @@ test("imagerySession: the health fold sees what the wrapper recorded", async () 
  * D — chaos hooks are inert off a dev host
  * ================================================================ */
 
-test("D: chaos hooks do nothing when the page is not on a dev host", async () => {
+test("D: chaos hooks do nothing when the page is not on a dev host", async (t) => {
+  // t.after restores the global even if an assertion throws mid-test — a bare
+  // restore at the end of the body leaks the mutation on failure (P2-3).
+  t.after(() => { globalThis.location.hostname = "localhost"; });
   globalThis.location.hostname = "geoparty.example";
   window.__gpChaos.moveTo = () => Promise.reject(new Error("chaos should not fire"));
   const iv = makeHostViewer();
   await iv.moveTo("777777777777777", "anchor");   // the REAL fake viewer resolves
   assert.equal(lastEvent("imagery_load").props.ok, true);
   iv.destroy();
-  globalThis.location.hostname = "localhost";
 });
 
-test("D: a production page never exposes the __gpViewers harness handle", () => {
+test("D: a production page never exposes the __gpViewers harness handle", (t) => {
+  t.after(() => { globalThis.location.hostname = "localhost"; });
   globalThis.location.hostname = "geoparty.example";
   delete window.__gpViewers;
   const iv = makeHostViewer();
   assert.equal(window.__gpViewers, undefined);
   iv.destroy();
-  globalThis.location.hostname = "localhost";
 });

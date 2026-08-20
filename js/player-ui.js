@@ -88,6 +88,7 @@ import { screenLink, tvBrowserLine, phoneJoinLine } from "./tvlink.js";
 import { countdownTick } from "./fx.js";
 import { initSound, playSound, buzz } from "./fx-ui.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
+import { scrubErrorMessage } from "./imagery.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
@@ -139,6 +140,39 @@ function noticeDegradedImagery(skips) {
   toast("Some images wouldn’t load — we skipped ahead.", { surface: "player" });
 }
 
+// Retryable imagery-degraded overlay (stabilization: review P2-1). Round
+// start is host-only; a stub viewer or a transient timeout there hands back
+// NO entry with `degraded: true`. That is NOT pool exhaustion, so the host
+// must NOT push {phase:"gameOver"} — which would end the game for the whole
+// room with a fabricated winner. Nothing is pushed; the host retries and the
+// other phones keep waiting. Injected, no team name → nothing new to mask.
+let degradedEl = null;
+function showImageryDegraded(onRetry) {
+  if (!degradedEl) {
+    degradedEl = document.createElement("div");
+    degradedEl.className = "imagery-degraded";
+    const p = document.createElement("p");
+    p.textContent =
+      "Couldn’t load the imagery. Nobody was scored — check your connection " +
+      "and try again.";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-primary";
+    btn.textContent = "Retry";
+    btn.addEventListener("click", () => {
+      hideImageryDegraded();
+      if (typeof degradedEl._retry === "function") degradedEl._retry();
+    });
+    degradedEl.append(p, btn);
+    document.body.appendChild(degradedEl);
+  }
+  degradedEl._retry = onRetry;
+  degradedEl.classList.remove("hidden");
+}
+function hideImageryDegraded() {
+  if (degradedEl) degradedEl.classList.add("hidden");
+}
+
 function wireSeg(segId) {
   const seg = $(segId);
   seg.addEventListener("click", (e) => {
@@ -185,7 +219,7 @@ async function janitor() {
   for (const entry of mine) {
     if (Date.now() - entry.createdAt > 86_400_000) {
       try { await deleteRoom(entry.code); }
-      catch (e) { console.warn("janitor: could not delete", entry.code, e); }
+      catch (e) { console.warn("janitor: could not delete", scrubErrorMessage(e)); }
     } else {
       keep.push(entry);
     }
@@ -241,7 +275,7 @@ const myResult = () =>
 
 function push(patch) {
   updateRoom(roomCode, patch).catch((e) => {
-    console.warn("Firebase write failed (continuing locally):", e);
+    console.warn("Firebase write failed (continuing locally):", scrubErrorMessage(e));
   });
 }
 
@@ -339,7 +373,7 @@ async function createRoom() {
     };
     const state = initialH2hRoomState(collectSettings(), teams, "t1");
     writeRoom(code, state).catch((e) =>
-      console.warn("Firebase write failed:", e));
+      console.warn("Firebase write failed:", scrubErrorMessage(e)));
     const mine = lsGet(LS_MY_ROOMS, []);
     mine.push({ code, createdAt: state.createdAt });
     lsSet(LS_MY_ROOMS, mine);
@@ -354,7 +388,7 @@ async function createRoom() {
     track("team_joined", { mode: "h2h", team_count: 1 });
     enterRoom(code, "t1");
   } catch (e) {
-    console.error(e);
+    console.error(scrubErrorMessage(e));
     toast("Could not create game — see console");
   } finally {
     $("btnOpenRoom").disabled = false;
@@ -402,7 +436,7 @@ async function joinRoom() {
     track("team_joined", { mode: "h2h", team_count: teamCount });
     enterRoom(code, claimed);
   } catch (e) {
-    console.error(e);
+    console.error(scrubErrorMessage(e));
     err.textContent = "Could not join — try again.";
   } finally {
     $("btnJoin").disabled = false;
@@ -461,7 +495,7 @@ async function followNextRoom(code) {
     toast("Following the winner…");
     enterRoom(code, mine);
   } catch (e) {
-    console.error(e);
+    console.error(scrubErrorMessage(e));
     leaveToHome();
   }
 }
@@ -494,7 +528,7 @@ async function leaveOrAbandon() {
       mode: "h2h",
       rounds_played: room.round ? room.round.number : 0,
     });
-    try { await deleteRoom(roomCode); } catch (e) { console.warn(e); }
+    try { await deleteRoom(roomCode); } catch (e) { console.warn(scrubErrorMessage(e)); }
     const mine = lsGet(LS_MY_ROOMS, []).filter((r) => r.code !== roomCode);
     lsSet(LS_MY_ROOMS, mine);
     leaveToHome();
@@ -502,7 +536,7 @@ async function leaveOrAbandon() {
     // A member leaving the lobby frees their slot for someone else.
     if (room.phase === "lobby") {
       try { await updateRoom(roomCode, { [`teams/${myTeam}`]: null }); }
-      catch (e) { console.warn(e); }
+      catch (e) { console.warn(scrubErrorMessage(e)); }
     }
     leaveToHome();
   }
@@ -695,9 +729,20 @@ async function startRound(advance) {
     panoRoundSeen = (room.round ? room.round.number : 0) + 1;
     iv.beginRound(panoRoundSeen);
     // Same dead-image skip loop as before, now shared and instrumented.
-    const { entry, skips } = await loadRoundImage(sampler, iv, "anchor");
+    const { entry, skips, degraded } = await loadRoundImage(sampler, iv, "anchor");
     noticeDegradedImagery(skips);
     if (!entry) {
+      if (degraded) {
+        // Retryable imagery failure (stub viewer / transient timeout), NOT
+        // pool exhaustion: nothing was pushed, so the room stays where it is.
+        // Never push gameOver here (review P2-1) — that would end the game for
+        // every phone with a fabricated winner. The host retries.
+        // Drop a stub viewer so the retry rebuilds it (the SDK may load late);
+        // a transient timeout keeps its working viewer.
+        if (iv && iv.ok === false) destroyViewer();
+        showImageryDegraded(() => startRound(advance));
+        return;
+      }
       toast("Location pool exhausted!", { surface: "player" });
       const winner = h2hWinner(room.teams, roomCode);
       push({ phase: "gameOver", hostTeam: winner });
@@ -737,7 +782,7 @@ async function startRound(advance) {
       ...(via ? { advance: via } : {}),
     });
   } catch (e) {
-    console.error(e);
+    console.error(scrubErrorMessage(e));
     toast("Could not start the round");
   } finally {
     $("btnPStart").disabled = false;
@@ -810,7 +855,9 @@ function renderRoundActive() {
       // is untouched — the wrapper only observes it.
       iv.noteReanchor();
       iv.moveTo(target, "anchor").catch((e) => {
-        console.warn("player: image load failed", e);
+        // Raw SDK rejections carry the image id / a tokened URL, and console
+        // capture rides into replays — log only the scrubbed message (P1-1).
+        console.warn("player: image load failed —", scrubErrorMessage(e));
         toast("Imagery didn’t load — guess from the map.",
           { surface: "player" });
       });
@@ -1644,11 +1691,11 @@ async function createNextGame() {
     const state = initialH2hRoomState(collectSettings(), teams, myTeam);
     switchingRooms = true; // stop reacting to the old room mid-handoff
     writeRoom(code, state).catch((e) =>
-      console.warn("Firebase write failed:", e));
+      console.warn("Firebase write failed:", scrubErrorMessage(e)));
     // Queued after the new room's write on the same connection: by the time
     // any subscriber sees the pointer, the room exists (couch pattern).
     updateRoom(oldCode, { nextRoom: code }).catch((e) =>
-      console.warn("nextRoom pointer write failed:", e));
+      console.warn("nextRoom pointer write failed:", scrubErrorMessage(e)));
     const mine = lsGet(LS_MY_ROOMS, []);
     mine.push({ code, createdAt: state.createdAt });
     lsSet(LS_MY_ROOMS, mine);
@@ -1663,7 +1710,7 @@ async function createNextGame() {
     });
     enterRoom(code, myTeam);
   } catch (e) {
-    console.error(e);
+    console.error(scrubErrorMessage(e));
     switchingRooms = false;
     toast("Could not create the next game");
   } finally {

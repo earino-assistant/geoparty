@@ -56,6 +56,24 @@ export function isFailureClass(errorClass) {
   return Boolean(errorClass) && !NON_FAILURE_CLASSES.includes(errorClass);
 }
 
+// The ONLY classes that mean the pool ENTRY itself is gone, so the seeded
+// sampler may deterministically skip past it. The skip is a property of the
+// content (dead everywhere, for everyone), which is what keeps the Daily's
+// "same five spots for everyone" invariant intact even as devices skip.
+//
+// Every OTHER failure (network_timeout, offline, rate_limit, server, auth,
+// webgl_*, sdk_unknown) is transient or environmental — a property of THIS
+// device/moment, not of the entry. Skipping past a LIVE entry on one of those
+// would desync the Daily's shared order (review P2-5) and burn the whole pool
+// for nothing, so loadRoundImage surfaces a retryable degraded state and does
+// NOT advance the sampler instead. `no_neighbors` is a navigation dead-end
+// (the anchor loaded fine), never an anchor-load skip reason.
+export const DEAD_ENTRY_CLASSES = Object.freeze(["image_dead"]);
+
+export function isDeadEntryClass(errorClass) {
+  return DEAD_ENTRY_CLASSES.includes(errorClass);
+}
+
 const RE_CANCELLED = /cancell?ed|aborted|superseded|request was replaced/i;
 const RE_AUTH = /\b40[13]\b|unauthoriz|forbidden|invalid (?:access )?token|token (?:expired|revoked)/i;
 const RE_RATE = /\b429\b|rate[ _-]?limit|too many requests|quota/i;

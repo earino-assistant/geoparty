@@ -5,6 +5,7 @@
 // heartbeat, as always).
 
 import { createViewer } from "./viewer-ui.js";
+import { scrubErrorMessage } from "./imagery.js";
 import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
 import {
@@ -274,7 +275,8 @@ function ensureGrid(state) {
       if (seedImage) {
         p.imageId = seedImage;
         p.iv.moveTo(seedImage, "seed")
-          .catch((e) => console.warn(`panel ${tid}: seed image failed`, e));
+          .catch((e) => console.warn(
+            `panel ${tid}: seed image failed —`, scrubErrorMessage(e)));
       }
     }
   });
@@ -390,7 +392,9 @@ function applyTeamFeed(p, state, round, feed, result, tid) {
   if (p.iv && targetImage && targetImage !== p.imageId) {
     p.imageId = targetImage;
     p.iv.moveTo(targetImage, "follow")
-      .catch((e) => console.warn(`panel ${tid}: image load failed`, e));
+      // Scrubbed: a raw SDK rejection carries the image id (review P1-1).
+      .catch((e) => console.warn(
+        `panel ${tid}: image load failed —`, scrubErrorMessage(e)));
   }
 
   if (stage === "map") {

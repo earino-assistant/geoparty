@@ -11,9 +11,14 @@
 //   3. Asks the Mapillary Graph API whether each id still resolves, at ONE
 //      request per ~1.2 s + jitter (≈ 5 minutes of traffic a week).
 //   4. Updates consecutive-failure counts in tools/pool-health-state.json.
+//      The WORKFLOW persists that file between runs via the Actions cache
+//      (never a commit to main), which is what makes the two-strike rule
+//      below reachable across weeks — see .github/workflows/pool-health.yml.
 //   5. Writes a PROPOSAL: ids dead on ≥ 2 consecutive runs are added to
 //      data/pool_quarantine.json. A human reviews the PR — a 404 can be
-//      transient Mapillary indigestion, and nothing here auto-merges.
+//      transient Mapillary indigestion, and nothing here auto-merges. Only
+//      the quarantine file is committed to the PR; the state file rides the
+//      cache.
 //
 // Politeness rules that are not negotiable:
 //   - never more than MAX_REQUESTS ids in one run;

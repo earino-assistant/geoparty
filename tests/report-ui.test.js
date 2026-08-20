@@ -264,9 +264,12 @@ test("the send button disables on tap, so a double-tap cannot double-send",
   });
 
 test("a blocked/failed send reports the failure honestly and collects nothing",
-  async () => {
-    // Kill the one-shot instance path the way an ad blocker would.
+  async (t) => {
+    // Kill the one-shot instance path the way an ad blocker would. Restore via
+    // t.after so a mid-test assertion failure can't leave posthog.init broken
+    // for every later test (review test-credibility item).
     const realInit = window.posthog.init;
+    t.after(() => { window.posthog.init = realInit; });
     window.posthog.init = () => { throw new Error("blocked"); };
     delete window.posthog.gpDiag;
     reportUi.openReportSheet({ surface: "player" });
@@ -276,7 +279,6 @@ test("a blocked/failed send reports the failure honestly and collects nothing",
     assert.equal(partOf("report-title").textContent, "Not sent");
     assert.ok(partOf("report-body").textContent.includes("No data was collected"));
     assert.equal(env.sinks.oneShot.length, 0);
-    window.posthog.init = realInit;
   });
 
 test("openReportFromSettings: the calm-state entry point needs only a surface",

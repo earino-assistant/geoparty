@@ -20,6 +20,7 @@ import {
   classifyImageryError,
   errorMessage,
   poolDiagId,
+  isDeadEntryClass,
   imageryTimeoutMs,
   createExceptionBudget,
   createDedup,
@@ -44,13 +45,32 @@ const now = () => (typeof performance !== "undefined" && performance.now
  * Session-scoped observability state (one per page load)
  * ================================================================ */
 
-const budget = createExceptionBudget();        // §7.4 caps
-const deadDedup = createDedup();               // one image_dead per entry
-const log = createImageryLog(20);              // report ring buffer
-const facts = {                                // §9.1 health inputs
-  viewerInits: [], loads: [], panos: [], exceptions: [],
-  reports: 0, roundsIncomplete: false,
-};
+// `let`, not `const`, ONLY so __resetSessionForTests can rebuild them between
+// tests (the singletons are otherwise never reassigned in production). Every
+// consumer reads the live module binding, so a reset is seen immediately.
+let budget = createExceptionBudget();          // §7.4 caps
+let deadDedup = createDedup();                 // one image_dead per entry
+let log = createImageryLog(20);                // report ring buffer
+let facts = freshFacts();                      // §9.1 health inputs
+
+function freshFacts() {
+  return {
+    viewerInits: [], loads: [], panos: [], exceptions: [],
+    reports: 0, roundsIncomplete: false,
+  };
+}
+
+// Test-only: the module holds one session's worth of accumulated facts by
+// design (one page load = one session). Node's test runner shares a module
+// instance across a whole file, so without this the facts/budget/dedup would
+// carry across tests and make assertions order-dependent (review P2-3).
+// Named to make its test-only purpose unmistakable; never called in prod.
+export function __resetSessionForTests() {
+  budget = createExceptionBudget();
+  deadDedup = createDedup();
+  log = createImageryLog(20);
+  facts = freshFacts();
+}
 
 const FACT_MAX = 60; // bounded: a long party must not grow this unboundedly
 function pushFact(list, item) {
@@ -440,28 +460,44 @@ function instrument({ surface, container, viewer }) {
 
 /* ================================================================
  * loadRoundImage — the one shared dead-image skip loop (was copy-pasted
- * three times). Behavior is identical to the loops it replaces: peek,
- * try, warn, advance, repeat; null entry means the pool is exhausted and
- * the caller keeps its existing handling.
+ * three times). Peek, try, and then either:
+ *   - success       → { entry, skips, degraded: false }
+ *   - dead entry    → skip (advance the seeded sampler) and try the next
+ *   - pool exhausted → { entry: null, skips, degraded: false }  (finish/end)
+ *   - RETRYABLE     → { entry: null, degraded: true }  (do NOT finish/end)
+ *
+ * The `degraded` flag is the stabilization contract (review P1-3/P2-1/P2-5).
+ * It is true when imagery failed in a way the CALLER must treat as retryable
+ * and MUST NOT let consume a Daily run, finish a couch game, or push h2h to
+ * gameOver:
+ *   - the viewer is a stub (iv.ok === false: SDK blocked, WebGL off, offline,
+ *     constructor threw) — every attempt would reject, so we consume nothing;
+ *   - a live seeded entry failed on a TRANSIENT class (timeout, offline, rate
+ *     limit, server, auth, webgl, unknown). Skipping past a live entry there
+ *     both desyncs the Daily's shared order and burns the pool for nothing, so
+ *     we keep the same entry and hand the caller a retryable state instead.
+ * Only a genuinely exhausted pool (every remaining entry provably dead) still
+ * returns the classic `entry: null, degraded: false` the finish paths expect.
  * ================================================================ */
 
 export async function loadRoundImage(sampler, iv, purpose) {
   const p = purpose || "anchor";
   let entry = sampler.peek();
   let skips = 0;
-  let last = null;
 
-  // The viewer itself is a stub (no WebGL, SDK blocked): every attempt would
-  // reject, so retrying would grind through the entire 5,000-entry pool for
-  // nothing. Report the real cause once and hand back the caller's existing
-  // "no entry" path. Not one pool entry is consumed.
+  // The viewer itself is a stub (no WebGL, SDK blocked, offline, constructor
+  // failure): every attempt would reject, so retrying would grind through the
+  // entire 5,000-entry pool for nothing. Report the real cause once and hand
+  // back a RETRYABLE degraded result — not one pool entry is consumed, and no
+  // caller may treat this as exhaustion. viewer_init already recorded the
+  // hard-failure fact, so this load is intentionally NOT tagged `exhausted`.
   if (iv.ok === false) {
     emitLoad({
       surface: iv.surface, purpose: p, ok: false, skips: 0, duration_ms: 0,
-      exhausted: true, error_class: iv.errorClass || "viewer_init",
+      error_class: iv.errorClass || "viewer_init",
       pool_entry: entry ? poolDiagId(entry.image_id) : "",
     });
-    return { entry: null, skips: 0 };
+    return { entry: null, skips: 0, degraded: true };
   }
 
   while (entry) {
@@ -473,10 +509,28 @@ export async function loadRoundImage(sampler, iv, purpose) {
         duration_ms: r.durationMs, pool_entry: r.poolEntry,
         ...(r.afterTimeout ? { after_timeout: true } : {}),
       });
-      return { entry, skips };
+      return { entry, skips, degraded: false };
     }
-    last = r;
-    // The console line the replays show: the diag id, never the raw image id.
+
+    // Transient/environmental failure on a LIVE seeded entry: do not advance
+    // the sampler (keeps the Daily's five identical for everyone) and do not
+    // consume the round. emitLoad(ok:false) still forces the recording and
+    // feeds the health fold; the console line carries the opaque diag id only.
+    if (!isDeadEntryClass(r.errorClass)) {
+      console.warn(
+        `Pool entry ${r.poolEntry} did not load (${r.errorClass}) — retryable`,
+      );
+      emitLoad({
+        surface: iv.surface, purpose: p, ok: false, skips,
+        duration_ms: r.durationMs, error_class: r.errorClass,
+        pool_entry: r.poolEntry,
+      });
+      return { entry: null, skips, degraded: true };
+    }
+
+    // A provably dead entry: skip it deterministically — every device on the
+    // same seed skips the same entry to the same next spot. The console line
+    // the replays show carries the diag id, never the raw image id.
     console.warn(
       `Pool entry ${r.poolEntry} failed to load (${r.errorClass}), skipping`,
     );
@@ -484,15 +538,14 @@ export async function loadRoundImage(sampler, iv, purpose) {
     entry = sampler.advance();
   }
 
-  // Pool exhausted: the player has no playable panorama for this round —
-  // the "failed" class of the session health model. `exhausted` is a local
-  // health-fold fact; the schema strips it, so it never leaves the device.
+  // Pool exhausted: every remaining entry was provably dead — the player has
+  // no playable panorama for this round (the "failed" health class). This is
+  // the ONLY null-entry case the finish/end paths should act on. `exhausted`
+  // is a local health-fold fact; the schema strips it, so it never leaves.
   emitLoad({
     surface: iv.surface, purpose: p, ok: false, skips, exhausted: true,
-    duration_ms: last ? last.durationMs : 0,
-    error_class: last ? last.errorClass : "image_dead",
-    pool_entry: last ? last.poolEntry : "",
+    duration_ms: 0, error_class: "image_dead", pool_entry: "",
   });
   startRecording();
-  return { entry: null, skips };
+  return { entry: null, skips, degraded: false };
 }
