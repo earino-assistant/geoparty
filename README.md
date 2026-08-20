@@ -9,6 +9,11 @@ awarded by distance.
 The entire system is static JavaScript synced through Firebase Realtime
 Database. No server code, no build step, no cost.
 
+> **Proprietary software — not open source.** GeoParty is owned by Eduardo Ariño
+de la Rubia and is licensed under the proprietary [GeoParty License](LICENSE).
+> You may not use, copy, modify, distribute, host, or create derivative works
+> from it without a separate written license.
+
 There are two modes. **Couch mode** (the original): one operator phone
 drives, the couch watches the TV. **Head-to-head**: every team plays on its
 own phone — the same location drops for everyone at once, each team roams
