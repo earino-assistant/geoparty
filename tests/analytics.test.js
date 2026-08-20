@@ -290,6 +290,89 @@ test("sanitizeEvent: an all-forfeit daily drops the null best distance", () => {
   assert.deepEqual(done.props, { day_number: 2, score: 0, rounds_played: 0 });
 });
 
+/* ---------------- G1–G8 event extensions (spec §7.1) ---------------- */
+
+test("sanitizeEvent: daily events carry the G1/G5/G6 flags, aggregates only", () => {
+  const started = sanitizeEvent("daily_challenge_started", {
+    day_number: 37, hard: true, vs_ghost: true, streak: 12,
+  });
+  assert.deepEqual(started.props,
+    { day_number: 37, hard: true, vs_ghost: true, streak: 12 });
+  const done = sanitizeEvent("daily_challenge_completed", {
+    day_number: 37, score: 18420, rounds_played: 5, best_distance_km: 0.4,
+    hard: false, vs_ghost: true, streak: 12, pb: true, aces: 2,
+  });
+  assert.deepEqual(done.props, {
+    day_number: 37, score: 18420, rounds_played: 5, best_distance_km: 0.4,
+    hard: false, vs_ghost: true, streak: 12, pb: true, aces: 2,
+  });
+});
+
+test("sanitizeEvent: ghost_duel_completed — outcome + margin, no payload byte", () => {
+  const out = sanitizeEvent("ghost_duel_completed", {
+    day_number: 37, outcome: "won", margin: 1840, hard: false,
+    // None of these may ever ride a ghost event:
+    lat: 48.8, lng: 2.3, ghost_payload: "AAAA", team_name: "Cats",
+  });
+  assert.deepEqual(out.props,
+    { day_number: 37, outcome: "won", margin: 1840, hard: false });
+});
+
+test("sanitizeEvent: ghost_link_invalid carries only the reason", () => {
+  const out = sanitizeEvent("ghost_link_invalid", { reason: "malformed", url: "x#g=Y" });
+  assert.deepEqual(out.props, { reason: "malformed" });
+});
+
+test("sanitizeEvent: night_champion — mode + games", () => {
+  const out = sanitizeEvent("night_champion", { mode: "h2h", games: 4, winner_name: "Cats" });
+  assert.deepEqual(out.props, { mode: "h2h", games: 4 });
+});
+
+test("sanitizeEvent: result_shared.challenge is strictly boolean", () => {
+  const out = sanitizeEvent("result_shared", { mode: "daily", method: "share", challenge: true });
+  assert.deepEqual(out.props, { mode: "daily", method: "share", challenge: true });
+  assert.ok(!("challenge" in
+    sanitizeEvent("result_shared", { mode: "daily", method: "share", challenge: "yes" }).props));
+});
+
+test("sanitizeEvent: round_started/guess_submitted twist + decoy are aggregates", () => {
+  const rs = sanitizeEvent("round_started", {
+    room: "KWPFRT", mode: "h2h", round_number: 3, twist: "blitz",
+  });
+  assert.equal(rs.props.twist, "blitz");
+  const gs = sanitizeEvent("guess_submitted", {
+    room: "KWPFRT", mode: "h2h", team_id: "t1", total_score: 3100,
+    round_number: 3, twist: "longhaul", decoy: true,
+  });
+  assert.equal(gs.props.round_number, 3);
+  assert.equal(gs.props.twist, "longhaul");
+  assert.equal(gs.props.decoy, true);
+  // A non-boolean decoy is stripped, never coerced.
+  assert.ok(!("decoy" in sanitizeEvent("guess_submitted",
+    { room: "R", mode: "h2h", decoy: 1 }).props));
+});
+
+test("sanitizeBeforeSend: a ghost #g= fragment leaves zero payload bytes (§3.5.6)", () => {
+  // The third, alarm layer of the ghost privacy defense: even if a challenge
+  // URL reached a $current_url-class property, no payload survives.
+  const payload = "AbCd-_1234567890xyzQWERTYuiopASDFghjklZXCVbnm";
+  const ev = sanitizeBeforeSend({
+    event: "$pageview",
+    properties: {
+      $current_url: `https://geoparty.example/daily.html?utm_source=share#g=${payload}`,
+      $pathname: "/daily.html",
+      $session_entry_url: `https://geoparty.example/daily.html#g=${payload}`,
+    },
+  });
+  for (const key of ["$current_url", "$pathname", "$session_entry_url"]) {
+    assert.ok(!ev.properties[key].includes(payload),
+      `${key} leaked ghost payload`);
+    assert.ok(!ev.properties[key].includes("g="),
+      `${key} kept the fragment`);
+  }
+  assert.equal(ev.properties.$current_url, "https://geoparty.example/daily.html");
+});
+
 test("sanitizeEvent: guess_submitted.super_sure is strictly boolean", () => {
   const base = { room: "KWPFRT", mode: "h2h", total_score: 3100 };
   assert.equal(

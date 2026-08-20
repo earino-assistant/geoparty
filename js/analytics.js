@@ -264,16 +264,24 @@ export const EVENT_SCHEMA = Object.freeze({
   // screen_attached (S7): was a TV heartbeat live when the round started?
   // Couch only — it splits the game_created → round_started funnel by TV
   // presence, the KPI behind removing the couch screen gate.
+  // twist (G2, §7.1): the round's twist id ("blitz"|"frozen"|"blind"|
+  // "longhaul"), absent when the round is plain — twist frequency in practice
+  // and completion of twisted vs. plain rounds.
   round_started: {
     room: "string", mode: "string", round_number: "int", advance: "string",
-    screen_attached: "bool",
+    screen_attached: "bool", twist: "string",
   },
   // moved: the pano was navigated off the round's anchor image before this
   // pin (street movement got used) — an image-id comparison, never a place.
+  // twist/decoy (G2/G7): distance/time by twist, decoy deployment rate, and
+  // the rival-behavior shift on decoyed rounds (join on room + round_number —
+  // the reason round_number is added here, §7.1). decoy is a bool flag only;
+  // the decoy's coordinates never ride (BANNED_KEY_RE would strip them anyway).
   guess_submitted: {
     room: "string", mode: "string", team_id: "string",
     distance_km: "float1", time_bonus: "int", total_score: "int",
     time_seconds: "float1", super_sure: "bool", moved: "bool",
+    round_number: "int", twist: "string", decoy: "bool",
   },
   reveal_shown: { room: "string", mode: "string", round_number: "int" },
   // One event per SUPER SURE bet, fired from the host phone at the reveal
@@ -316,16 +324,38 @@ export const EVENT_SCHEMA = Object.freeze({
   // "daily" to the usual pair; method mirrors invite_shared. The card's
   // link is UTM-tagged (utm_source=share) — inbound attribution rides on
   // PostHog's automatic utm_* capture, not on this event.
-  result_shared: { mode: "string", method: "string" },
+  // challenge (G5, §7.1): this shared card carries a ghost payload (a duel
+  // link) vs. a plain card — the top of the duel funnel.
+  result_shared: { mode: "string", method: "string", challenge: "bool" },
   // S2 Daily Challenge. day_number is the public puzzle index ("Daily #37")
   // — a calendar fact shared by every player that day, never an identity.
-  daily_challenge_started: { day_number: "int" },
+  // G1/G5/G6 extend it: hard (which board), vs_ghost (a duel run), streak
+  // (count BEFORE the run — retention health at the source). No ghost payload
+  // byte ever rides — only these aggregate flags/counts.
+  daily_challenge_started: {
+    day_number: "int", hard: "bool", vs_ghost: "bool", streak: "int",
+  },
   // rounds_played counts rounds with a pin (0–5; forfeits excluded);
   // best_distance_km is the run's closest guess (absent when all forfeit).
+  // G1/G4/G5/G6/G8 extend it: hard, vs_ghost, streak (after), pb (a personal
+  // best was set), aces (this run's sub-1km pins).
   daily_challenge_completed: {
     day_number: "int", score: "int", rounds_played: "int",
-    best_distance_km: "float1",
+    best_distance_km: "float1", hard: "bool", vs_ghost: "bool",
+    streak: "int", pb: "bool", aces: "int",
   },
+  // G5 Ghost Duels (§7.1). Fired on the RECIPIENT's device at the verdict.
+  // margin is a score difference — the same class of aggregate as
+  // winning_score; no pin, timing, or payload byte ever rides.
+  ghost_duel_completed: {
+    day_number: "int", outcome: "string", margin: "int", hard: "bool",
+  },
+  // G5: a challenge link failed to open into a duel. reason ∈
+  // malformed|version|expired|pool — link rot in the wild.
+  ghost_link_invalid: { reason: "string" },
+  // G3 Crown Night (§7.1). Fired by the phase-writing device at a champion.
+  // games is how many games the night took to reach first-to-3.
+  night_champion: { mode: "string", games: "int" },
   // S5 PWA: the landing page was launched as an installed app (standalone
   // display mode — the manifest's start_url lands there). No properties:
   // the launch itself is the signal; PostHog's device id carries retention.

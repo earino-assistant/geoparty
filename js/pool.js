@@ -41,8 +41,9 @@ export async function loadPool() {
   return rawPool;
 }
 
-// Small string hash -> 32-bit seed.
-function hashSeed(str) {
+// Small string hash -> 32-bit seed. Exported so twist.js can draw the same
+// deterministic per-round twist without duplicating the PRNG (spec §3.2).
+export function hashSeed(str) {
   let h = 2166136261;
   for (let i = 0; i < str.length; i++) {
     h ^= str.charCodeAt(i);
@@ -51,8 +52,8 @@ function hashSeed(str) {
   return h >>> 0;
 }
 
-// mulberry32 PRNG — deterministic, tiny.
-function mulberry32(seed) {
+// mulberry32 PRNG — deterministic, tiny. Exported alongside hashSeed (§3.2).
+export function mulberry32(seed) {
   let a = seed;
   return function () {
     a |= 0;

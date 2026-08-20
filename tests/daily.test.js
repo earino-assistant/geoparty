@@ -5,11 +5,17 @@ import assert from "node:assert/strict";
 import {
   DAILY_ROUNDS,
   DAILY_ROUND_SECONDS,
+  HARD_ROUND_SECONDS,
   DAILY_EPOCH_KEY,
   DAILY_RESULT_KEY,
+  DAILY_RESULT_HARD_KEY,
   dailyKey,
   dailySeed,
   dailyNumber,
+  daysBetweenKeys,
+  dailyRoundSeconds,
+  dailyMoveAllowed,
+  dailyResultKey,
   newDailyRun,
   recordDailyRound,
   dailyRunComplete,
@@ -79,7 +85,7 @@ test("recordDailyRound: scores with the party scorer against the fixed 60s windo
   assert.equal(run.rounds.length, 1);
   assert.deepEqual(run.rounds[0], {
     distanceKm: 100, distancePoints, timeBonus: bonus,
-    points: distancePoints + bonus,
+    points: distancePoints + bonus, guess: null, elapsedMs: 15_000,
   });
   assert.equal(run.score, distancePoints + bonus);
 });
@@ -88,6 +94,7 @@ test("recordDailyRound: a forfeit (no pin at the buzzer) scores zero", () => {
   const run = recordDailyRound(newDailyRun("20260819"), null);
   assert.deepEqual(run.rounds[0], {
     distanceKm: null, distancePoints: 0, timeBonus: 0, points: 0,
+    guess: null, elapsedMs: 0,
   });
   assert.equal(run.score, 0);
 });
@@ -152,4 +159,87 @@ test("loadDailyResult: malformed or unreadable storage reads as unplayed", () =>
   };
   assert.equal(loadDailyResult(broken, "20260819"), null);
   saveDailyResult(broken, newDailyRun("20260819")); // must not throw
+});
+
+/* ---------------- daysBetweenKeys (G1 streak arithmetic, §3.1) ---------- */
+
+test("daysBetweenKeys: whole-day gaps, DST/month/year proof", () => {
+  assert.equal(daysBetweenKeys("20260819", "20260820"), 1);
+  assert.equal(daysBetweenKeys("20260820", "20260819"), -1);  // clock rollback
+  assert.equal(daysBetweenKeys("20260819", "20260819"), 0);   // same day
+  assert.equal(daysBetweenKeys("20260819", "20260821"), 2);   // one missed day
+  // US DST spring-forward (2026-03-08) and fall-back (2026-11-01): the local
+  // day is 23h/25h long, but UTC-midnight parsing keeps the count exact.
+  assert.equal(daysBetweenKeys("20260307", "20260309"), 2);
+  assert.equal(daysBetweenKeys("20261031", "20261102"), 2);
+  // Month and year boundaries are plain arithmetic.
+  assert.equal(daysBetweenKeys("20260131", "20260201"), 1);
+  assert.equal(daysBetweenKeys("20261231", "20270101"), 1);
+  // Missing/empty predecessor is the "first ever run" sentinel.
+  assert.equal(daysBetweenKeys("", "20260819"), Infinity);
+  assert.equal(daysBetweenKeys(undefined, "20260819"), Infinity);
+});
+
+/* ---------------- G6 hard mode constants + v2 result ---------------- */
+
+test("hard mode: 30s window, movement off; normal: 60s, movement on", () => {
+  assert.equal(dailyRoundSeconds(false), DAILY_ROUND_SECONDS);
+  assert.equal(dailyRoundSeconds(true), HARD_ROUND_SECONDS);
+  assert.equal(dailyMoveAllowed(false), true);
+  assert.equal(dailyMoveAllowed(true), false);
+});
+
+test("recordDailyRound: v2 stores the pin and elapsed for a ghost", () => {
+  let run = newDailyRun("20260819");
+  run = recordDailyRound(run, {
+    distanceKm: 12, elapsedMs: 8000, lat: 48.85, lng: 2.35,
+  });
+  assert.deepEqual(run.rounds[0].guess, { lat: 48.85, lng: 2.35 });
+  assert.equal(run.rounds[0].elapsedMs, 8000);
+  // A pin with no coordinates (malformed) stores no ghost pin.
+  const forfeit = recordDailyRound(newDailyRun("20260819"), {
+    distanceKm: 5, elapsedMs: 3000,
+  });
+  assert.equal(forfeit.rounds[0].guess, null);
+});
+
+test("recordDailyRound: a hard run scores on the 30s window", () => {
+  const hardRun = recordDailyRound(newDailyRun("20260819", true),
+    { distanceKm: 100, elapsedMs: 15_000 });
+  const normalRun = recordDailyRound(newDailyRun("20260819", false),
+    { distanceKm: 100, elapsedMs: 15_000 });
+  const dp = scoreForDistance(100);
+  assert.equal(hardRun.rounds[0].timeBonus,
+    timeBonus(dp, 15_000, bonusWindowMs(HARD_ROUND_SECONDS)));
+  assert.equal(normalRun.rounds[0].timeBonus,
+    timeBonus(dp, 15_000, bonusWindowMs(DAILY_ROUND_SECONDS)));
+  // 15s into a 30s round earns less bonus than 15s into a 60s round.
+  assert.ok(hardRun.rounds[0].timeBonus < normalRun.rounds[0].timeBonus);
+  assert.equal(hardRun.hard, true);
+});
+
+test("daily result: hard run saves to its own slot; slots are independent", () => {
+  const s = memStorage();
+  const normal = recordDailyRound(newDailyRun("20260819", false),
+    { distanceKm: 10, elapsedMs: 1000 });
+  const hard = recordDailyRound(newDailyRun("20260819", true),
+    { distanceKm: 20, elapsedMs: 1000 });
+  saveDailyResult(s, normal);
+  saveDailyResult(s, hard);
+  assert.equal(dailyResultKey(false), DAILY_RESULT_KEY);
+  assert.equal(dailyResultKey(true), DAILY_RESULT_HARD_KEY);
+  assert.deepEqual(loadDailyResult(s, "20260819", DAILY_RESULT_KEY), normal);
+  assert.deepEqual(loadDailyResult(s, "20260819", DAILY_RESULT_HARD_KEY), hard);
+  // The normal slot is unaffected by the hard save (v1 path untouched).
+  assert.equal(loadDailyResult(s, "20260819").hard, false);
+});
+
+test("loadDailyResult: a v1 save (no pins/elapsed/hard) still loads", () => {
+  const s = memStorage();
+  // Exactly the pre-v2 on-disk shape.
+  const v1 = { key: "20260819", score: 4200, rounds: [
+    { distanceKm: 12, distancePoints: 4200, timeBonus: 0, points: 4200 },
+  ] };
+  s.setItem(DAILY_RESULT_KEY, JSON.stringify(v1));
+  assert.deepEqual(loadDailyResult(s, "20260819"), v1);
 });

@@ -136,6 +136,11 @@ export const MESSAGE_MAX = 300;
 
 // Mapillary access tokens ride in query params and image ids are long digit
 // strings that reverse to a place via the public Graph API. Both die here.
+// The `#` in the cut also drops URL *fragments* entirely — this is the belt
+// layer of the Ghost Duel privacy defense (spec §3.5.6): even if a `#g=`
+// challenge URL reached a `$current_url`-class property, no payload byte
+// survives sanitizeBeforeSend. (The braces layer, history.replaceState, strips
+// it before analytics can ever observe the URL.)
 export function scrubUrl(value) {
   if (typeof value !== "string") return value;
   const cut = value.search(/[?#]/);

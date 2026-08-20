@@ -17,6 +17,23 @@ import { scoreForDistance, timeBonus, bonusWindowMs } from "./game.js";
 export const DAILY_ROUNDS = 5;
 export const DAILY_ROUND_SECONDS = 60;
 
+// G6 Hard Mode (spec §3.6): the same five locations and seed as the day's
+// normal daily, under harder fixed rules — no movement, 30 seconds. One
+// scored hard run per day in its own storage slot, so the two locks can
+// never corrupt each other and the v1 (normal) code path is untouched.
+export const HARD_ROUND_SECONDS = 30;
+export const DAILY_MOVE_ALLOWED = true;   // normal daily: movement on
+export const HARD_MOVE_ALLOWED = false;   // hard daily: read the single frame
+
+// Round seconds / movement for a run, keyed off its own `hard` flag so a
+// saved run is self-describing (a ghost can be rebuilt from it, §5.2).
+export function dailyRoundSeconds(hard) {
+  return hard ? HARD_ROUND_SECONDS : DAILY_ROUND_SECONDS;
+}
+export function dailyMoveAllowed(hard) {
+  return hard ? HARD_MOVE_ALLOWED : DAILY_MOVE_ALLOWED;
+}
+
 // Daily #1. The number is a day counter, not a date — "Daily #37" is what
 // the share card brags, exactly like Wordle's puzzle number.
 export const DAILY_EPOCH_KEY = "20260819";
@@ -50,36 +67,64 @@ export function dailyNumber(key) {
   return Math.round((keyToUtcMs(key) - keyToUtcMs(DAILY_EPOCH_KEY)) / 86_400_000) + 1;
 }
 
+// Whole calendar days from key `a` to key `b` (b − a), parsing both as UTC
+// midnights so DST-length local days can't skew the count (the same trick as
+// dailyNumber). Exported for the G1 streak fold (spec §3.1): a gap of 1 is
+// consecutive days, 2 is one missed day (grace territory), ≤0 is a same-day
+// re-entry or a backwards clock. Empty/undefined `a` returns Infinity — the
+// "first ever run" sentinel the fold reads as a fresh streak.
+export function daysBetweenKeys(a, b) {
+  if (!a || !b) return Infinity;
+  return Math.round((keyToUtcMs(b) - keyToUtcMs(a)) / 86_400_000);
+}
+
+// Day number for a run's key (the value the ghost codec carries, §3.5.1).
+export function dailyNumberForKey(key) {
+  return dailyNumber(key);
+}
+
 /* ================================================================
  * The run: a fold over rounds. Same scorer as the party game —
  * scoreForDistance + timeBonus against the fixed 60s window — so a
  * daily point means exactly what a party point means.
  * ================================================================ */
 
-export function newDailyRun(key) {
-  return { key, score: 0, rounds: [] };
+// A run carries its own `hard` flag (G6) so the scorer, the storage slot, and
+// any ghost rebuilt from a saved run all agree on the ruleset without a second
+// lookup. Absent/false ⇒ the normal daily (the v1 shape, unchanged on disk).
+export function newDailyRun(key, hard = false) {
+  return { key, score: 0, rounds: [], hard: !!hard };
 }
 
-// One round locked in. guess is {distanceKm, elapsedMs}, or null when the
-// clock ran out with no pin (a forfeit scores zero, like the party game).
-// Returns a new run; the input is never mutated.
+// One round locked in. guess is {distanceKm, elapsedMs, lat, lng}, or null when
+// the clock ran out with no pin (a forfeit scores zero, like the party game).
+// v2 (spec §5.2): the round entry additionally stores the pin `guess {lat,lng}`
+// and `elapsedMs` so a saved run can later become a Ghost Duel challenge. These
+// fields are additive — the v1 loader validates only key/score/rounds, so old
+// code reads v2 saves fine and new code treats a missing pin as "no ghost from
+// this round". Returns a new run; the input is never mutated.
 export function recordDailyRound(run, guess) {
+  const seconds = dailyRoundSeconds(run.hard);
+  const elapsedMs = guess ? Math.max(0, guess.elapsedMs || 0) : 0;
+  const pin = guess && typeof guess.lat === "number" &&
+    typeof guess.lng === "number" ? { lat: guess.lat, lng: guess.lng } : null;
   let entry;
   if (guess && typeof guess.distanceKm === "number") {
     const distancePoints = scoreForDistance(guess.distanceKm);
-    const bonus = timeBonus(
-      distancePoints,
-      Math.max(0, guess.elapsedMs || 0),
-      bonusWindowMs(DAILY_ROUND_SECONDS)
-    );
+    const bonus = timeBonus(distancePoints, elapsedMs, bonusWindowMs(seconds));
     entry = {
       distanceKm: guess.distanceKm,
       distancePoints,
       timeBonus: bonus,
       points: distancePoints + bonus,
+      guess: pin,
+      elapsedMs,
     };
   } else {
-    entry = { distanceKm: null, distancePoints: 0, timeBonus: 0, points: 0 };
+    entry = {
+      distanceKm: null, distancePoints: 0, timeBonus: 0, points: 0,
+      guess: null, elapsedMs,
+    };
   }
   return {
     ...run,
@@ -112,12 +157,23 @@ export function bestDailyDistance(run) {
  * ================================================================ */
 
 export const DAILY_RESULT_KEY = "geoparty_daily_result";
+// G6: the hard run's separate slot. A distinct key means the normal and hard
+// locks can never corrupt each other, and the v1 (normal) code path is
+// untouched by hard mode entirely (spec §3.6, §5.2).
+export const DAILY_RESULT_HARD_KEY = "geoparty_daily_result_hard";
+
+// The storage key for a run's board — normal vs. hard.
+export function dailyResultKey(hard) {
+  return hard ? DAILY_RESULT_HARD_KEY : DAILY_RESULT_KEY;
+}
 
 // storage is localStorage-shaped ({getItem,setItem}). Anything unreadable,
-// malformed, or from another day reads as "not played yet".
-export function loadDailyResult(storage, key) {
+// malformed, or from another day reads as "not played yet". `storageKey`
+// selects the normal (default) or hard slot; the validation is v1's, which
+// v2 objects satisfy (only key/score/rounds are checked, §5.2).
+export function loadDailyResult(storage, key, storageKey = DAILY_RESULT_KEY) {
   try {
-    const parsed = JSON.parse(storage.getItem(DAILY_RESULT_KEY));
+    const parsed = JSON.parse(storage.getItem(storageKey));
     if (parsed && parsed.key === key &&
         typeof parsed.score === "number" && Array.isArray(parsed.rounds)) {
       return parsed;
@@ -126,8 +182,9 @@ export function loadDailyResult(storage, key) {
   return null;
 }
 
-export function saveDailyResult(storage, run) {
+export function saveDailyResult(storage, run, storageKey) {
+  const target = storageKey || dailyResultKey(run && run.hard);
   try {
-    storage.setItem(DAILY_RESULT_KEY, JSON.stringify(run));
+    storage.setItem(target, JSON.stringify(run));
   } catch { /* private mode: today just won't be remembered */ }
 }

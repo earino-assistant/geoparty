@@ -121,7 +121,10 @@ export function resultRowText(r) {
  * player-ui.js / host-ui.js / daily-ui.js. */
 
 // "+3,120 pts · 812 km · ⚡+140 fast" — one line for the whole personal
-// result, SUPER SURE verdict appended when the round carried a bet.
+// result, SUPER SURE verdict appended when the round carried a bet. G2/G4:
+// an optional `twistTag` (e.g. "×1.5 ⚡", precomputed via twist.js so game.js
+// stays free of a twist.js import cycle) and `medalCaption` ("ACE!" / "Nailed
+// it") extend the line — both absent ⇒ the pre-G2 output, byte-for-byte.
 export function revealResultLine(result) {
   if (!result || !result.guess) {
     // A burned bet is not a plain forfeit: it spent something.
@@ -129,10 +132,10 @@ export function revealResultLine(result) {
       ? "+0 pts · no pin · 🔥 SUPER SURE — 0"
       : "+0 pts · no pin";
   }
-  const parts = [
-    `+${adjustedPoints(result).toLocaleString()} pts`,
-    formatDistance(result.distanceKm),
-  ];
+  const parts = [`+${adjustedPoints(result).toLocaleString()} pts`];
+  if (result.twistTag) parts.push(result.twistTag);
+  parts.push(formatDistance(result.distanceKm));
+  if (result.medalCaption) parts.push(result.medalCaption);
   if (result.timeBonus > 0) {
     parts.push(`⚡+${result.timeBonus.toLocaleString()} fast`);
   }

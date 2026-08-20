@@ -118,6 +118,9 @@ export function screenAttached(state, now) {
 // design: copying costs the time bonus the rival already spent), and a
 // team's pin vanishes at lock-in because lockIn() nulls live/<tid>/pin.
 export function liveRivalPins(round, myTeam) {
+  // G2 Blind Duel: rival pins are hidden for the round (the twist rides the
+  // round record, so every device suppresses them identically, §3.2).
+  if (round && round.twist && round.twist.id === "blind") return [];
   const live = (round && round.live) || {};
   return Object.keys(live).sort()
     .filter((id) => id !== myTeam)

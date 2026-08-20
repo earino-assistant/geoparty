@@ -12,7 +12,9 @@ import {
   distanceEmoji,
   emojiRow,
   dailyShareText,
+  dailyChallengeUrl,
 } from "../js/share.js";
+import { parseGhostFragment, encodeGhost } from "../js/ghost.js";
 
 /* ---------------- withUtm ---------------- */
 
@@ -90,7 +92,9 @@ test("partyShareText: unnamed place and missing best degrade gracefully", () => 
 /* ---------------- the daily card ---------------- */
 
 test("distanceEmoji: grades distances into the four tiers plus no-pin", () => {
-  assert.equal(distanceEmoji(0), "🟩");
+  assert.equal(distanceEmoji(0), "🎯");     // < 1 km is an ACE (G4)
+  assert.equal(distanceEmoji(0.9), "🎯");
+  assert.equal(distanceEmoji(1), "🟩");     // exactly 1 km is not an ACE
   assert.equal(distanceEmoji(100), "🟩");   // boundaries are inclusive
   assert.equal(distanceEmoji(100.1), "🟨");
   assert.equal(distanceEmoji(750), "🟨");
@@ -113,7 +117,7 @@ test("emojiRow: one square per round, in order", () => {
   assert.equal(emojiRow(null), "");
 });
 
-test("dailyShareText: number, score, grid, and the tagged link", () => {
+test("dailyShareText: plain card — number, globe, score, grid, link", () => {
   const text = dailyShareText({
     dayNumber: 37,
     score: 18420,
@@ -121,8 +125,71 @@ test("dailyShareText: number, score, grid, and the tagged link", () => {
     url: "https://example.test/daily.html?utm_source=share&utm_campaign=daily",
   });
   assert.deepEqual(text.split("\n"), [
-    `GeoParty Daily #37 🌍 ${(18420).toLocaleString()} pts`,
+    `GeoParty Daily #37 🌍 · ${(18420).toLocaleString()} pts`,
     "🟩⬛",
     "Beat me: https://example.test/daily.html?utm_source=share&utm_campaign=daily",
   ]);
+});
+
+test("dailyShareText: streak segment appears at ≥2, omitted at <2 (G1)", () => {
+  const withStreak = dailyShareText({
+    dayNumber: 37, score: 18340, streak: 12,
+    rounds: [{ distanceKm: 1 }], url: "https://x.test/",
+  });
+  assert.match(withStreak.split("\n")[0], /^GeoParty Daily #37 🔥12 · 18,340 pts$/);
+  const one = dailyShareText({
+    dayNumber: 37, score: 100, streak: 1, rounds: [{ distanceKm: 1 }], url: "https://x.test/",
+  });
+  assert.doesNotMatch(one.split("\n")[0], /🔥/);
+});
+
+test("dailyShareText: hard card carries the star and ⚡ (G6)", () => {
+  const text = dailyShareText({
+    dayNumber: 37, score: 14200, hard: true,
+    rounds: [{ distanceKm: 1 }], url: "https://x.test/",
+  });
+  assert.match(text.split("\n")[0], /^GeoParty Daily #37\* ⚡ · 14,200 pts$/);
+});
+
+test("dailyShareText: challenge line + ace grid square (G5/G4)", () => {
+  const text = dailyShareText({
+    dayNumber: 37, score: 18420, challenge: true,
+    rounds: [{ distanceKm: 0.4 }, { distanceKm: 200 }],   // an ACE → 🎯
+    url: "https://x.test/daily.html#g=ABC",
+  });
+  assert.equal(text.split("\n")[1], "🎯🟨");
+  assert.equal(text.split("\n")[2], "⚔️ Beat my ghost: https://x.test/daily.html#g=ABC");
+});
+
+test("dailyShareText: verdict card leads with the duel result (G5)", () => {
+  const won = dailyShareText({
+    dayNumber: 37, verdict: { outcome: "won", margin: 1840 },
+    rounds: [{ distanceKm: 1 }], url: "https://x.test/#g=Z",
+  });
+  assert.equal(won.split("\n")[0], "GeoParty Daily #37 — I beat the ghost by 1,840 🏆");
+  assert.equal(won.split("\n")[2], "⚔️ Your move: https://x.test/#g=Z");
+  const lost = dailyShareText({
+    dayNumber: 37, verdict: { outcome: "lost", margin: 90 },
+    rounds: [], url: "https://x.test/",
+  });
+  assert.match(lost.split("\n")[0], /The ghost got me by 90 👻/);
+  const tie = dailyShareText({
+    dayNumber: 37, verdict: { outcome: "tie", margin: 0 },
+    rounds: [], url: "https://x.test/",
+  });
+  assert.match(tie.split("\n")[0], /Dead heat with the ghost/);
+});
+
+test("dailyChallengeUrl: UTM query and ghost fragment coexist", () => {
+  const payload = encodeGhost({
+    dayNumber: 37, hard: false, poolCheck: 0,
+    rounds: [{ pinned: true, lat: 10, lng: 20, elapsedMs: 3000 }],
+  });
+  const url = dailyChallengeUrl("https://x.test/daily.html", payload, "daily");
+  const [base, frag] = url.split("#");
+  const u = new URL(base);
+  assert.equal(u.searchParams.get("utm_source"), "share");
+  assert.equal(u.searchParams.get("utm_campaign"), "daily");
+  assert.ok(!base.includes(payload));                     // never in the query
+  assert.equal(parseGhostFragment("#" + frag), payload);  // only in the fragment
 });
