@@ -24,6 +24,10 @@ import {
   tallyLineText, crownHookText, championText, nightSummary,
 } from "./night.js";
 import {
+  normalizeTwistSetting, drawTwist, twistRoundSeconds, twistMoveAllowed,
+  twistedRoundScore, twistHudTag, twistRevealTag, twistCard,
+} from "./twist.js";
+import {
   makeRoomCode,
   isValidRoomCode,
   haversineKm,
@@ -299,6 +303,8 @@ function collectSettings() {
     roundSeconds: parseInt($("pSegSeconds").dataset.value, 10),
     moveAllowed: $("pSegMove").dataset.value === "1",
     difficulty: normalizeDifficulty($("pSegDifficulty").dataset.value),
+    twists: normalizeTwistSetting(   // G2
+      $("pSegTwists") ? $("pSegTwists").dataset.value : "occasional"),
   };
 }
 
@@ -765,8 +771,21 @@ async function startRound(advance) {
     sampler.advance();
 
     const now = Date.now();
-    const secs = room.settings.roundSeconds;
     const number = (room.round ? room.round.number : 0) + 1;
+    // G2: the hostTeam phone draws the twist (deterministic, standings-free)
+    // and writes it into the round; every other phone reads round.twist and
+    // never redraws. Long Haul rides the tested gentler curve on the normal
+    // supply here (its dedicated expert sampler is a documented follow-up).
+    const prevTwist = room.round && room.round.twist ? room.round.twist.id : null;
+    const twistId = drawTwist({
+      roomCode, roundNumber: number, roundCount: room.settings.roundCount,
+      mode: "h2h", moveAllowed: room.settings.moveAllowed,
+      difficulty: room.settings.difficulty, twists: room.settings.twists,
+      prevTwistId: prevTwist, isShowdown: false,
+      numTeams: teamIds(room.teams).length,
+      poolScored: true, longHaulExhausted: false,
+    });
+    const secs = twistRoundSeconds(room.settings, twistId);
     // Truth rides in the round: with it, every phone scores itself at
     // submit time — no central scorer, no pool download on member phones.
     // (Peeking at devtools mid-party is not a threat model we carry.)
@@ -779,11 +798,13 @@ async function startRound(advance) {
       live: null,
       results: null,
       revealAt: null,
+      twist: twistId ? { id: twistId } : null,   // G2
     };
     push({ phase: "roundActive", round, poolCursor: sampler.cursor });
     track("round_started", {
       room: roomCode, mode: "h2h", round_number: number,
       ...(via ? { advance: via } : {}),
+      ...(twistId ? { twist: twistId } : {}),   // G2
     });
   } catch (e) {
     console.error(scrubErrorMessage(e));
@@ -818,6 +839,9 @@ function renderRoundActive() {
     updateLockButton();
     updateGuessBanner();
     startTick();
+    // G2: apply this round's twist locally (every phone reads round.twist) —
+    // the card flip, and the Frozen movement lever.
+    applyRoundTwist(round.twist ? round.twist.id : null);
   }
 
   // Rivals' pins land on MY map too (not just the TV panels), so the
@@ -868,9 +892,42 @@ function renderRoundActive() {
     }
   }
 
+  const twistId = round.twist ? round.twist.id : null;
   $("pHudRound").textContent =
-    `Round ${round.number}/${room.settings.roundCount}`;
+    `Round ${round.number}/${room.settings.roundCount}` +
+    (twistId ? ` · ${twistHudTag(twistId)}` : "");   // G2
   updateLockedHud();
+}
+
+// G2: the twist card flip (center overlay + scrim, ~2.5s, tap to skip) plus the
+// Frozen movement lever. Injected overlay — no team name, so nothing to mask.
+let twistCardEl = null;
+let twistCardTimer = null;
+function applyRoundTwist(twistId) {
+  if (iv && iv.setMoveAllowed) {
+    iv.setMoveAllowed(twistMoveAllowed(room.settings, twistId));
+  }
+  if (!twistId) return;
+  const card = twistCard(twistId);
+  if (!card) return;
+  playSound("sting");
+  if (!twistCardEl) {
+    twistCardEl = document.createElement("div");
+    twistCardEl.className = "twist-card-overlay";
+    twistCardEl.addEventListener("click", () => twistCardEl.classList.add("hidden"));
+    document.body.appendChild(twistCardEl);
+  }
+  twistCardEl.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "twist-card-title";
+  title.textContent = card.card;
+  const rule = document.createElement("div");
+  rule.className = "twist-card-rule";
+  rule.textContent = card.rule;
+  twistCardEl.append(title, rule);
+  twistCardEl.classList.remove("hidden");
+  clearTimeout(twistCardTimer);
+  twistCardTimer = setTimeout(() => twistCardEl.classList.add("hidden"), 2500);
 }
 
 function updateLockedHud() {
@@ -1152,11 +1209,14 @@ function lockIn(auto = false) {
   // same clock the countdown already trusts). Clamped ≥0 against skew.
   const submittedAt = Date.now();
   const elapsedMs = Math.max(0, submittedAt - (room.round.startedAt || submittedAt));
-  const distancePoints = guess ? scoreForDistance(distanceKm) : 0;
-  const speedBonus = guess
-    ? timeBonus(distancePoints, elapsedMs, bonusWindowMs(room.settings.roundSeconds))
-    : 0;
-  const points = distancePoints + speedBonus;
+  // G2: one scorer for twisted and plain rounds (blitz ×1.5, Long Haul curve,
+  // blitz 20s window). twistId is read from the round the host wrote.
+  const twistId = room.round.twist ? room.round.twist.id : null;
+  const ts = guess ? twistedRoundScore(twistId, distanceKm, elapsedMs, room.settings)
+    : { distancePoints: 0, timeBonus: 0, points: 0 };
+  const distancePoints = ts.distancePoints;
+  const speedBonus = ts.timeBonus;
+  const points = ts.points;
   // An armed bet commits here — with a pin it rides on the result; with no
   // pin at the buzzer it rides on the forfeit and burns at settlement.
   // Either way the one use is spent (superSureUsed on the team row).
@@ -1172,6 +1232,7 @@ function lockIn(auto = false) {
     submittedAt,
     forfeited: guess ? null : true,
     superSure: betting ? true : null,
+    twistTag: twistRevealTag(twistId),   // G2: reveal result line
   };
   cancelLiveWrite();
   const patch = {
@@ -1227,6 +1288,9 @@ function lockIn(auto = false) {
       time_seconds: elapsedMs / 1000,
       super_sure: betting,
       moved: panoMoved(anchoredImageId, currentImageId),
+      round_number: room.round.number,                 // G2/G7 join key
+      ...(twistId ? { twist: twistId } : {}),          // G2
+      decoy: !!(result.decoy),                          // G7 (set when a decoy was planted)
     });
   }
   if (auto && !guess) {
@@ -1709,6 +1773,7 @@ function openNextGameSetup() {
     ["pSegSeconds", String(room.settings.roundSeconds)],
     ["pSegMove", room.settings.moveAllowed ? "1" : "0"],
     ["pSegDifficulty", normalizeDifficulty(room.settings.difficulty)],
+    ["pSegTwists", normalizeTwistSetting(room.settings.twists)],
   ]) {
     const el = $(seg);
     el.dataset.value = val;
@@ -1803,6 +1868,7 @@ wireSeg("pSegRounds");
 wireSeg("pSegSeconds");
 wireSeg("pSegMove");
 wireSeg("pSegDifficulty");
+wireSeg("pSegTwists");
 
 $("btnStartNew").addEventListener("click", startNewGame);
 $("btnSetupBack").addEventListener("click", showHome);

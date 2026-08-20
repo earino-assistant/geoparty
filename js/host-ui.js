@@ -14,6 +14,10 @@ import {
   tallyLineText, crownHookText, championText, nightSummary,
 } from "./night.js";
 import {
+  normalizeTwistSetting, drawTwist, twistRoundSeconds, twistMoveAllowed,
+  twistedRoundScore, twistHudTag, twistRevealTag, twistCard,
+} from "./twist.js";
+import {
   canTransition,
   makeRoomCode,
   haversineKm,
@@ -303,6 +307,7 @@ function collectSettings() {
     roundSeconds: parseInt($("segSeconds").dataset.value, 10), // 0 = no limit
     moveAllowed: $("segMove").dataset.value === "1",
     difficulty: normalizeDifficulty($("segDifficulty").dataset.value),
+    twists: normalizeTwistSetting($("segTwists").dataset.value), // G2
   };
 }
 
@@ -538,6 +543,8 @@ async function startRound(advance) {
   const via = advance === "auto" ? "auto"
     : room.round ? "manual" : null; // round 1 follows no reveal
   const number = (room.round ? room.round.number : 0) + 1;
+  // G2: the previous round's twist, so a fresh draw never repeats it.
+  const prevTwist = room.round && room.round.twist ? room.round.twist.id : null;
   showScreen("h-round");
   if (!iv) makeViewer();
   iv.beginRound(number);
@@ -569,8 +576,21 @@ async function startRound(advance) {
   sampler.advance();
 
   const now = Date.now();
-  const secs = room.settings.roundSeconds;
   const showdown = isShowdownRound(room.teams, room.settings, number);
+  // G2: draw this round's twist — deterministic in (roomCode, roundNumber),
+  // NEVER from standings (no scripted comebacks). Written into the round record
+  // so every device reads it and no one redraws. Long Haul rides the tested
+  // gentler curve on the normal location supply here; its dedicated expert-tier
+  // sampler (§3.2 lhCursor) is a documented follow-up.
+  const twistId = drawTwist({
+    roomCode, roundNumber: number, roundCount: room.settings.roundCount,
+    mode: "couch", moveAllowed: room.settings.moveAllowed,
+    difficulty: room.settings.difficulty, twists: room.settings.twists,
+    prevTwistId: prevTwist, isShowdown: showdown,
+    numTeams: teamIds(room.teams).length,
+    poolScored: true, longHaulExhausted: false,
+  });
+  const secs = twistRoundSeconds(room.settings, twistId);
   room.round = {
     number,
     imageId: entry.image_id,
@@ -590,6 +610,7 @@ async function startRound(advance) {
     showdown,
     order: showdown ? showdownOrder(room.teams) : null,
     results: null,
+    twist: twistId ? { id: twistId } : null,   // G2
   };
   room.activeTeam = showdown
     ? room.round.order[0]
@@ -607,9 +628,15 @@ async function startRound(advance) {
     // presence — the KPI behind removing the screen gate.
     screen_attached: screenLive(screenBeat, Date.now()),
     ...(via ? { advance: via } : {}),
+    ...(twistId ? { twist: twistId } : {}),   // G2
   });
 
-  $("hudRound").textContent = `Round ${number}/${room.settings.roundCount}`;
+  // G2 Frozen: disable street movement for the round via the viewer lever.
+  if (iv && iv.setMoveAllowed) {
+    iv.setMoveAllowed(twistMoveAllowed(room.settings, twistId));
+  }
+  $("hudRound").textContent = `Round ${number}/${room.settings.roundCount}` +
+    (twistId ? ` · ${twistHudTag(twistId)}` : "");
   $("hudTeam").textContent = roundTeamLabel();
   // First-time education (M5): the showdown gets its one-rule interstitial;
   // an ordinary first pano teaches the loop's first move. One shot each.
@@ -618,7 +645,40 @@ async function startRound(advance) {
   } else {
     oneShotHint("pano", HINT_CARDS.pano);
   }
+  if (twistId) showTwistCard(twistId);   // G2 ritual interstitial
   startTimer();
+}
+
+// G2: the twist card flip — a center overlay + scrim (the ritual-interstitial
+// class), auto-dismissing in ~2.5s, tap to skip. Reduced-motion collapses to a
+// static appear via the CSS reset. Injected (no HTML id), carries no team name.
+let twistCardEl = null;
+let twistCardTimer = null;
+function showTwistCard(twistId) {
+  const card = twistCard(twistId);
+  if (!card) return;
+  playSound("sting");
+  if (!twistCardEl) {
+    twistCardEl = document.createElement("div");
+    twistCardEl.className = "twist-card-overlay";
+    twistCardEl.addEventListener("click", hideTwistCard);
+    document.body.appendChild(twistCardEl);
+  }
+  twistCardEl.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "twist-card-title";
+  title.textContent = card.card;
+  const rule = document.createElement("div");
+  rule.className = "twist-card-rule";
+  rule.textContent = card.rule;
+  twistCardEl.append(title, rule);
+  twistCardEl.classList.remove("hidden");
+  clearTimeout(twistCardTimer);
+  twistCardTimer = setTimeout(hideTwistCard, 2500);
+}
+function hideTwistCard() {
+  if (twistCardEl) twistCardEl.classList.add("hidden");
+  clearTimeout(twistCardTimer);
 }
 
 // HUD label for the round screen: the active team, or the showdown banner.
@@ -908,15 +968,18 @@ function confirmGuess() {
   const g = guessMarker.getLatLng();
   const guess = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
   const distanceKm = haversineKm(currentTruth.lat, currentTruth.lng, guess.lat, guess.lng);
-  const distancePoints = scoreForDistance(distanceKm);
   // Speed clock: round start (or this team's showdown turn start) to this
   // confirm tap. turnStartedAt may be absent on rounds started pre-update.
   const submittedAt = Date.now();
   const elapsedMs = Math.max(
     0, submittedAt - (room.round.turnStartedAt || room.round.startedAt));
-  const speedBonus =
-    timeBonus(distancePoints, elapsedMs, bonusWindowMs(room.settings.roundSeconds));
-  const points = distancePoints + speedBonus;
+  // G2: one scorer for twisted and plain rounds (blitz ×1.5 on the total,
+  // Long Haul's gentler curve, 20s blitz window) — twistId null ⇒ plain.
+  const twistId = room.round && room.round.twist ? room.round.twist.id : null;
+  const ts = twistedRoundScore(twistId, distanceKm, elapsedMs, room.settings);
+  const distancePoints = ts.distancePoints;
+  const speedBonus = ts.timeBonus;
+  const points = ts.points;
   // The active team's armed bet commits with this pin. Couch has no
   // forfeit path (a pin is always confirmed), so bets never burn here.
   const betting = superSureArmed &&
@@ -971,6 +1034,7 @@ function confirmGuess() {
     elapsedMs, submittedAt, distanceKm,
     superSure: betting ? true : null,
     superSureOutcome: null,
+    twistTag: twistRevealTag(twistId),   // G2: shown on the reveal result line
   };
   if (betting) {
     // Solo rounds have exactly one pin, so the shared rule resolves it as
@@ -1309,7 +1373,10 @@ function enterReveal() {
     if (list) list.classList.add("hidden");
     const score = room.round.score;
     resultEl.classList.remove("hidden");
-    resultEl.textContent = revealResultLine(score);
+    // Pass the round's guess so the full personal line renders (and carries the
+    // G2 twist tag on `score.twistTag`).
+    resultEl.textContent = revealResultLine(
+      score ? { ...score, guess: score.guess || room.round.guess } : score);
     resultEl.classList.toggle(
       "lost", !!(score && score.superSure && score.superSureOutcome !== "won"));
   }
@@ -1612,6 +1679,7 @@ wireSeg("segRounds");
 wireSeg("segSeconds");
 wireSeg("segMove");
 wireSeg("segDifficulty");
+wireSeg("segTwists");
 wireSeg("segTeams", (v) => renderTeamNameInputs(parseInt(v, 10)));
 
 $("btnNewGame").addEventListener("click", newGame);

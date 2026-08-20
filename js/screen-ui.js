@@ -32,6 +32,7 @@ import {
   defaultNight, bumpNight, champion, gameWinner,
   tallyLineText, championText,
 } from "./night.js";
+import { twistHudTag } from "./twist.js";
 import { adjustedPoints, superSureLabel } from "./supersure.js";
 import { TV_VIAS, screenJoinVia } from "./tvlink.js";
 import { countdownTick, motionDuration, animFraction } from "./fx.js";
@@ -340,7 +341,8 @@ function renderRound(state) {
 
   $("tvRoundNo").textContent =
     `Round ${round.number || 1}` +
-    (state.settings ? ` / ${state.settings.roundCount}` : "");
+    (state.settings ? ` / ${state.settings.roundCount}` : "") +
+    (round.twist ? ` · ${twistHudTag(round.twist.id)}` : "");   // G2
   const ids = teamIds(state.teams);
   const activeIdx = ids.indexOf(state.activeTeam);
   const teamEl = $("tvActiveTeam");
@@ -495,7 +497,8 @@ function renderGuessing(state) {
   $("tvGuessRound").textContent = round.showdown
     ? "FINAL SHOWDOWN"
     : `Round ${round.number || 1}` +
-      (state.settings ? ` / ${state.settings.roundCount}` : "");
+      (state.settings ? ` / ${state.settings.roundCount}` : "") +
+      (round.twist ? ` · ${twistHudTag(round.twist.id)}` : "");   // G2
 
   // Whose turn is it? Solo rounds name the team; showdown turns count down
   // the pass-around ("Blue is guessing · 2/3").

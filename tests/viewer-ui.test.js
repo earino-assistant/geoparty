@@ -143,6 +143,8 @@ function installFakeMapillary() {
     moveTo() { return Promise.resolve(); }   // chaos overrides this in tests
     remove() { this.removed = true; }
     resize() {}
+    activateComponent(name) { (this.activated = this.activated || []).push(name); }
+    deactivateComponent(name) { (this.deactivated = this.deactivated || []).push(name); }
   }
   globalThis.mapillary = {
     Viewer: FakeViewer,
@@ -196,6 +198,18 @@ const HOST_COMPONENT = { cover: false, direction: true, sequence: true };
 const makeHostViewer = () => viewerUi.createViewer({
   surface: "host", container: "hostViewer", moveAllowed: true,
   component: HOST_COMPONENT,
+});
+
+test("setMoveAllowed: toggles moveEnabled and (de)activates nav components (G2/G6)", () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  iv.setMoveAllowed(false);   // G2 Frozen / G6 Hard
+  assert.equal(iv.moveEnabled, false);
+  assert.deepEqual(raw.deactivated, ["direction", "sequence", "keyboard"]);
+  iv.setMoveAllowed(true);
+  assert.equal(iv.moveEnabled, true);
+  assert.deepEqual(raw.activated, ["direction", "sequence", "keyboard"]);
+  iv.destroy();
 });
 
 /* ================================================================

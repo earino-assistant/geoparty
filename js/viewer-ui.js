@@ -186,6 +186,7 @@ function stubViewer(surface, errorClass) {
     endRound() {},
     noteReanchor() {},
     session: () => null,
+    setMoveAllowed(allowed) { this.moveEnabled = allowed === true; },
     resize() {},
     destroy() {},
   };
@@ -434,6 +435,20 @@ function instrument({ surface, container, viewer }) {
     // Whether street movement is enabled for this surface — the health model
     // only counts navigation failures where navigation was offered (§9.1).
     moveEnabled: false,
+
+    // G2 Frozen / G6 Hard: toggle street navigation mid-surface by
+    // (de)activating the direction/sequence/keyboard components. The ONLY
+    // legal place to touch the viewer's components (CLAUDE.md). Idempotent and
+    // SDK-build-tolerant.
+    setMoveAllowed(allowed) {
+      iv.moveEnabled = allowed === true;
+      for (const name of ["direction", "sequence", "keyboard"]) {
+        try {
+          if (allowed) viewer.activateComponent(name);
+          else viewer.deactivateComponent(name);
+        } catch { /* SDK build without this component */ }
+      }
+    },
 
     resize() {
       try { viewer.resize(); } catch { /* not laid out yet */ }

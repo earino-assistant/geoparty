@@ -1324,6 +1324,40 @@ body:has(.action-bar) .consent-settings {
   line-height: 1.5;
 }
 
+/* G2 Twists: the ritual-interstitial card flip (center overlay + scrim). */
+.twist-card-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.72);
+  animation: twist-card-in 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+.twist-card-title {
+  font-size: clamp(2rem, 9vw, 4rem);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: #fff;
+  text-align: center;
+}
+.twist-card-rule {
+  font-size: clamp(1rem, 4vw, 1.4rem);
+  color: var(--muted);
+  text-align: center;
+  max-width: 80%;
+}
+@keyframes twist-card-in {
+  from { transform: rotateX(90deg) scale(0.9); opacity: 0; }
+  to { transform: rotateX(0) scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .twist-card-overlay { animation: none; }   /* fade only — no flip */
+}
+
 /* G3 Crown Night: the muted tally line + the full-screen champion. */
 .night-tally {
   color: var(--muted);

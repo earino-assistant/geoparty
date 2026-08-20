@@ -8,6 +8,7 @@ import { createViewer } from "./viewer-ui.js";
 import { scrubErrorMessage } from "./imagery.js";
 import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
+import { twistHudTag } from "./twist.js";
 import {
   autoAdvanceStatus,
   advanceTarget,
@@ -325,7 +326,8 @@ function renderLive(state, showScreen) {
 
   $("h2hRoundNo").textContent =
     `Round ${round.number || 1}` +
-    (state.settings ? ` / ${state.settings.roundCount}` : "");
+    (state.settings ? ` / ${state.settings.roundCount}` : "") +
+    (round.twist ? ` · ${twistHudTag(round.twist.id)}` : "");   // G2
   startTimer(round.endsAt);
 
   const n = submittedCount(round);
