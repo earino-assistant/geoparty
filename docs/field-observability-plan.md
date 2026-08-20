@@ -1,7 +1,8 @@
 # Field observability plan — imagery & viewer debugging in the wild
 
-**Status: PLAN ONLY — no production code changes until owner approval.**
-Implementation is specified here for Opus to execute phase by phase (§14).
+**Status: IMPLEMENTED (2026-08-20).** P0–P2 are in the tree; see the
+implementation note at the end of this document for the delta between plan
+and code, and `docs/failure-injection.md` for the verification results.
 
 > **Revision 2026-08-20 — learning mode.** Owner decision: the original
 > failure-triggered-only replay posture was too cautious for a product
@@ -1033,3 +1034,82 @@ exceptions + replay only; product analytics stays in PostHog.
 
 Nothing in this plan touches `data/location_pool.json` generation,
 Firebase, or game logic.
+
+---
+
+## Implementation note — 2026-08-20 (P0–P2 shipped)
+
+Implemented from this plan in one pass. What follows is the honest delta
+between the plan as written and the code as built; everything not listed
+here was implemented as specified.
+
+**Owner sequencing decision (recorded).** Stage-1 learning mode ships as
+specified (100% of explicitly consented sessions, 30 days / 300 useful
+sessions), but it is **not a deployment gate**: later roadmap work does not
+wait on it. The Stage-2 transition (§9.2, §14 P1.5) remains future
+operational policy.
+
+**Plan conflict resolved — no permanent pano chrome.** §10.1's *ambient*
+"Image not working? Report it" link under the active panorama conflicts
+with `docs/ui-ux-design-review.md`, which protects the pano as the
+product's cleanest screen. Per PM decision the ambient link was **not**
+built. Reportability is preserved three ways instead (see the header
+comment in `js/report-ui.js`): a reactive inline action inside the toast
+that a failure already raises; a quiet link on the existing 🍪
+analytics/diagnostics settings surface (the calm-state path, and the only
+route for `gesture_blocked`, which raises no toast); and fully automatic
+consent-gated reporting for classified failures. The §10.4 one-time
+diagnostic consent for decliners is implemented exactly as specified.
+
+**Deviations, each with its reason:**
+
+1. **`imagery_load.late` → `after_timeout`.** The existing
+   `BANNED_KEY_RE` (`/lat|…/`) strips any property whose key contains
+   `lat` — including `late`. Renaming the property was the safe fix;
+   weakening the coordinate guard was not.
+2. **Maps are blocked from replay, and OSM tile hosts are not in the
+   network allowlist.** §9.4 enumerated canvas, inputs, team names and room
+   codes but not Leaflet. A tile URL is `/{z}/{x}/{y}.png` — literally a
+   coordinate — so recording tiles would have leaked both the round's
+   answer and the player's aim. `blockSelector: ".leaflet-container,
+   [data-ph-block]"` plus dropping tile hosts from the waterfall closes it.
+   Reveal **place names** are masked for the same reason.
+3. **Stage-1 replay event triggers are NOT configured project-side.** In
+   PostHog, `session_recording_event_trigger_config` *gates* recording:
+   with triggers set, sessions that never fire the trigger do not record.
+   Configuring `$exception` / `imagery_report` triggers now would have
+   defeated learning mode's entire purpose. Sampling is 100% and the
+   client-side `startSessionRecording()` override (§9.3.2) is wired and
+   tested; the triggers become a Stage-2 settings change, applied in the
+   same click as the 100% → 15% sampling drop.
+4. **`loadRoundImage` short-circuits on a stub viewer.** With no WebGL,
+   every attempt rejects; the plan's unbounded loop would have ground
+   through all 5,312 pool entries. It now reports the real cause once and
+   returns "no entry" without consuming a pool entry. The loop is otherwise
+   unbounded exactly as before.
+5. **The per-purpose timeout is a real behavior change**, as §6.1
+   specifies: a `moveTo` that never settles now rejects at 20 s / 10 s
+   instead of hanging forever, and a late SDK success emits a correcting
+   `imagery_load{ok:true, after_timeout:true}`. Every other catch, skip,
+   toast and fallback is byte-for-byte unchanged.
+6. **`pano_session` is emitted on TV surfaces too** (`tv`, `tv_panel`),
+   where the interaction counters are structurally zero. `nav_available`
+   and `webglcontextlost` still carry signal about TV-stick browsers, and
+   the health model already ignores navigation facts where movement is not
+   offered.
+7. **Alert coverage is bounded by the PostHog API.** Six insight alerts
+   exist (§12 rows 1–5). The "3× trailing-7-day median" exception spike is
+   not expressible — PostHog alert thresholds are absolute — so it fires on
+   the plan's floor (>20/day) and the trend is read on panel 8. "Chronic
+   pool entry" (a per-entity threshold) and "replay consumption" (replays
+   are not events) have no alert primitive; both are dashboard panels /
+   the §9.5 weekly owner review.
+8. **`anonymize_ips` was OFF** on the PostHog project despite PRIVACY.md
+   promising it. Turned **on** as part of this work.
+
+**Verified external objects** (PostHog EU, project 252836): dashboard
+`905962` "Field reliability" with 17 tiles (13 plan panels + 4
+alert-backing insights); feature flag `replay-imagery-debug` id `255025`,
+linked to session recording as the remote kill switch; six enabled daily
+alerts. IDs and URLs are listed in `docs/analytics.md` and the
+implementation report.

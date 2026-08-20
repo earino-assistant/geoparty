@@ -37,7 +37,7 @@
         <div>
           <strong>Game in progress</strong>
           <div style="color: var(--muted); font-size: 0.9rem">
-            Room <span id="pResumeCode"></span> — rejoin your team?
+            Room <span id="pResumeCode" data-ph-mask></span> — rejoin your team?
           </div>
         </div>
         <button id="btnPResume" class="btn-primary">Rejoin</button>
@@ -46,7 +46,7 @@
       <div class="settings-group">
         <div class="label">Your team name</div>
         <div class="team-names">
-          <input id="myTeamName" maxlength="24" placeholder="e.g. The Atlas Cats" autocomplete="off" />
+          <input id="myTeamName" data-ph-mask maxlength="24" placeholder="e.g. The Atlas Cats" autocomplete="off" />
         </div>
       </div>
 
@@ -107,9 +107,9 @@
   <section id="p-lobby" class="phase-screen hidden">
     <div class="host-wrap">
       <h1>Room</h1>
-      <div id="pRoomCodeHuge" class="room-code-huge">······</div>
+      <div id="pRoomCodeHuge" class="room-code-huge" data-ph-mask>······</div>
       <div class="qr-box"><canvas id="pQrCanvas"></canvas></div>
-      <div id="pJoinUrl" class="screen-url"></div>
+      <div id="pJoinUrl" data-ph-mask class="screen-url"></div>
       <div class="share-row">
         <button id="btnPShare" class="btn-primary">📤 Send invite link</button>
       </div>
@@ -122,10 +122,10 @@
         <p class="tv-add-hint">Scan with any phone or tablet, then cast or
           AirPlay it to the TV.</p>
         <div class="share-row"><button id="btnPTvLink">📤 Send the TV link</button></div>
-        <p id="pTvType" class="tv-add-alt"></p>
+        <p id="pTvType" data-ph-mask class="tv-add-alt"></p>
       </details>
       <h2>Teams</h2>
-      <ul id="pLobbyTeams" class="totals-list lobby-teams"></ul>
+      <ul id="pLobbyTeams" data-ph-mask class="totals-list lobby-teams"></ul>
       <div id="pLobbyNote" class="waiting-screen-note"></div>
     </div>
     <div class="action-bar">
@@ -166,10 +166,10 @@
   <section id="p-locked" class="phase-screen hidden">
     <div class="host-wrap locked-wrap">
       <div class="locked-stamp">LOCKED IN</div>
-      <div id="pLockedRank" class="locked-rank"></div>
+      <div id="pLockedRank" data-ph-mask class="locked-rank"></div>
       <p class="locked-sub" id="pLockedSub">Eyes on the TV 📺</p>
       <h2>Who's in</h2>
-      <ul id="pLockedList" class="totals-list"></ul>
+      <ul id="pLockedList" data-ph-mask class="totals-list"></ul>
     </div>
     <div class="action-bar">
       <button id="btnCloseRound" class="hidden">Close Round (forfeit stragglers)</button>
@@ -183,7 +183,7 @@
       <div id="pRevealMap" class="p-reveal-map"></div>
       <div class="stat-card">
         <div class="label">Location</div>
-        <div class="big place" id="pRevealPlace">—</div>
+        <div class="big place" id="pRevealPlace" data-ph-mask>—</div>
       </div>
       <div class="stat-card">
         <div class="label">Your distance</div>
@@ -194,9 +194,9 @@
         <div class="big" id="pRevealPoints" style="color: var(--accent)">—</div>
       </div>
       <h2>This round</h2>
-      <ul id="pRoundResults" class="totals-list"></ul>
+      <ul id="pRoundResults" data-ph-mask class="totals-list"></ul>
       <h2>Totals</h2>
-      <ul id="pRevealTotals" class="totals-list"></ul>
+      <ul id="pRevealTotals" data-ph-mask class="totals-list"></ul>
       <div id="pRevealNote" class="waiting-screen-note advance-note"></div>
     </div>
     <div class="action-bar">
@@ -209,8 +209,8 @@
   <section id="p-gameover" class="phase-screen hidden">
     <div class="host-wrap">
       <h1 id="pGameOverTitle">Game over!</h1>
-      <ul id="pFinalTotals" class="totals-list"></ul>
-      <div id="pHandoffNote" class="handoff-note"></div>
+      <ul id="pFinalTotals" data-ph-mask class="totals-list"></ul>
+      <div id="pHandoffNote" data-ph-mask class="handoff-note"></div>
     </div>
     <div class="action-bar">
       <button id="btnPHome">Leave</button>

@@ -1,7 +1,6 @@
 // host-ui.js — operator phone controller. The host is the single source of
 // truth: it holds full game state locally and pushes it to Firebase.
 
-import { MAPILLARY_TOKEN } from "../config.js";
 import {
   readRoom,
   writeRoom,
@@ -70,6 +69,8 @@ import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
+import { createViewer, loadRoundImage } from "./viewer-ui.js";
+import { toastWithReport, toastPlain } from "./report-ui.js";
 
 /* ================================================================
  * DOM helpers
@@ -94,12 +95,25 @@ function showScreen(id) {
 }
 
 let toastTimer = null;
-function toast(msg) {
+// `reportCtx` turns this into the REACTIVE report surface (plan §10.1 as
+// reconciled with the UI/UX review): an inline action, only on the toasts
+// that already fire for a broken/degraded imagery condition. The pano itself
+// gains no permanent chrome.
+function toast(msg, reportCtx) {
   const el = $("toast");
-  el.textContent = msg;
+  if (reportCtx) toastWithReport(el, msg, reportCtx); else toastPlain(el, msg);
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 2500);
+  toastTimer = setTimeout(
+    () => el.classList.remove("show"), reportCtx ? 6000 : 2500);
+}
+
+// One degraded-imagery nudge per game: a party should never be nagged.
+let degradedNoticeShown = false;
+function noticeDegradedImagery(skips) {
+  if (degradedNoticeShown || skips < 2) return;
+  degradedNoticeShown = true;
+  toast("Some images wouldn’t load — we skipped ahead.", { surface: "host" });
 }
 
 /* ================================================================
@@ -167,7 +181,8 @@ let currentTruth = null;  // pool entry backing the active round
 let gameBest = null;      // closest guess so far — the share card's brag (S1)
 let connected = true;
 
-let viewer = null;        // MapillaryJS viewer
+let iv = null;            // instrumented viewer wrapper (viewer-ui.js)
+let viewer = null;        // its raw MapillaryJS viewer (pose APIs unchanged)
 let guessMap = null;      // Leaflet map
 let guessMarker = null;
 let superSureArmed = false; // active team's SUPER SURE toggle, this pin only
@@ -388,9 +403,10 @@ async function abandonGame() {
 function makeViewer() {
   destroyViewer();
   const moveAllowed = room.settings.moveAllowed;
-  viewer = new mapillary.Viewer({
-    accessToken: MAPILLARY_TOKEN,
+  iv = createViewer({
+    surface: "host",
     container: "hostViewer",
+    moveAllowed,
     component: {
       cover: false,
       // "No moving" mode locks navigation but keeps look-around (spec §6).
@@ -401,6 +417,11 @@ function makeViewer() {
       bearing: true,
     },
   });
+  viewer = iv.viewer;
+  // Construction failed (no WebGL, SDK blocked): viewer_init is already
+  // reported and every moveTo rejects. Every `if (viewer)` guard below then
+  // degrades exactly as it does when the viewer is gone.
+  if (!viewer) return;
   viewer.on("pov", schedulePoseWrite);
   viewer.on("position", schedulePoseWrite);
   viewer.on("image", (ev) => {
@@ -413,10 +434,11 @@ function makeViewer() {
 }
 
 function destroyViewer() {
-  if (viewer) {
-    try { viewer.remove(); } catch { /* already gone */ }
-    viewer = null;
+  if (iv) {
+    iv.destroy();   // flushes the open pano_session, then viewer.remove()
+    iv = null;
   }
+  viewer = null;
 }
 
 // Throttle pose writes to at most 4/second (spec §1).
@@ -452,26 +474,20 @@ async function startRound(advance) {
     : room.round ? "manual" : null; // round 1 follows no reveal
   const number = (room.round ? room.round.number : 0) + 1;
   showScreen("h-round");
-  if (!viewer) makeViewer();
+  if (!iv) makeViewer();
+  iv.beginRound(number);
 
-  // Sample the pool, skipping dead imagery silently (spec §9).
-  let entry = sampler.peek();
-  let loaded = false;
-  while (entry && !loaded) {
-    try {
-      await viewer.moveTo(entry.image_id);
-      loaded = true;
-    } catch (e) {
-      console.warn(`Pool image ${entry.image_id} failed to load, skipping`, e);
-      entry = sampler.advance();
-    }
-  }
+  // Sample the pool, skipping dead imagery silently (spec §9). The loop is
+  // unchanged — it just lives in viewer-ui.js now, where each skip is timed,
+  // classified and (once per pool entry) reported.
+  const { entry, skips } = await loadRoundImage(sampler, iv, "anchor");
   if (!entry) {
-    toast("Location pool exhausted!");
+    toast("Location pool exhausted!", { surface: "host" });
     room.phase = "reveal"; // allow reveal -> gameOver transition
     finishGame();
     return;
   }
+  noticeDegradedImagery(skips);
   currentTruth = entry;
   sampler.advance();
 
@@ -1177,6 +1193,7 @@ function enterReveal() {
       list = document.createElement("ul");
       list.id = "hostShowdownResults";
       list.className = "totals-list showdown-results";
+      list.dataset.phMask = "";   // team names — replay masking (plan §9.4)
       ptsCard.after(list);
     }
     list.classList.remove("hidden");
@@ -1410,8 +1427,13 @@ async function resumeGame(code, state) {
     case "roundActive": {
       showScreen("h-round");
       makeViewer();
-      try { await viewer.moveTo(room.round.imageId); }
-      catch (e) { console.warn("resume: image failed to load", e); }
+      iv.beginRound(room.round.number);
+      try { await iv.moveTo(room.round.imageId, "resume"); }
+      catch (e) {
+        console.warn("resume: image failed to load", e);
+        toast("Imagery didn’t load — the round still works from the map.",
+          { surface: "host" });
+      }
       $("hudRound").textContent =
         `Round ${room.round.number}/${room.settings.roundCount}`;
       $("hudTeam").textContent = roundTeamLabel();

@@ -9,6 +9,15 @@
 //   - Every event goes through a per-event property allowlist: unknown
 //     events are dropped, unknown/banned/badly-typed properties stripped.
 //     Raw coordinates can never leave the device.
+//   - Exceptions (field observability, docs/field-observability-plan.md)
+//     ride the SAME gate: trackError() mirrors track() — consent check, then
+//     an EXCEPTION_PROPS allowlist — and before_send scrubs query strings
+//     and long digit runs out of every URL/stack that leaves the device.
+//   - The one exception to "capture only after accept" is the explicit,
+//     user-initiated one-time diagnostic report (§10.4): two taps, one
+//     bundle, memory-only persistence, no replay, stored "no" untouched.
+
+import { scrubUrl, scrubErrorMessage } from "./imagery.js";
 
 /* ================================================================
  * PostHog project config (public embeddable key, EU-resident instance —
@@ -31,7 +40,166 @@ export const POSTHOG_INIT_OPTIONS = {
   // UI strings. Team names (user input) live in list items and headings,
   // which autocapture must never lift into $el_text.
   autocapture: { element_allowlist: ["button", "a"] },
+
+  // Field observability (plan §4.1). Every key below still sits behind the
+  // consent gate: posthog-js is not loaded at all until the user accepts,
+  // so none of this can run for a decliner.
+
+  // Error tracking: window.onerror + unhandledrejection become issues. Our
+  // own console.warn/error stay OUT of the issue stream — replay captures
+  // them in context instead, which is where they are actually readable.
+  capture_exceptions: {
+    capture_unhandled_errors: true,
+    capture_unhandled_rejections: true,
+    capture_console_errors: false,
+  },
+
+  // Web Vitals autocapture ($web_vitals: LCP/CLS/INP/FCP) — the "imagery is
+  // slow" complaint needs a page-level baseline next to the viewer timings.
+  capture_performance: { web_vitals: true },
+
+  // Session replay. Retention follows the staged policy (plan §9.2) and is
+  // a project-settings dial; the masking below is identical in every stage
+  // and is the part that must never be loosened.
+  session_recording: {
+    maskAllInputs: true,                  // nothing typed, ever (team names)
+    // Team names + room codes in the UI, plus Leaflet's tooltips (which
+    // carry team-name pin labels on the reveal maps).
+    maskTextSelector: "[data-ph-mask], .leaflet-tooltip",
+    // Every map is BLOCKED, not just masked. Leaflet renders OSM tiles as
+    // <img src=".../{z}/{x}/{y}.png"> — a tile path IS a coordinate, and
+    // reveal/guess maps would otherwise put the round's truth and the
+    // player's aim into the recording. Blocked elements record as an opaque
+    // placeholder box, so layout still reads but no location does.
+    blockSelector: ".leaflet-container, [data-ph-block]",
+    captureCanvas: false,                 // the WebGL pano is a black box
+    recordHeaders: false,
+    recordBody: false,
+    // Timing/status/allowlisted-path only. Mapillary access tokens ride in
+    // query params, so the strip below is mandatory before replay ships.
+    maskCapturedNetworkRequestFn: (req) => maskNetworkRequest(
+      req,
+      typeof location !== "undefined" ? location.hostname : "",
+    ),
+  },
+  // Console output synced into replays: the warns our skip loops already
+  // print are the story of a failing round.
+  enable_recording_console_log: true,
+
+  // Belt-and-braces URL hygiene on every event, exception and pageview:
+  // query strings and long digit runs (image ids) never leave the device.
+  before_send: sanitizeBeforeSend,
 };
+
+/* ================================================================
+ * Replay / network / URL sanitizers (pure — tested)
+ * ================================================================ */
+
+// Hosts whose request TIMING may appear in a replay waterfall. Anything
+// else is dropped entirely rather than recorded with a stripped name.
+// Deliberately NOT here: tile.openstreetmap.org. A tile URL is
+// `/{z}/{x}/{y}.png` — literally a coordinate — so map tile requests are
+// dropped from the waterfall entirely rather than recorded with a stripped
+// query string.
+export const NETWORK_HOST_ALLOWLIST = Object.freeze([
+  "graph.mapillary.com",
+  "unpkg.com",
+  "eu.i.posthog.com",
+  "eu-assets.i.posthog.com",
+]);
+
+// Suffix matches for hosts that are sharded per-region/per-CDN-node.
+const NETWORK_HOST_SUFFIXES = Object.freeze([
+  ".fbcdn.net",                 // Mapillary imagery CDN (scontent-*.fbcdn.net)
+  ".firebasedatabase.app",      // the room sync socket
+  ".mapillary.com",
+]);
+
+function hostOf(name) {
+  const m = /^[a-z]+:\/\/([^/?#]+)/i.exec(String(name || ""));
+  if (!m) return null;               // relative URL → our own origin
+  return m[1].split("@").pop().split(":")[0].toLowerCase();
+}
+
+// posthog-js calls this for every captured network request. Returning null
+// drops the entry. `selfHost` keeps our own static assets (release.json,
+// the location pool) visible in the waterfall.
+export function maskNetworkRequest(req, selfHost) {
+  if (!req || typeof req.name !== "string") return null;
+  const host = hostOf(req.name);
+  const allowed =
+    host === null ||
+    (selfHost && host === String(selfHost).toLowerCase()) ||
+    NETWORK_HOST_ALLOWLIST.includes(host) ||
+    NETWORK_HOST_SUFFIXES.some((sfx) => host.endsWith(sfx));
+  if (!allowed) return null;
+  req.name = scrubUrl(req.name);
+  // Defense in depth: posthog-js only sends these when recordHeaders /
+  // recordBody are on, but a future default flip must not leak.
+  delete req.requestHeaders;
+  delete req.responseHeaders;
+  delete req.requestBody;
+  delete req.responseBody;
+  return req;
+}
+
+const URL_PROPS = Object.freeze([
+  "$current_url", "$pathname", "$referrer", "$referring_domain",
+  "$initial_current_url", "$initial_pathname", "$initial_referrer",
+  "$session_entry_url", "$session_entry_pathname", "$session_entry_referrer",
+]);
+
+// before_send hook: scrub URL-shaped properties and exception frames on
+// EVERY outgoing event. Never returns null — dropping stays the schema's
+// job (sanitizeEvent), and silently eating events would hide bugs.
+export function sanitizeBeforeSend(event) {
+  if (!event || !event.properties) return event;
+  const props = event.properties;
+  for (const key of URL_PROPS) {
+    if (typeof props[key] === "string") props[key] = scrubUrl(props[key]);
+  }
+  const list = props.$exception_list;
+  if (Array.isArray(list)) {
+    for (const ex of list) {
+      if (!ex || typeof ex !== "object") continue;
+      if (typeof ex.value === "string") ex.value = scrubErrorMessage(ex.value);
+      if (typeof ex.type === "string") ex.type = scrubErrorMessage(ex.type);
+      const frames = ex.stacktrace && ex.stacktrace.frames;
+      if (!Array.isArray(frames)) continue;
+      for (const f of frames) {
+        if (!f || typeof f !== "object") continue;
+        if (typeof f.filename === "string") f.filename = scrubUrl(f.filename);
+        if (typeof f.abs_path === "string") f.abs_path = scrubUrl(f.abs_path);
+        if (typeof f.module === "string") f.module = scrubUrl(f.module);
+      }
+    }
+  }
+  if (typeof props.$exception_message === "string") {
+    props.$exception_message = scrubErrorMessage(props.$exception_message);
+  }
+  return event;
+}
+
+// §10.4 one-time diagnostic init: the same options with everything ambient
+// switched off. A fresh object every call — posthog.init() mutates it, and
+// this path must never share state with the consented init.
+export function oneShotInitOptions() {
+  return {
+    api_host: POSTHOG_INIT_OPTIONS.api_host,
+    defaults: POSTHOG_INIT_OPTIONS.defaults,
+    person_profiles: "identified_only",
+    persistence: "memory",          // no cookies, no localStorage
+    disable_session_recording: true, // one report is not a recording
+    autocapture: false,
+    capture_pageview: false,
+    capture_pageleave: false,
+    capture_exceptions: false,
+    capture_performance: false,
+    advanced_disable_feature_flags: true,
+    disable_surveys: true,
+    before_send: sanitizeBeforeSend,
+  };
+}
 
 // The posthog-js bundle, loaded directly (no inline snippet — CSP-friendlier
 // and nothing runs before consent). EU assets host per the official snippet.
@@ -161,6 +329,86 @@ export const EVENT_SCHEMA = Object.freeze({
   consent_given: {},
   consent_denied: {},
   next_game: { mode: "string" },
+
+  /* ---- Field observability (docs/field-observability-plan.md §7.1) ----
+   * Aggregates only. `pool_entry` is the opaque diag id from
+   * imagery.js#poolDiagId — never the raw Mapillary image id, never a
+   * coordinate. Browser/OS/device class ride on PostHog's automatic
+   * $browser / $os / $device_type, so no custom property needs them.
+   */
+
+  // One per createViewer() call, success or failure.
+  viewer_init: {
+    surface: "string",      // host|player|tv|tv_panel|daily|landing
+    ok: "bool",
+    error_class: "string",  // §5 enum; absent when ok
+    duration_ms: "int",
+    webgl: "bool",          // mapillary.isSupported()
+    sdk: "string",          // pinned MapillaryJS tag
+  },
+
+  // One per moveTo outcome, and one per round-start skip-loop resolution.
+  // NOTE: the plan calls the "resolved after the timeout already fired"
+  // flag `late`; it is named `after_timeout` here because BANNED_KEY_RE
+  // (/lat|.../) strips any key containing "lat" — including "late" — before
+  // the allowlist is consulted. Renaming the property was the safe fix;
+  // weakening the coordinate guard was not.
+  imagery_load: {
+    surface: "string",
+    purpose: "string",       // anchor|resume|follow|seed|hero|nav
+    ok: "bool",
+    after_timeout: "bool",   // resolved after our timeout already fired
+    error_class: "string",
+    duration_ms: "int",
+    skips: "int",            // dead entries burned before this outcome
+    pool_entry: "string",    // opaque diag id (§8)
+    net_type: "string",      // navigator.connection.effectiveType|"unknown"
+    online: "bool",
+  },
+
+  // One per (surface, round) when the round leaves play or the viewer dies.
+  pano_session: {
+    surface: "string",
+    round_number: "int",
+    looks: "int",            // pov-change bursts (throttled count)
+    zoom_changes: "int",
+    nav_moves: "int",        // image changes not caused by our own moveTo
+    nav_failures: "int",
+    nav_available: "bool",   // last `navigable` state seen
+    reanchors: "int",        // re-anchor writes during active play
+    first_move_ms: "int",    // round start → first user interaction
+    pointer_downs: "int",    // with looks==0 → gesture_blocked signal
+  },
+
+  // One per user-initiated report (§10). consent is "analytics" (the user
+  // had already accepted) or "one_time" (the §10.4 one-shot path).
+  imagery_report: {
+    surface: "string",
+    ref_code: "string",      // "GP-XXXXXX"
+    error_class: "string",   // last classified failure, or "none"
+    pool_entry: "string",
+    net_type: "string",
+    online: "bool",
+    recent_failures: "int",
+    consent: "string",
+  },
+});
+
+/* ================================================================
+ * Exception property allowlist (§7.2) + release super properties (§11)
+ * ================================================================ */
+
+// trackError() mirrors track(): consent check, then this allowlist. Same
+// types as EVENT_SCHEMA, same BANNED_KEY_RE sweep.
+export const EXCEPTION_PROPS = Object.freeze({
+  surface: "string", purpose: "string", error_class: "string",
+  pool_entry: "string", duration_ms: "int", skips: "int",
+  net_type: "string", online: "bool", webgl: "bool", ref_code: "string",
+});
+
+// Registered once per session after a successful init, from release.json.
+export const RELEASE_PROPS = Object.freeze({
+  release: "string", commit: "string", deployed_at: "string",
 });
 
 // Defense in depth: even if a call site (or a future schema edit) tries to
@@ -169,12 +417,10 @@ export const EVENT_SCHEMA = Object.freeze({
 const BANNED_KEY_RE = /lat|lng|lon|coord|pin|guess$|name|email|device|user/i;
 const STRING_MAX = 40;
 
-// Validate one (event, props) pair against the schema. Returns
-// { event, props } with only clean allowlisted properties, or null when the
-// event itself is unknown — callers drop nulls silently.
-export function sanitizeEvent(event, props) {
-  const schema = EVENT_SCHEMA[event];
-  if (!schema) return null;
+// Sanitize a props bag against an allowlist (an EVENT_SCHEMA entry, or
+// EXCEPTION_PROPS / RELEASE_PROPS). Unknown keys never survive: we iterate
+// the ALLOWLIST, not the input.
+export function sanitizeProps(schema, props) {
   const clean = {};
   const src = props || {};
   for (const key of Object.keys(schema)) {
@@ -191,7 +437,30 @@ export function sanitizeEvent(event, props) {
       clean[key] = type === "float1" ? Math.round(v * 10) / 10 : Math.round(v);
     }
   }
-  return { event, props: clean };
+  return clean;
+}
+
+// Validate one (event, props) pair against the schema. Returns
+// { event, props } with only clean allowlisted properties, or null when the
+// event itself is unknown — callers drop nulls silently.
+export function sanitizeEvent(event, props) {
+  const schema = EVENT_SCHEMA[event];
+  if (!schema) return null;
+  return { event, props: sanitizeProps(schema, props) };
+}
+
+// The Error we hand to posthog.captureException is always OUR wrapper, so a
+// raw SDK message can never smuggle an image id or a tokened URL into the
+// issue title. `errorFactory` is injected so this stays pure/testable.
+export function makeImageryError(errorClass, originalMessage, ErrorCtor) {
+  const Ctor = ErrorCtor || Error;
+  const scrubbed = scrubErrorMessage(originalMessage);
+  const err = new Ctor(
+    scrubbed ? `ImageryError: ${errorClass} — ${scrubbed}`
+      : `ImageryError: ${errorClass}`,
+  );
+  err.name = "ImageryError";
+  return err;
 }
 
 /* ================================================================
@@ -204,19 +473,35 @@ export function sanitizeEvent(event, props) {
 
 const QUEUE_MAX = 100; // events buffered while the script is in flight
 
-export function createAnalytics({ storage, loadPosthog }) {
+export function createAnalytics({ storage, loadPosthog, loadPosthogOneShot }) {
   let posthog = null;
   let loadPromise = null;
   let optedOut = false;
+  let registered = null;   // release super props, applied on/after load
   const queue = [];
 
   const consent = () => getConsent(storage);
 
   function flushQueue() {
     while (queue.length && posthog) {
-      const { event, props } = queue.shift();
-      posthog.capture(event, props);
+      const item = queue.shift();
+      if (item.kind === "error") {
+        captureError(item.error, item.props);
+      } else {
+        posthog.capture(item.event, item.props);
+      }
     }
+  }
+
+  // posthog.captureException is only present on a current posthog-js; an
+  // older/blocked bundle silently degrades to the aggregated event.
+  function captureError(error, props) {
+    if (!posthog) return false;
+    if (typeof posthog.captureException === "function") {
+      posthog.captureException(error, props);
+      return true;
+    }
+    return false;
   }
 
   function ensureLoaded() {
@@ -228,6 +513,9 @@ export function createAnalytics({ storage, loadPosthog }) {
           // Consent may have been revoked while the script was in flight:
           // drop the buffer and stop capturing instead of flushing it.
           if (consent() === CONSENT_ACCEPTED) {
+            if (registered && posthog && posthog.register) {
+              posthog.register(registered);
+            }
             flushQueue();
           } else {
             queue.length = 0;
@@ -276,6 +564,83 @@ export function createAnalytics({ storage, loadPosthog }) {
         ensureLoaded();
       }
       return true;
+    },
+
+    // Capture one handled failure as a PostHog issue. Same gate as track():
+    // no consent, nothing happens — not even a load. `error` must already be
+    // our own scrubbed wrapper (see makeImageryError); props go through the
+    // EXCEPTION_PROPS allowlist. Returns true when accepted for delivery.
+    trackError(error, props) {
+      if (consent() !== CONSENT_ACCEPTED) return false;
+      if (!error) return false;
+      const clean = sanitizeProps(EXCEPTION_PROPS, props);
+      if (posthog) {
+        captureError(error, clean);
+      } else {
+        if (queue.length < QUEUE_MAX) {
+          queue.push({ kind: "error", error, props: clean });
+        }
+        ensureLoaded();
+      }
+      return true;
+    },
+
+    // Release stamping (§11): register release/commit/deployed_at as super
+    // properties so every event, exception and replay is release-correlated.
+    // Consent-gated like everything else; buffered until the script lands.
+    register(props) {
+      if (consent() !== CONSENT_ACCEPTED) return false;
+      const clean = sanitizeProps(RELEASE_PROPS, props);
+      if (!Object.keys(clean).length) return false;
+      registered = { ...(registered || {}), ...clean };
+      if (posthog && posthog.register) posthog.register(registered);
+      return true;
+    },
+
+    // §9.3 client-side recording override: when the wrapper classifies a
+    // failure or a degraded condition we force this session to record, so a
+    // negative sampling decision in Stage 2+ cannot lose the evidence. In
+    // learning mode (100% sampling) this is a redundant no-op by design.
+    startRecording() {
+      if (consent() !== CONSENT_ACCEPTED) return false;
+      if (!posthog || typeof posthog.startSessionRecording !== "function") {
+        return false;
+      }
+      try { posthog.startSessionRecording(); } catch { return false; }
+      return true;
+    },
+
+    // §10.4 — the ONLY capture path outside the accepted-consent gate.
+    // User-initiated, explicitly consented in its own dialog, exactly one
+    // bundle: memory persistence (no cookies/localStorage), no replay, no
+    // autocapture, and the stored consent flag is NEVER touched. When the
+    // user has already accepted, this is just the normal gated path.
+    sendDiagnostic({ event, props, error, errorProps }) {
+      if (consent() === CONSENT_ACCEPTED) {
+        const okEvent = this.track(event, props);
+        if (error) this.trackError(error, errorProps);
+        return Promise.resolve(okEvent);
+      }
+      const clean = sanitizeEvent(event, props);
+      if (!clean || typeof loadPosthogOneShot !== "function") {
+        return Promise.resolve(false);
+      }
+      const cleanErrProps = sanitizeProps(EXCEPTION_PROPS, errorProps);
+      return Promise.resolve()
+        .then(() => loadPosthogOneShot(POSTHOG_PROJECT_KEY, oneShotInitOptions()))
+        .then((ph) => {
+          if (!ph) return false;
+          ph.capture(clean.event, clean.props);
+          if (error && typeof ph.captureException === "function") {
+            ph.captureException(error, cleanErrProps);
+          }
+          // One report, not ongoing tracking: stop immediately.
+          if (typeof ph.opt_out_capturing === "function") {
+            ph.opt_out_capturing();
+          }
+          return true;
+        })
+        .catch(() => false);
     },
 
     // User accepted: persist, load PostHog (first time), record the choice.

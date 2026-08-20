@@ -18,6 +18,44 @@ implementation (unit-tested in `tests/analytics.test.js`).
   (head-to-head), `js/screen-ui.js` (TV), `js/landing-ui.js` (the front
   door), `js/daily-ui.js` (the Daily Challenge), `js/share-ui.js` (the
   shared result-card glue), and `js/fx-ui.js` (the S4 sound toggle).
+- **Field observability** (`docs/field-observability-plan.md`) adds a second
+  pure module and one wrapper: `js/imagery.js` (error taxonomy, scrubbers,
+  the opaque pool diag id, timeout/caps policy, the `pano_session` fold and
+  the session-health classifier — all unit-tested in
+  `tests/imagery.test.js`) and `js/viewer-ui.js`, the instrumented
+  MapillaryJS wrapper every viewer on every page is now built through.
+  `js/report-ui.js` is the "Report it" flow.
+- `trackError(error, props)` is the exception twin of `track()`: identical
+  consent gate, its own `EXCEPTION_PROPS` allowlist, and an Error object we
+  construct ourselves (`makeImageryError`) so a raw SDK message can never
+  carry an image id or a tokened URL into an issue title.
+- `before_send` (`sanitizeBeforeSend`) scrubs query strings and runs of ≥10
+  digits out of every URL property and exception frame on the way out —
+  belt and braces over the schema allowlist.
+
+### Session replay + exceptions (what is enabled, and why it is safe)
+
+Both sit entirely behind the existing accept gate — posthog-js is not
+loaded at all until the user taps "Sounds good", so a decliner produces no
+event, no exception and no recording, ever.
+
+| Setting | Value | Why |
+|---|---|---|
+| `capture_exceptions` | unhandled errors + rejections, `capture_console_errors: false` | unknown-unknowns become issues; our own warns stay out of the issue stream and show up in replay instead |
+| `capture_performance.web_vitals` | on | a page-level baseline next to the viewer timings |
+| `session_recording.maskAllInputs` | true | nothing typed is ever recorded |
+| `session_recording.maskTextSelector` | `[data-ph-mask], .leaflet-tooltip` | team names, room codes, place names, map pin labels (checklist: `docs/replay-mask-checklist.md`) |
+| `session_recording.blockSelector` | `.leaflet-container, [data-ph-block]` | **a map tile URL is a coordinate** — maps are blocked, not merely masked |
+| `session_recording.captureCanvas` | false | the WebGL panorama (street imagery = a location proxy) is never recorded |
+| `session_recording.recordHeaders` / `recordBody` | false | plus both are deleted defensively in `maskNetworkRequest` |
+| `maskCapturedNetworkRequestFn` | `maskNetworkRequest` | timing/status/path only, host-allowlisted, query strings stripped (Mapillary tokens ride in query params) |
+| `enable_recording_console_log` | true | the imagery story is in the console |
+
+Project-side (PostHog project **252836**, EU): recording ON, sampling
+**100%** (Stage-1 learning mode), minimum duration 2000 ms, console + network
+performance capture ON, canvas recording OFF, exception autocapture ON,
+**discard client IP ON**, recording linked to the `replay-imagery-debug`
+feature flag (id 255025) — the remote kill switch.
 
 PostHog init (owner-provided, verbatim): key
 `phc_Au8ogwiWbfcWqhbP6iE8ayyT5JSQtambPHFSffykdvkE`, `api_host:
@@ -58,8 +96,31 @@ the user-entered team name.
 | `consent_given` | — | consent module | Banner accepted (first event after PostHog init) |
 | `consent_denied` | — | consent module | A previously-consented user revokes. A **first-time** decline sends nothing — PostHog was never loaded, by design |
 | `next_game` | `mode` | host phone | "New game" chosen from the game-over screen |
+| `viewer_init` | `surface, ok, error_class, duration_ms, webgl, sdk` | every page with a panorama | One per `createViewer()` call. `surface` is `host` \| `player` \| `tv` \| `tv_panel` \| `daily` \| `landing`. `ok=false` carries the §5 `error_class` (`webgl_unavailable`, `viewer_init`, …) and means the player got no viewer at all; `webgl` is `mapillary.isSupported()`; `sdk` is the pinned MapillaryJS tag |
+| `imagery_load` | `surface, purpose, ok, after_timeout, error_class, duration_ms, skips, pool_entry, net_type, online` | the viewer wrapper | One per `moveTo` outcome, and one per round-start skip-loop resolution (the loop emits a single event carrying its `skips` count, not one per attempt). `purpose` is `anchor` \| `resume` \| `follow` \| `seed` \| `hero` \| `nav`. `pool_entry` is the **opaque** diag id (see below) — never the Mapillary image id, never a coordinate. `after_timeout` is the plan's `late`, renamed because `BANNED_KEY_RE` strips any key containing `lat` |
+| `pano_session` | `surface, round_number, looks, zoom_changes, nav_moves, nav_failures, nav_available, reanchors, first_move_ms, pointer_downs` | the viewer wrapper | One per (surface, round), emitted when the round leaves play or the viewer is destroyed. `looks` are throttled pov bursts, `nav_moves` are image changes we did **not** ask for (the player walked), `reanchors` is the movement-bounce regression canary, and `pointer_downs > 0` with `looks = 0` is the only signal we have for `gesture_blocked` |
+| `imagery_report` | `surface, ref_code, error_class, pool_entry, net_type, online, recent_failures, consent` | report sheet | One per user-initiated report. `ref_code` (`GP-XXXXXX`, Crockford base32) is the support reference code shown to the user; `consent` is `analytics` (already opted in) or `one_time` (the §10.4 explicit one-shot path, which never records a replay and never alters the stored decline) |
 
-Plus PostHog defaults: `$pageview` and (button/link-only) autocapture.
+Plus PostHog defaults: `$pageview`, (button/link-only) autocapture,
+`$exception` (autocaptured unhandled errors **and** our `trackError`
+captures) and `$web_vitals`.
+
+Every event, exception and replay also carries the release super properties
+`release` (short SHA), `commit` and `deployed_at`, registered from
+`release.json` — written into the Pages artifact at deploy time and absent
+in a dev checkout, where `release` is simply `"dev"`.
+
+### `pool_entry` — correlating failures without coordinates
+
+`imagery.js#poolDiagId(image_id)` is two salted FNV-1a passes folded to 41
+bits and rendered as 8 base36 chars (`k3x9q0ar`). It lets us say "this same
+pool entry failed for 6 people this week" while PostHog holds no coordinate
+and no directly-reversible location key. The pool file is public in this
+repo, so this is **pseudonymisation of game content, not a secret** — and
+deliberately so: pool entries are content we chose, not user data. Nothing
+derived from a *user's guess* is hashed or sent, in any form.
+
+Map it back locally: `node tools/diag_lookup.mjs k3x9q0ar`.
 
 ## KPIs and where they come from
 
@@ -89,6 +150,24 @@ Plus PostHog defaults: `$pageview` and (button/link-only) autocapture.
 | **Difficulty tiers** (S3) | The tier KPI: `guess_submitted.distance_km` spread broken down by the room's `game_created.difficulty` (HogQL join on `room`). Tiers should compress the spread within a chosen difficulty — Casual rooms tight and near, Expert rooms far — and round-1 distances should sit in Casual territory in **every** difficulty (the easy-first-round guard). `game_created` broken down by `difficulty` is the adoption mix (does anyone pick Expert?) | `game_created`, `guess_submitted` |
 | **Sound opt-in/opt-out** (S4) | `sound_toggled` broken down by `surface` + `enabled`: phone `enabled=true` share is demand for sound where the default mutes it; TV `enabled=false` share is rejection of the default-on sting/ticks. S4's headline KPIs (session length, `game_completed` rate) are trend comparisons before/after the pass | `sound_toggled`, `game_completed` |
 | **Daily actives & retention** (S2) | The ritual KPI: `daily_challenge_started` unique users per day (daily actives); PostHog Retention on `daily_challenge_started` (does the ritual bring people back?) and on `game_created` (does the daily feed the party game?). Completion rate = `daily_challenge_completed ÷ daily_challenge_started`; `score` / `best_distance_km` distributions calibrate difficulty day over day | `daily_challenge_started`, `daily_challenge_completed`, `game_created` |
+
+### Field-reliability KPIs
+
+| KPI | Definition | Events |
+|---|---|---|
+| **Imagery success rate** | Share of `imagery_load` with `ok=true`, excluding `error_class=cancelled` (a superseded `moveTo` is expected churn, not a failure). Trend + `surface` breakdown. Alerts at <97% (warn) and <90% (critical) | `imagery_load` |
+| **Anchor load speed** | P50/P95 `imagery_load.duration_ms` where `purpose=anchor, ok=true`, by `net_type`/`$browser`/`$os`. The Stage-1 learning-mode exit report turns these into per-segment alert thresholds instead of guesses | `imagery_load` |
+| **First playable pano rate** | "Round 1 just worked": share of anchor loads with `ok=true, skips=0, duration_ms<10000`. The single number that says whether the product's first impression survives | `imagery_load` |
+| **Dead-entry tax** | Average `imagery_load.skips` per anchor and the share of rounds with `skips>0` — background pool decay. Feeds the weekly pool-health quarantine proposals | `imagery_load` |
+| **Failure taxonomy mix** | `imagery_load` `ok=false` by `error_class`, and failure rate by `$browser`/`$os`/`net_type`: is this the world being flaky, or one browser being broken? | `imagery_load`, `$exception` |
+| **Navigation health** | Share of `pano_session` with `nav_failures>0` or `nav_available=false` where movement is enabled; `nav_moves` is how often players actually walk. `reanchors>0` is the movement-bounce regression canary that complements `guess_submitted.moved` | `pano_session` |
+| **Session health mix** | Share of sessions classified healthy / degraded / failed by `imagery.js#classifySessionHealth` (failed > degraded > healthy), trended by `release` and `surface`. A skip that still landed a pano is *degraded*, never failed — "failed" is reserved for a player who saw a broken game | all of the above |
+| **Health-class comparison** | Healthy vs degraded vs failed side by side on load speed, skip rate, navigation use and round completion: do slow loads and skips actually bleed players, or do they play on? | all of the above, `reveal_shown` |
+| **Release regression** | `$exception` count by `release`. A spike right after a deploy names its own culprit | `$exception` |
+| **Reports** | `imagery_report` volume, and `ref_code` as the support lookup key: search the code → the event → its session → replay + issues + full event trail | `imagery_report` |
+
+Dashboard: **Field reliability** (PostHog EU project 252836, dashboard
+`905962`).
 
 ## Adding a new event
 

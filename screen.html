@@ -32,7 +32,7 @@
     <div class="tv-center room-entry">
       <h1 class="tv-title"><span class="geo">Geo</span>Party</h1>
       <p class="tv-sub">Enter the room code from the host's phone</p>
-      <input id="roomInput" maxlength="6" autocomplete="off" autocapitalize="characters"
+      <input id="roomInput" data-ph-mask maxlength="6" autocomplete="off" autocapitalize="characters"
              spellcheck="false" placeholder="KWPFRT" />
       <div id="entryErr" class="err"></div>
     </div>
@@ -43,7 +43,7 @@
     <div class="tv-center">
       <h1 class="tv-title"><span class="geo">Geo</span>Party</h1>
       <p class="tv-sub">Waiting for the operator…</p>
-      <div id="lobbyTeams" class="tv-teams"></div>
+      <div id="lobbyTeams" data-ph-mask class="tv-teams"></div>
     </div>
   </section>
 
@@ -52,7 +52,7 @@
     <div id="screenViewer" class="viewer-full" style="pointer-events: none"></div>
     <div id="tvRoundNo" class="tv-hud-corner tv-round-no">Round 1</div>
     <div id="tvCountdown" class="tv-hud-corner tv-countdown"></div>
-    <div id="tvActiveTeam" class="tv-hud-corner tv-active-team"></div>
+    <div id="tvActiveTeam" data-ph-mask class="tv-hud-corner tv-active-team"></div>
   </section>
 
   <!-- Guessing: live world map mirroring the host's pin as they aim -->
@@ -67,7 +67,7 @@
   <section id="s-reveal" class="phase-screen hidden">
     <div class="reveal-split">
       <div id="revealMap" class="reveal-map"></div>
-      <div id="tvPlace" class="reveal-place"></div>
+      <div id="tvPlace" class="reveal-place" data-ph-mask></div>
       <div class="reveal-stats">
         <div class="reveal-num">
           <div class="val" id="tvDistance">—</div>
@@ -77,7 +77,7 @@
           <div class="val points" id="tvPoints">0</div>
           <div class="label">Points</div>
         </div>
-        <div id="tvBoard" class="reveal-board"></div>
+        <div id="tvBoard" data-ph-mask class="reveal-board"></div>
       </div>
       <div id="tvAdvanceNote" class="tv-advance-note"></div>
     </div>
@@ -87,16 +87,16 @@
   <section id="s-h2h-lobby" class="phase-screen hidden">
     <div class="tv-center">
       <h1 class="tv-title"><span class="geo">Geo</span>Party <span class="h2h-tag">head-to-head</span></h1>
-      <div id="h2hLobbyCode" class="h2h-lobby-code">······</div>
-      <p id="h2hLobbyUrl" class="tv-sub"></p>
-      <div id="h2hLobbyTeams" class="tv-teams"></div>
+      <div id="h2hLobbyCode" class="h2h-lobby-code" data-ph-mask>······</div>
+      <p id="h2hLobbyUrl" data-ph-mask class="tv-sub"></p>
+      <div id="h2hLobbyTeams" data-ph-mask class="tv-teams"></div>
       <p id="h2hLobbyNote" class="tv-sub"></p>
     </div>
   </section>
 
   <!-- Head-to-head round: split into one live panel per team -->
   <section id="s-h2h-live" class="phase-screen hidden">
-    <div id="h2hGrid" class="h2h-grid"></div>
+    <div id="h2hGrid" data-ph-mask class="h2h-grid"></div>
     <div id="h2hRoundNo" class="tv-hud-corner tv-round-no h2h-hud">Round 1</div>
     <div id="h2hCountdown" class="tv-hud-corner h2h-countdown"></div>
     <div id="h2hProgress" class="h2h-progress"></div>
@@ -106,10 +106,10 @@
   <section id="s-h2h-reveal" class="phase-screen hidden">
     <div class="reveal-split">
       <div id="h2hRevealMap" class="reveal-map"></div>
-      <div id="h2hPlace" class="reveal-place"></div>
+      <div id="h2hPlace" class="reveal-place" data-ph-mask></div>
       <div class="reveal-stats">
-        <div id="h2hRoundBoard" class="reveal-board tv-showdown" data-caption="This round"></div>
-        <div id="h2hTotals" class="reveal-board captioned" data-caption="Leaderboard"></div>
+        <div id="h2hRoundBoard" data-ph-mask class="reveal-board tv-showdown" data-caption="This round"></div>
+        <div id="h2hTotals" data-ph-mask class="reveal-board captioned" data-caption="Leaderboard"></div>
       </div>
       <div id="h2hAdvanceNote" class="tv-advance-note"></div>
     </div>
@@ -124,8 +124,8 @@
     <div id="confetti" class="confetti"></div>
     <div class="tv-center">
       <h1 class="tv-title">Game over!</h1>
-      <div id="podium" class="podium"></div>
-      <div id="tvNextHost" class="tv-next-host hidden"></div>
+      <div id="podium" data-ph-mask class="podium"></div>
+      <div id="tvNextHost" data-ph-mask class="tv-next-host hidden"></div>
       <button id="btnNewEntry" class="btn-primary tv-newgame">New game — enter a room code</button>
       <p class="tv-newgame-hint">or start a new game on the host's phone and the screen will follow</p>
     </div>

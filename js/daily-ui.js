@@ -6,7 +6,6 @@
 // fold, replay lock) lives in daily.js / share.js (pure, tested); this
 // module is DOM glue in the player-ui mold.
 
-import { MAPILLARY_TOKEN } from "../config.js";
 import {
   haversineKm,
   formatDistance,
@@ -40,6 +39,8 @@ import { countdownTick } from "./fx.js";
 import { initSound, playSound, buzz } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { track } from "./consent.js";
+import { createViewer, loadRoundImage } from "./viewer-ui.js";
+import { toastWithReport, toastPlain } from "./report-ui.js";
 
 /* ================================================================
  * DOM helpers (same shape as the other pages)
@@ -56,12 +57,23 @@ function showScreen(id) {
 }
 
 let toastTimer = null;
-function toast(msg) {
+// `reportCtx` adds the REACTIVE inline Report action — only on toasts that
+// already fire for a broken/degraded imagery condition (plan §10.1).
+function toast(msg, reportCtx) {
   const el = $("toast");
-  el.textContent = msg;
+  if (reportCtx) toastWithReport(el, msg, reportCtx); else toastPlain(el, msg);
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 2500);
+  toastTimer = setTimeout(
+    () => el.classList.remove("show"), reportCtx ? 6000 : 2500);
+}
+
+// One degraded-imagery nudge per run.
+let degradedNoticeShown = false;
+function noticeDegradedImagery(skips) {
+  if (degradedNoticeShown || skips < 2) return;
+  degradedNoticeShown = true;
+  toast("Some images wouldn’t load — we skipped ahead.", { surface: "daily" });
 }
 
 /* ================================================================
@@ -79,7 +91,8 @@ let endsAt = 0;
 let locked = false;
 let stage = "explore";     // "explore" (pano) | "map"
 
-let viewer = null;
+let iv = null;             // instrumented viewer wrapper (viewer-ui.js)
+let viewer = null;         // its raw MapillaryJS viewer
 let guessMap = null;
 let guessMarker = null;
 let revealMap = null;
@@ -120,21 +133,13 @@ async function startRound() {
   destroyRevealMap();
   showScreen("d-round");
   oneShotHint("pano", HINT_CARDS.pano);
-  if (!viewer) makeViewer();
+  if (!iv) makeViewer();
+  iv.beginRound(run.rounds.length + 1);
   // Same dead-image skip as the party hosts: everyone shares the seeded
   // order, so everyone skips the same dead entries to the same five spots.
-  let entry = sampler.peek();
-  let loadedOk = false;
-  while (entry && !loadedOk) {
-    try {
-      await viewer.moveTo(entry.image_id);
-      loadedOk = true;
-    } catch (e) {
-      console.warn(`daily: pool image ${entry.image_id} failed, skipping`, e);
-      entry = sampler.advance();
-    }
-  }
+  const { entry, skips } = await loadRoundImage(sampler, iv, "anchor");
   if (!entry) { finishRun(); return; } // pool exhausted — score what we have
+  noticeDegradedImagery(skips);
   sampler.advance();
   current = entry;
   roundStartedAt = Date.now();
@@ -147,9 +152,10 @@ async function startRound() {
 // gets the same rules (look around AND move down the street), so scores
 // stay comparable — movement is part of the fixed ruleset, like scoring.
 function makeViewer() {
-  viewer = new mapillary.Viewer({
-    accessToken: MAPILLARY_TOKEN,
+  iv = createViewer({
+    surface: "daily",
     container: "dailyViewer",
+    moveAllowed: true,
     component: {
       cover: false,
       direction: true,
@@ -159,13 +165,15 @@ function makeViewer() {
       bearing: true,
     },
   });
+  viewer = iv.viewer;   // null when construction failed; guards below cope
 }
 
 function destroyViewer() {
-  if (viewer) {
-    try { viewer.remove(); } catch { /* already gone */ }
-    viewer = null;
+  if (iv) {
+    iv.destroy();   // flushes the open pano_session, then viewer.remove()
+    iv = null;
   }
+  viewer = null;
 }
 
 /* ---------------- Guess map ---------------- */

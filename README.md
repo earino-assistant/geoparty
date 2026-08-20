@@ -77,11 +77,14 @@ over the new file).
 
 ## Tests & CI
 
-The pure logic layer (`js/game.js`, `js/h2h.js`, `js/pool.js`, `js/qr.js`)
-is covered by a dependency-free test suite using Node's built-in runner —
-scoring, the time bonus, phase machines, turn rotation, reveal ordering,
-winner tie-breaks, the seeded shuffle/resume contract, QR encoding, and an
-integrity check over `data/location_pool.json`:
+The pure logic layer (`js/game.js`, `js/h2h.js`, `js/pool.js`, `js/qr.js`,
+`js/imagery.js`) is covered by a dependency-free test suite using Node's
+built-in runner — scoring, the time bonus, phase machines, turn rotation,
+reveal ordering, winner tie-breaks, the seeded shuffle/resume contract, QR
+encoding, an integrity check over `data/location_pool.json`, and the
+field-observability layer (error taxonomy, privacy scrubbers, the
+collision-free pool diag id, session-health classification, and the
+seven-scenario failure-injection matrix in `tests/viewer-ui.test.js`):
 
 ```sh
 npm test        # node --test tests/*.test.js — no install needed
@@ -104,15 +107,32 @@ only aggregate metrics are sent (distances, scores, times, mode, team
 counts — never coordinates, names, or identities), and the choice can be
 changed anytime via the 🍪 control on every page. The event schema is a
 hard allowlist in `js/analytics.js`, unit-tested in
-`tests/analytics.test.js`. See [`PRIVACY.md`](PRIVACY.md) for the policy
-and [`docs/analytics.md`](docs/analytics.md) for the event/KPI catalog.
-One manual dashboard step: enable *"Discard client IP data"* in the
-PostHog project settings.
+`tests/analytics.test.js`.
+
+The same gate covers **field observability** (imagery/viewer diagnostics,
+error tracking and session replay): nothing is loaded or recorded before an
+explicit accept, the panorama canvas and every map are excluded from
+recordings (a map tile URL is a coordinate), everything typed is masked,
+and locations travel only as an opaque 8-character pool code — never a
+coordinate or a Mapillary image id. A user who declined can still send
+**one** diagnostic report, after a second explicit ask, without their "no"
+ever changing.
+
+See [`PRIVACY.md`](PRIVACY.md) for the policy,
+[`docs/analytics.md`](docs/analytics.md) for the event/KPI catalog,
+[`docs/field-observability-plan.md`](docs/field-observability-plan.md) for
+the design, [`docs/replay-mask-checklist.md`](docs/replay-mask-checklist.md)
+for the masking audit, and
+[`docs/failure-injection.md`](docs/failure-injection.md) for the chaos
+runbook.
 
 ## Deployment (GitHub Pages)
 
 1. Create a public GitHub repo `geoparty` and push this directory to `main`.
-2. Repo Settings → Pages → deploy from branch `main`, root.
+2. Repo Settings → Pages → Source = **GitHub Actions**
+   (`.github/workflows/pages.yml` runs the checks, stamps `release.json`
+   with the deployed commit, and deploys — nothing is committed per
+   deploy).
 3. The site serves at `https://<owner>.github.io/geoparty/`. All asset paths
    in the repo are relative, so subpath serving works as-is.
 

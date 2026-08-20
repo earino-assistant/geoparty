@@ -1,0 +1,101 @@
+# Weekly pool health check (field-observability plan §13).
+#
+# Rechecks field-reported "suspect" pool entries plus a rotating sample
+# against the Mapillary Graph API and PROPOSES a quarantine list in a pull
+# request. It never auto-merges: a 404 can be transient Mapillary
+# indigestion, so a human always looks before an entry leaves the game.
+#
+# Politeness: ≤250 requests, one per ~1.2 s (≈5 minutes of traffic a week),
+# and the run aborts cleanly on the third 429 without writing anything.
+name: Pool health
+
+on:
+  schedule:
+    # Monday 04:13 UTC — an odd minute, deliberately off the top-of-hour
+    # stampede that every other cron in the world fires on.
+    - cron: "13 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Check only; write nothing, open no PR"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write        # commit the state/quarantine proposal to a branch
+  pull-requests: write   # open the review PR
+
+concurrency:
+  group: pool-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check pool entries against the Mapillary Graph API
+        id: health
+        env:
+          # The same public, embeddable token that ships in config.js — this
+          # workflow needs no secret of its own.
+          MAPILLARY_TOKEN: ${{ secrets.MAPILLARY_TOKEN }}
+        run: |
+          TOKEN="${MAPILLARY_TOKEN}"
+          if [ -z "$TOKEN" ]; then
+            TOKEN=$(node -e 'import("./config.js").then(m=>console.log(m.MAPILLARY_TOKEN))')
+          fi
+          node tools/pool_health.mjs --token "$TOKEN" \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Open a quarantine proposal PR
+        if: steps.health.outputs.added != '0' && steps.health.outputs.added != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="pool-health/$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add data/pool_quarantine.json tools/pool-health-state.json
+          git commit -m "Pool health: propose quarantining ${{ steps.health.outputs.added }} dead entr(y/ies)"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "Pool health: quarantine ${{ steps.health.outputs.added }} dead entr(y/ies)" \
+            --body "$(cat <<'BODY'
+          Automated weekly pool health check (docs/field-observability-plan.md §13).
+
+          - checked: ${{ steps.health.outputs.checked }} entries
+          - dead this run: ${{ steps.health.outputs.dead }}
+          - newly proposed for quarantine: ${{ steps.health.outputs.added }}
+
+          Every id here failed to resolve on **two consecutive weekly runs**.
+          `js/pool.js` filters `data/pool_quarantine.json` at load time, so
+          merging removes them from play; the runtime dead-image skip stays as
+          the belt to this suspender.
+
+          **Review before merging** — a 404 can be transient. Spot-check an id
+          with `node tools/diag_lookup.mjs --id <image_id>` and open its
+          viewer URL. This PR is never auto-merged.
+          BODY
+          )"
+
+      - name: Commit state only (nothing new to quarantine)
+        if: steps.health.outputs.added == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet tools/pool-health-state.json; then
+            echo "no state change"
+            exit 0
+          fi
+          # Failure counters still moved (an id died once, or recovered).
+          # That is bookkeeping, not a game change: land it on a branch and
+          # let the next run's PR carry it, rather than pushing to main.
+          echo "::notice::state updated but nothing crossed the quarantine threshold"

@@ -1,0 +1,7 @@
+# Generated at deploy time by .github/workflows/pages.yml (plan §11) and
+# fetched at runtime by js/consent.js. Never committed: the SHA and the
+# timestamp belong to a deployment, not to the source tree.
+release.json
+
+# Weekly pool-health run artifacts that are not the committed state file.
+tools/.pool-health-cache.json

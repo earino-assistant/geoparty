@@ -4,7 +4,7 @@
 // composes the all-pins reveal. It writes nothing (screen-ui.js owns the
 // heartbeat, as always).
 
-import { MAPILLARY_TOKEN } from "../config.js";
+import { createViewer } from "./viewer-ui.js";
 import { formatCountdown, resultRowText, teamIds, standings } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest } from "./h2h.js";
 import {
@@ -52,7 +52,7 @@ function panelStatus(p, text) {
 function disposePanels() {
   for (const tid of Object.keys(panels)) {
     const p = panels[tid];
-    if (p.viewer) { try { p.viewer.remove(); } catch { /* gone */ } }
+    if (p.iv) { p.iv.destroy(); p.iv = null; }
     if (p.map) { try { p.map.remove(); } catch { /* gone */ } }
   }
   panels = {};
@@ -246,7 +246,7 @@ function ensureGrid(state) {
 
     panels[tid] = {
       root, viewerEl, mapEl, statusEl: status, lockEl: lock, rankEl: rank,
-      viewer: null, map: null, marker: null,
+      iv: null, viewer: null, map: null, marker: null,
       imageId: null, poseKey: null, viewKey: null, pinKey: null,
       mapShown: false, locked: false, color,
     };
@@ -258,19 +258,22 @@ function ensureGrid(state) {
   requestAnimationFrame(() => {
     for (const tid of ids) {
       const p = panels[tid];
-      if (!p || p.viewer) continue;
-      p.viewer = new mapillary.Viewer({
-        accessToken: MAPILLARY_TOKEN,
+      if (!p || p.iv) continue;
+      p.iv = createViewer({
+        surface: "tv_panel",
         container: p.viewerEl.id,
+        moveAllowed: false,
         component: {
           // Display-only, same as the couch screen viewer (spec §6).
           cover: false, direction: false, sequence: false,
           keyboard: false, pointer: false, zoom: false, bearing: false,
         },
       });
+      p.viewer = p.iv.viewer;   // null when construction failed
+      p.iv.beginRound((state.round && state.round.number) || 1);
       if (seedImage) {
         p.imageId = seedImage;
-        p.viewer.moveTo(seedImage)
+        p.iv.moveTo(seedImage, "seed")
           .catch((e) => console.warn(`panel ${tid}: seed image failed`, e));
       }
     }
@@ -384,9 +387,9 @@ function applyTeamFeed(p, state, round, feed, result, tid) {
   const targetImage = (feed && feed.imageId) || round.imageId;
 
   // The pano follows this team's own image (movement diverges per team).
-  if (p.viewer && targetImage && targetImage !== p.imageId) {
+  if (p.iv && targetImage && targetImage !== p.imageId) {
     p.imageId = targetImage;
-    p.viewer.moveTo(targetImage)
+    p.iv.moveTo(targetImage, "follow")
       .catch((e) => console.warn(`panel ${tid}: image load failed`, e));
   }
 

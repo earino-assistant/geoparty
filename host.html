@@ -36,7 +36,7 @@
         <div>
           <strong>Game in progress</strong>
           <div style="color: var(--muted); font-size: 0.9rem">
-            Room <span id="resumeCode"></span> — resume as host?
+            Room <span id="resumeCode" data-ph-mask></span> — resume as host?
           </div>
         </div>
         <button id="btnResume" class="btn-primary">Resume</button>
@@ -86,11 +86,11 @@
           <button data-v="3">3</button>
           <button data-v="4">4</button>
         </div>
-        <div class="team-names" id="teamNames" style="margin-top: 10px"></div>
+        <div class="team-names" id="teamNames" data-ph-mask style="margin-top: 10px"></div>
       </div>
 
       <h2>All-time top 10</h2>
-      <ul id="leaderboardList" class="leaderboard-list"></ul>
+      <ul id="leaderboardList" data-ph-mask class="leaderboard-list"></ul>
     </div>
     <div class="action-bar">
       <button id="btnNewGame" class="btn-primary">New Game</button>
@@ -101,12 +101,12 @@
   <section id="h-lobby" class="phase-screen hidden">
     <div class="host-wrap">
       <h1>Room</h1>
-      <div id="roomCodeHuge" class="room-code-huge">······</div>
+      <div id="roomCodeHuge" class="room-code-huge" data-ph-mask>······</div>
       <div class="qr-box"><canvas id="qrCanvas"></canvas></div>
       <p class="tv-add-hint">Scan with a spare phone or tablet, then cast or
         AirPlay it to the TV.</p>
       <div class="share-row"><button id="btnTvLink">📤 Send the TV link</button></div>
-      <p id="tvType" class="tv-add-alt"></p>
+      <p id="tvType" data-ph-mask class="tv-add-alt"></p>
       <!-- S7: a screen is optional — the note names the mode, never a gate. -->
       <div id="waitingNote" class="waiting-screen-note">No TV? No problem — the reveal shows right here. Add a TV anytime.</div>
     </div>
@@ -121,7 +121,7 @@
     <div id="hostViewer" class="viewer-full"></div>
     <div class="hud">
       <div class="hud-item" id="hudRound">Round 1/5</div>
-      <div class="hud-item" id="hudTeam"></div>
+      <div class="hud-item" id="hudTeam" data-ph-mask></div>
       <div class="hud-item" id="hudTimer">2:00</div>
     </div>
     <div class="action-bar">
@@ -151,7 +151,7 @@
       <div id="hostRevealMap" class="p-reveal-map hidden"></div>
       <div class="stat-card">
         <div class="label">Location</div>
-        <div class="big place" id="revealPlace">—</div>
+        <div class="big place" id="revealPlace" data-ph-mask>—</div>
       </div>
       <div class="stat-card">
         <div class="label">Distance</div>
@@ -162,7 +162,7 @@
         <div class="big" id="revealPoints" style="color: var(--accent)">—</div>
       </div>
       <h2>Totals</h2>
-      <ul id="revealTotals" class="totals-list"></ul>
+      <ul id="revealTotals" data-ph-mask class="totals-list"></ul>
       <div id="hostAdvanceNote" class="waiting-screen-note advance-note"></div>
     </div>
     <div class="action-bar">
@@ -176,8 +176,8 @@
     <div class="host-wrap">
       <h1>Final standings</h1>
       <!-- S7: the crown, when this phone is the shared screen. -->
-      <div id="hostCrown" class="host-crown hidden"></div>
-      <ul id="finalTotals" class="totals-list"></ul>
+      <div id="hostCrown" data-ph-mask class="host-crown hidden"></div>
+      <ul id="finalTotals" data-ph-mask class="totals-list"></ul>
     </div>
     <div class="action-bar">
       <button id="btnShareResult">📤 Share</button>

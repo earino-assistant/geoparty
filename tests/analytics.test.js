@@ -9,9 +9,17 @@ import {
   POSTHOG_PROJECT_KEY,
   POSTHOG_INIT_OPTIONS,
   EVENT_SCHEMA,
+  EXCEPTION_PROPS,
+  RELEASE_PROPS,
+  NETWORK_HOST_ALLOWLIST,
   getConsent,
   setConsent,
   sanitizeEvent,
+  sanitizeProps,
+  sanitizeBeforeSend,
+  maskNetworkRequest,
+  makeImageryError,
+  oneShotInitOptions,
   createAnalytics,
 } from "../js/analytics.js";
 
@@ -31,8 +39,14 @@ function memStorage() {
 function fakePosthog() {
   return {
     captured: [],
+    exceptions: [],
+    superProps: null,
+    recordings: 0,
     optedOut: false,
     capture(event, props) { this.captured.push({ event, props }); },
+    captureException(error, props) { this.exceptions.push({ error, props }); },
+    register(props) { this.superProps = { ...(this.superProps || {}), ...props }; },
+    startSessionRecording() { this.recordings++; },
     opt_out_capturing() { this.optedOut = true; },
     opt_in_capturing() { this.optedOut = false; },
   };
@@ -552,4 +566,461 @@ test("tracker: a failed script load degrades silently", async () => {
   });
   await a.accept(); // must not throw
   assert.equal(a.track("next_game", { mode: "couch" }), true, "gate still open; delivery is best-effort");
+});
+
+/* ================================================================
+ * Field observability (docs/field-observability-plan.md)
+ * ================================================================ */
+
+test("sanitizeEvent: viewer_init carries construction facts only", () => {
+  const out = sanitizeEvent("viewer_init", {
+    surface: "host", ok: false, error_class: "webgl_unavailable",
+    duration_ms: 12.6, webgl: false, sdk: "4.1.2",
+    container: "hostViewer", stack: "at makeViewer (host-ui.js:391)",
+  });
+  assert.deepEqual(out.props, {
+    surface: "host", ok: false, error_class: "webgl_unavailable",
+    duration_ms: 13, webgl: false, sdk: "4.1.2",
+  });
+});
+
+test("sanitizeEvent: imagery_load carries aggregates and the opaque entry id", () => {
+  const out = sanitizeEvent("imagery_load", {
+    surface: "player", purpose: "anchor", ok: false, after_timeout: true,
+    error_class: "network_timeout", duration_ms: 20001, skips: 2,
+    pool_entry: "k3x9q0ar", net_type: "3g", online: true,
+    // None of these may survive: a raw id, a place, coordinates, a message.
+    image_id: "1263588815098567", lat: 51.5, lng: -0.12,
+    place_name: "Camden", message: "GET https://graph.mapillary.com/x?access_token=Y",
+    exhausted: true,
+  });
+  assert.deepEqual(out.props, {
+    surface: "player", purpose: "anchor", ok: false, after_timeout: true,
+    error_class: "network_timeout", duration_ms: 20001, skips: 2,
+    pool_entry: "k3x9q0ar", net_type: "3g", online: true,
+  });
+});
+
+test("sanitizeEvent: imagery_load.pool_entry is never a raw Mapillary id", () => {
+  // 16-digit ids are 16 chars, well under STRING_MAX — only the call site's
+  // discipline (poolDiagId) keeps them out, so this documents the contract:
+  // an 8-char base36 diag id is what the schema is sized and named for.
+  const out = sanitizeEvent("imagery_load", { pool_entry: "k3x9q0ar" });
+  assert.match(out.props.pool_entry, /^[0-9a-z]{8}$/);
+});
+
+test("sanitizeEvent: pano_session keeps the interaction fold, nothing else", () => {
+  const out = sanitizeEvent("pano_session", {
+    surface: "player", round_number: 3, looks: 12, zoom_changes: 2,
+    nav_moves: 4, nav_failures: 1, nav_available: true, reanchors: 0,
+    first_move_ms: 1840, pointer_downs: 7,
+    team_name: "The Wanderers", image_id: "1263588815098567",
+  });
+  assert.deepEqual(out.props, {
+    surface: "player", round_number: 3, looks: 12, zoom_changes: 2,
+    nav_moves: 4, nav_failures: 1, nav_available: true, reanchors: 0,
+    first_move_ms: 1840, pointer_downs: 7,
+  });
+});
+
+test("sanitizeEvent: imagery_report carries the ref code and the consent path", () => {
+  const out = sanitizeEvent("imagery_report", {
+    surface: "player", ref_code: "GP-4K7QX2", error_class: "image_dead",
+    pool_entry: "k3x9q0ar", net_type: "4g", online: true, recent_failures: 3,
+    consent: "one_time", note: "the picture never showed up", lat: 1,
+  });
+  assert.deepEqual(out.props, {
+    surface: "player", ref_code: "GP-4K7QX2", error_class: "image_dead",
+    pool_entry: "k3x9q0ar", net_type: "4g", online: true, recent_failures: 3,
+    consent: "one_time",
+  });
+});
+
+test("EXCEPTION_PROPS: the allowlist holds no location- or identity-ish key", () => {
+  const banned = /lat|lng|lon|coord|pin|guess$|name|email|device|user/i;
+  for (const key of Object.keys(EXCEPTION_PROPS)) {
+    assert.ok(!banned.test(key), `EXCEPTION_PROPS.${key}`);
+  }
+  for (const key of Object.keys(RELEASE_PROPS)) {
+    assert.ok(!banned.test(key), `RELEASE_PROPS.${key}`);
+  }
+});
+
+test("sanitizeProps: exception props are allowlisted exactly like events", () => {
+  const out = sanitizeProps(EXCEPTION_PROPS, {
+    surface: "host", purpose: "anchor", error_class: "image_dead",
+    pool_entry: "k3x9q0ar", duration_ms: 511.4, skips: 1, net_type: "4g",
+    online: true, webgl: true, ref_code: "GP-4K7QX2",
+    message: "raw SDK text", image_id: "1263588815098567", lat: 51.5,
+  });
+  assert.deepEqual(out, {
+    surface: "host", purpose: "anchor", error_class: "image_dead",
+    pool_entry: "k3x9q0ar", duration_ms: 511, skips: 1, net_type: "4g",
+    online: true, webgl: true, ref_code: "GP-4K7QX2",
+  });
+});
+
+test("makeImageryError: the captured Error is ours, and already scrubbed", () => {
+  const err = makeImageryError(
+    "image_dead",
+    "GET https://graph.mapillary.com/1263588815098567?access_token=MLY|secret failed",
+  );
+  assert.equal(err.name, "ImageryError");
+  assert.ok(err.message.startsWith("ImageryError: image_dead"));
+  assert.ok(!err.message.includes("1263588815098567"));
+  assert.ok(!err.message.includes("access_token"));
+  assert.equal(makeImageryError("viewer_init", "").message,
+    "ImageryError: viewer_init");
+});
+
+/* ---------------- trackError: the same gate as track ---------------- */
+
+test("trackError: nothing loads and nothing captures before consent", async () => {
+  const { a, loads, ph } = harness();
+  assert.equal(a.trackError(new Error("x"), { surface: "host" }), false);
+  await tick();
+  assert.equal(loads.count, 0, "PostHog must not even be loaded");
+  assert.equal(ph.exceptions.length, 0);
+});
+
+test("trackError: a declined user never sends an exception", async () => {
+  const { a, storage, loads } = harness();
+  setConsent(storage, CONSENT_DECLINED);
+  assert.equal(a.trackError(new Error("x"), { surface: "host" }), false);
+  await tick();
+  assert.equal(loads.count, 0);
+});
+
+test("trackError: with consent, props are allowlisted before capture", async () => {
+  const { a, storage, ph } = harness();
+  setConsent(storage, CONSENT_ACCEPTED);
+  await a.init();
+  const err = makeImageryError("image_dead", "Image <id> not found");
+  assert.equal(a.trackError(err, {
+    surface: "host", error_class: "image_dead", pool_entry: "k3x9q0ar",
+    lat: 51.5, teamName: "Wanderers",
+  }), true);
+  assert.equal(ph.exceptions.length, 1);
+  assert.equal(ph.exceptions[0].error, err);
+  assert.deepEqual(ph.exceptions[0].props, {
+    surface: "host", error_class: "image_dead", pool_entry: "k3x9q0ar",
+  });
+});
+
+test("trackError: exceptions queue with events and flush in order", async () => {
+  const storage = memStorage();
+  const ph = fakePosthog();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
+  setConsent(storage, CONSENT_ACCEPTED);
+  a.init();
+  a.track("imagery_load", { surface: "host", purpose: "anchor", ok: false });
+  a.trackError(makeImageryError("image_dead", "dead"), { surface: "host" });
+  assert.equal(ph.captured.length, 0);
+  release();
+  await tick();
+  assert.equal(ph.captured.length, 1);
+  assert.equal(ph.exceptions.length, 1);
+});
+
+test("trackError: a bundle with no captureException degrades to events only", async () => {
+  const storage = memStorage();
+  const old = fakePosthog();
+  delete old.captureException;
+  const a = createAnalytics({ storage, loadPosthog: () => Promise.resolve(old) });
+  setConsent(storage, CONSENT_ACCEPTED);
+  await a.init();
+  assert.equal(a.trackError(new Error("x"), { surface: "host" }), true);
+  assert.equal(old.captured.length, 0, "no crash, nothing invented");
+});
+
+test("trackError: a missing error object is a no-op", async () => {
+  const { a, storage } = harness();
+  setConsent(storage, CONSENT_ACCEPTED);
+  await a.init();
+  assert.equal(a.trackError(null, { surface: "host" }), false);
+});
+
+/* ---------------- release stamping + recording override ---------------- */
+
+test("register: release super props are gated and allowlisted", async () => {
+  const { a, storage, ph } = harness();
+  assert.equal(a.register({ release: "abc1234" }), false, "no consent, no stamp");
+  setConsent(storage, CONSENT_ACCEPTED);
+  await a.init();
+  assert.equal(a.register({
+    release: "abc1234", commit: "abc1234def", deployed_at: "2026-08-20T10:00:00Z",
+    lat: 51.5, secret: "nope",
+  }), true);
+  assert.deepEqual(ph.superProps, {
+    release: "abc1234", commit: "abc1234def", deployed_at: "2026-08-20T10:00:00Z",
+  });
+});
+
+test("register: a stamp made before the script lands is applied on load", async () => {
+  const storage = memStorage();
+  const ph = fakePosthog();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const a = createAnalytics({ storage, loadPosthog: () => gate.then(() => ph) });
+  setConsent(storage, CONSENT_ACCEPTED);
+  a.init();
+  a.register({ release: "dev" });
+  assert.equal(ph.superProps, null);
+  release();
+  await tick();
+  assert.deepEqual(ph.superProps, { release: "dev" });
+});
+
+test("register: an empty/garbage stamp is rejected", async () => {
+  const { a, storage } = harness();
+  setConsent(storage, CONSENT_ACCEPTED);
+  await a.init();
+  assert.equal(a.register({}), false);
+  assert.equal(a.register({ nonsense: 1 }), false);
+});
+
+test("startRecording: consent-gated, and a no-op on an older bundle", async () => {
+  const { a, storage, ph } = harness();
+  assert.equal(a.startRecording(), false, "no consent, no recording");
+  setConsent(storage, CONSENT_ACCEPTED);
+  await a.init();
+  assert.equal(a.startRecording(), true);
+  assert.equal(ph.recordings, 1);
+  delete ph.startSessionRecording;
+  assert.equal(a.startRecording(), false);
+});
+
+/* ---------------- §10.4 one-time diagnostic consent ---------------- */
+
+function oneShotHarness() {
+  const storage = memStorage();
+  const main = fakePosthog();
+  const shot = fakePosthog();
+  const calls = { main: 0, oneShot: 0, options: null };
+  const a = createAnalytics({
+    storage,
+    loadPosthog: () => { calls.main++; return Promise.resolve(main); },
+    loadPosthogOneShot: (key, options) => {
+      calls.oneShot++;
+      calls.options = options;
+      calls.key = key;
+      return Promise.resolve(shot);
+    },
+  });
+  return { storage, main, shot, calls, a };
+}
+
+const REPORT = {
+  event: "imagery_report",
+  props: {
+    surface: "player", ref_code: "GP-4K7QX2", error_class: "image_dead",
+    net_type: "4g", online: true, recent_failures: 1, consent: "one_time",
+  },
+  error: makeImageryError("reported_by_user", "image_dead"),
+  errorProps: { surface: "player", ref_code: "GP-4K7QX2" },
+};
+
+test("one-time report: a decliner's stored 'no' is never changed", async () => {
+  const { a, storage } = oneShotHarness();
+  setConsent(storage, CONSENT_DECLINED);
+  await a.sendDiagnostic(REPORT);
+  assert.equal(getConsent(storage), CONSENT_DECLINED);
+});
+
+test("one-time report: sends exactly one bundle, then opts out", async () => {
+  const { a, storage, shot, main, calls } = oneShotHarness();
+  setConsent(storage, CONSENT_DECLINED);
+  assert.equal(await a.sendDiagnostic(REPORT), true);
+  assert.equal(calls.main, 0, "the consented instance is never loaded");
+  assert.equal(calls.oneShot, 1);
+  assert.equal(main.captured.length, 0);
+  assert.deepEqual(shot.captured.map((c) => c.event), ["imagery_report"]);
+  assert.equal(shot.exceptions.length, 1);
+  assert.equal(shot.optedOut, true, "capturing stops immediately after");
+});
+
+test("one-time report: works for a user who has made no choice yet", async () => {
+  const { a, storage, shot } = oneShotHarness();
+  assert.equal(getConsent(storage), null);
+  assert.equal(await a.sendDiagnostic(REPORT), true);
+  assert.equal(shot.captured.length, 1);
+  assert.equal(getConsent(storage), null, "still no stored choice");
+});
+
+test("one-time report: the bundle is schema-sanitized like any other event", async () => {
+  const { a, storage, shot } = oneShotHarness();
+  setConsent(storage, CONSENT_DECLINED);
+  await a.sendDiagnostic({
+    ...REPORT,
+    props: { ...REPORT.props, lat: 51.5, note: "it broke", image_id: "1263588815098567" },
+    errorProps: { ...REPORT.errorProps, lat: 51.5 },
+  });
+  const keys = Object.keys(shot.captured[0].props);
+  for (const k of ["lat", "note", "image_id"]) assert.ok(!keys.includes(k), k);
+  assert.ok(!("lat" in shot.exceptions[0].props));
+});
+
+test("one-time report: an unknown event is refused outright", async () => {
+  const { a, storage, calls } = oneShotHarness();
+  setConsent(storage, CONSENT_DECLINED);
+  assert.equal(await a.sendDiagnostic({ ...REPORT, event: "not_a_real_event" }), false);
+  assert.equal(calls.oneShot, 0, "nothing is even loaded for a bad event");
+});
+
+test("one-time report: a blocked/failed one-shot load reports failure honestly", async () => {
+  const storage = memStorage();
+  setConsent(storage, CONSENT_DECLINED);
+  const a = createAnalytics({
+    storage,
+    loadPosthog: () => Promise.resolve(fakePosthog()),
+    loadPosthogOneShot: () => Promise.reject(new Error("adblock")),
+  });
+  assert.equal(await a.sendDiagnostic(REPORT), false);
+});
+
+test("one-time report: an accepted user takes the ordinary gated path", async () => {
+  const { a, storage, main, shot, calls } = oneShotHarness();
+  setConsent(storage, CONSENT_ACCEPTED);
+  await a.init();
+  assert.equal(await a.sendDiagnostic(REPORT), true);
+  assert.equal(calls.oneShot, 0, "no second instance for a consented user");
+  assert.equal(shot.captured.length, 0);
+  assert.deepEqual(main.captured.map((c) => c.event), ["imagery_report"]);
+  assert.equal(main.exceptions.length, 1);
+  assert.equal(main.optedOut, false, "consented capture keeps running");
+});
+
+test("one-shot init options: memory persistence, no replay, no autocapture", () => {
+  const o = oneShotInitOptions();
+  assert.equal(o.persistence, "memory");
+  assert.equal(o.disable_session_recording, true);
+  assert.equal(o.autocapture, false);
+  assert.equal(o.capture_pageview, false);
+  assert.equal(o.capture_exceptions, false);
+  assert.equal(o.api_host, POSTHOG_INIT_OPTIONS.api_host, "still EU-resident");
+  assert.equal(o.before_send, sanitizeBeforeSend);
+  // A fresh, mutable object every call — posthog.init() writes onto it.
+  assert.notEqual(oneShotInitOptions(), o);
+  assert.equal(Object.isExtensible(o), true);
+});
+
+/* ---------------- replay + before_send configuration ---------------- */
+
+test("init options: replay masking is configured and stays mutable", () => {
+  const r = POSTHOG_INIT_OPTIONS.session_recording;
+  assert.equal(r.maskAllInputs, true);
+  assert.equal(r.captureCanvas, false, "street pixels are never recorded");
+  assert.equal(r.recordHeaders, false);
+  assert.equal(r.recordBody, false);
+  assert.ok(r.maskTextSelector.includes("[data-ph-mask]"));
+  assert.ok(r.blockSelector.includes(".leaflet-container"), "map tiles are coordinates");
+  assert.equal(typeof r.maskCapturedNetworkRequestFn, "function");
+  assert.equal(POSTHOG_INIT_OPTIONS.enable_recording_console_log, true);
+  assert.equal(Object.isExtensible(r), true);
+  assert.equal(Object.isExtensible(POSTHOG_INIT_OPTIONS.capture_exceptions), true);
+});
+
+test("init options: exception + web-vitals autocapture are on, console errors off", () => {
+  const e = POSTHOG_INIT_OPTIONS.capture_exceptions;
+  assert.equal(e.capture_unhandled_errors, true);
+  assert.equal(e.capture_unhandled_rejections, true);
+  assert.equal(e.capture_console_errors, false);
+  assert.equal(POSTHOG_INIT_OPTIONS.capture_performance.web_vitals, true);
+  assert.equal(POSTHOG_INIT_OPTIONS.before_send, sanitizeBeforeSend);
+});
+
+test("maskNetworkRequest: allowlisted hosts keep timing, lose the query string", () => {
+  const out = maskNetworkRequest(
+    { name: "https://graph.mapillary.com/1263588815098567?access_token=MLY|s", duration: 812 },
+    "geoparty.example",
+  );
+  assert.equal(out.name, "https://graph.mapillary.com/<id>");
+  assert.equal(out.duration, 812);
+});
+
+test("maskNetworkRequest: OSM tiles are dropped — a tile path is a coordinate", () => {
+  assert.equal(
+    maskNetworkRequest({ name: "https://tile.openstreetmap.org/16/32791/21801.png" }, "x"),
+    null,
+  );
+  assert.ok(!NETWORK_HOST_ALLOWLIST.includes("tile.openstreetmap.org"));
+});
+
+test("maskNetworkRequest: non-allowlisted hosts are dropped entirely", () => {
+  assert.equal(maskNetworkRequest({ name: "https://tracker.example/beacon" }, "x"), null);
+  assert.equal(maskNetworkRequest({ name: "https://evil.graph.mapillary.com.attacker.net/x" }, "x"), null);
+  assert.equal(maskNetworkRequest(null, "x"), null);
+  assert.equal(maskNetworkRequest({}, "x"), null);
+});
+
+test("maskNetworkRequest: our own origin and relative URLs stay visible", () => {
+  assert.equal(
+    maskNetworkRequest({ name: "release.json" }, "geoparty.example").name,
+    "release.json",
+  );
+  assert.equal(
+    maskNetworkRequest({ name: "https://geoparty.example/data/location_pool.json?v=2" },
+      "geoparty.example").name,
+    "https://geoparty.example/data/location_pool.json",
+  );
+});
+
+test("maskNetworkRequest: headers and bodies are deleted, not trusted", () => {
+  const out = maskNetworkRequest({
+    name: "https://graph.mapillary.com/x",
+    requestHeaders: { authorization: "Bearer secret" },
+    responseBody: "{...}",
+    requestBody: "{...}",
+    responseHeaders: { "set-cookie": "x" },
+  }, "x");
+  assert.deepEqual(Object.keys(out), ["name"]);
+});
+
+test("sanitizeBeforeSend: strips query strings and ids from URL properties", () => {
+  const ev = sanitizeBeforeSend({
+    event: "$pageview",
+    properties: {
+      $current_url: "https://geoparty.example/player.html?room=KWPF&utm_source=share",
+      $pathname: "/player.html",
+      $referrer: "https://x.example/a?b=c",
+      distance_km: 12.4,
+    },
+  });
+  assert.equal(ev.properties.$current_url, "https://geoparty.example/player.html");
+  assert.equal(ev.properties.$referrer, "https://x.example/a");
+  assert.equal(ev.properties.distance_km, 12.4, "non-URL props untouched");
+});
+
+test("sanitizeBeforeSend: scrubs exception values and stack frames", () => {
+  const ev = sanitizeBeforeSend({
+    event: "$exception",
+    properties: {
+      $exception_message: "Image 1263588815098567 not found",
+      $exception_list: [{
+        type: "Error",
+        value: "GET https://graph.mapillary.com/1263588815098567?access_token=MLY|s",
+        stacktrace: {
+          frames: [{
+            filename: "https://geoparty.example/js/viewer-ui.js?v=1263588815098567",
+            abs_path: "https://geoparty.example/js/viewer-ui.js?v=2",
+          }],
+        },
+      }],
+    },
+  });
+  const ex = ev.properties.$exception_list[0];
+  assert.ok(!ex.value.includes("1263588815098567"));
+  assert.ok(!ex.value.includes("access_token"));
+  assert.equal(ex.stacktrace.frames[0].filename,
+    "https://geoparty.example/js/viewer-ui.js");
+  assert.ok(!ev.properties.$exception_message.includes("1263588815098567"));
+});
+
+test("sanitizeBeforeSend: never drops an event (that is the schema's job)", () => {
+  assert.deepEqual(sanitizeBeforeSend({ event: "x" }), { event: "x" });
+  assert.equal(sanitizeBeforeSend(null), null);
+  const weird = { event: "y", properties: { $exception_list: "nope" } };
+  assert.equal(sanitizeBeforeSend(weird), weird);
 });

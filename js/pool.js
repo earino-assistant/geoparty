@@ -7,16 +7,37 @@
 // The shuffle is seeded from the room code so a resumed host (or anyone
 // replaying the same room) deterministically sees the same order.
 
+import { filterQuarantined } from "./imagery.js";
+
 let rawPool = null;
+
+// Ids the weekly pool-health check found dead twice in a row and a human
+// then merged (tools/pool_health.mjs opens the PR; nothing auto-merges).
+// The file is optional by design: absent → no-op, so file:// and older
+// checkouts keep working exactly as before. The runtime dead-image skip
+// stays as the belt to this suspender.
+export const QUARANTINE_URL = "data/pool_quarantine.json";
+
+async function loadQuarantine() {
+  try {
+    const res = await fetch(QUARANTINE_URL, { cache: "no-store" });
+    if (!res.ok) return [];
+    const ids = await res.json();
+    return Array.isArray(ids) ? ids : [];
+  } catch {
+    return [];   // absent file / file:// / offline — never blocks the game
+  }
+}
 
 export async function loadPool() {
   if (rawPool) return rawPool;
   const res = await fetch("data/location_pool.json");
   if (!res.ok) throw new Error(`Failed to load location pool: ${res.status}`);
-  rawPool = await res.json();
-  if (!Array.isArray(rawPool) || rawPool.length === 0) {
+  const pool = await res.json();
+  if (!Array.isArray(pool) || pool.length === 0) {
     throw new Error("Location pool is empty");
   }
+  rawPool = filterQuarantined(pool, await loadQuarantine());
   return rawPool;
 }
 

@@ -10,7 +10,6 @@
 // completes the submission set flips the room to reveal. Writes to disjoint
 // paths never conflict, so N writers stay coherent without a referee.
 
-import { MAPILLARY_TOKEN } from "../config.js";
 import {
   readRoom,
   writeRoom,
@@ -86,6 +85,8 @@ import { initSound, playSound, buzz } from "./fx-ui.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
+import { createViewer, loadRoundImage } from "./viewer-ui.js";
+import { toastWithReport, toastPlain } from "./report-ui.js";
 
 /* ================================================================
  * DOM helpers
@@ -109,12 +110,24 @@ function showScreen(id) {
 }
 
 let toastTimer = null;
-function toast(msg) {
+// `reportCtx` turns this into the REACTIVE report surface (plan §10.1 as
+// reconciled with the UI/UX review): an inline action on the toasts that
+// already fire for a broken/degraded imagery condition — and nowhere else.
+function toast(msg, reportCtx) {
   const el = $("toast");
-  el.textContent = msg;
+  if (reportCtx) toastWithReport(el, msg, reportCtx); else toastPlain(el, msg);
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 2500);
+  toastTimer = setTimeout(
+    () => el.classList.remove("show"), reportCtx ? 6000 : 2500);
+}
+
+// One degraded-imagery nudge per game.
+let degradedNoticeShown = false;
+function noticeDegradedImagery(skips) {
+  if (degradedNoticeShown || skips < 2) return;
+  degradedNoticeShown = true;
+  toast("Some images wouldn’t load — we skipped ahead.", { surface: "player" });
 }
 
 function wireSeg(segId) {
@@ -184,7 +197,9 @@ let switchingRooms = false;
 let sampler = null;        // host-only pool sampler (lazy)
 let pool = null;
 
-let viewer = null;         // MapillaryJS viewer (this phone's own eyes)
+let iv = null;             // instrumented viewer wrapper (viewer-ui.js)
+let viewer = null;         // its raw MapillaryJS viewer (this phone's eyes)
+let panoRoundSeen = null;  // round whose pano_session fold is already open
 let currentImageId = null; // where the player IS (movement lands on neighbors)
 let anchoredImageId = null; // the round anchor the viewer was last sent to
 let guessMap = null;
@@ -619,20 +634,14 @@ async function startRound(advance) {
     // The host phone shows the pano screen before the state echoes back,
     // so renderRoundActive's screen-change guard won't fire this for it.
     oneShotHint("pano", HINT_CARDS.pano);
-    if (!viewer) makeViewer();
-    let entry = sampler.peek();
-    let loaded = false;
-    while (entry && !loaded) {
-      try {
-        await viewer.moveTo(entry.image_id);
-        loaded = true;
-      } catch (e) {
-        console.warn(`Pool image ${entry.image_id} failed to load, skipping`, e);
-        entry = sampler.advance();
-      }
-    }
+    if (!iv) makeViewer();
+    panoRoundSeen = (room.round ? room.round.number : 0) + 1;
+    iv.beginRound(panoRoundSeen);
+    // Same dead-image skip loop as before, now shared and instrumented.
+    const { entry, skips } = await loadRoundImage(sampler, iv, "anchor");
+    noticeDegradedImagery(skips);
     if (!entry) {
-      toast("Location pool exhausted!");
+      toast("Location pool exhausted!", { surface: "player" });
       const winner = h2hWinner(room.teams, roomCode);
       push({ phase: "gameOver", hostTeam: winner });
       track("game_completed", {
@@ -722,17 +731,29 @@ function renderRoundActive() {
       oneShotHint("pano", HINT_CARDS.pano);
       if (viewer) viewer.resize();
     }
-    if (!viewer) makeViewer();
+    if (!iv) makeViewer();
+    // One pano_session per round on THIS phone. startRound() only runs on
+    // the h2h host, so without this every non-host player would be invisible
+    // to the navigation/interaction panels.
+    if (round.number !== panoRoundSeen) {
+      panoRoundSeen = round.number;
+      iv.beginRound(round.number);
+    }
     // Re-anchor ONLY when the round's anchor changes (new round / rejoin /
     // fresh viewer). Comparing currentImageId here snapped every forward
     // move back to the anchor on the next state echo (movement bounce).
-    if (viewer && shouldReanchorViewer(anchoredImageId, currentImageId, round.imageId)) {
+    if (iv && shouldReanchorViewer(anchoredImageId, currentImageId, round.imageId)) {
       const target = round.imageId;
       anchoredImageId = target;
       currentImageId = target;
-      viewer.moveTo(target).catch((e) => {
+      // The bounce-regression canary: every re-anchor during active play is
+      // counted into pano_session.reanchors (plan §5/§7.2). The guard above
+      // is untouched — the wrapper only observes it.
+      iv.noteReanchor();
+      iv.moveTo(target, "anchor").catch((e) => {
         console.warn("player: image load failed", e);
-        toast("Imagery failed to load — you can still guess from the map");
+        toast("Imagery failed to load — you can still guess from the map",
+          { surface: "player" });
       });
     }
   }
@@ -751,9 +772,10 @@ function updateLockedHud() {
 function makeViewer() {
   destroyViewer();
   const moveAllowed = room.settings.moveAllowed;
-  viewer = new mapillary.Viewer({
-    accessToken: MAPILLARY_TOKEN,
+  iv = createViewer({
+    surface: "player",
     container: "playerViewer",
+    moveAllowed,
     component: {
       cover: false,
       direction: moveAllowed,
@@ -763,6 +785,10 @@ function makeViewer() {
       bearing: true,
     },
   });
+  viewer = iv.viewer;
+  // Construction failed: viewer_init is reported and every moveTo rejects,
+  // so the existing "guess from the map" degradation path takes over.
+  if (!viewer) return;
   viewer.on("pov", scheduleLiveWrite);
   viewer.on("position", scheduleLiveWrite);
   viewer.on("image", (ev) => {
@@ -774,12 +800,14 @@ function makeViewer() {
 }
 
 function destroyViewer() {
-  if (viewer) {
-    try { viewer.remove(); } catch { /* already gone */ }
-    viewer = null;
-    currentImageId = null;
-    anchoredImageId = null;
+  if (iv) {
+    iv.destroy();   // flushes the open pano_session, then viewer.remove()
+    iv = null;
   }
+  viewer = null;
+  currentImageId = null;
+  anchoredImageId = null;
+  panoRoundSeen = null;
 }
 
 function ensureGuessMap() {

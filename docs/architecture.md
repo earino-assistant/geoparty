@@ -23,7 +23,12 @@ js/share.js        Pure share-artifact logic: UTM links, card text, grid   ← t
 js/fx.js           Pure S4 sound+motion: sound pref, tick scheduling,
                    synth specs as data, reduced-motion easing math         ← tested
 js/pool.js         Location pool: seeded shuffle, S3 difficulty tiers
-                   (easy-first-round guard), cursor sampler                ← tested
+                   (easy-first-round guard), cursor sampler, quarantine
+                   filter                                                  ← tested
+js/imagery.js      Pure field observability: imagery error taxonomy,
+                   message/URL scrubbers, opaque pool diag id, timeout +
+                   exception-cap policy, pano_session fold, session-health
+                   classifier, ref codes, report bundle                    ← tested
 js/qr.js           Self-contained QR encoder (join/screen URLs)            ← tested
 js/firebase.js     Firebase init + thin typed helpers (the only SDK import)
 js/landing-ui.js   The one front door: hero pano, chooser, code routing
@@ -36,7 +41,42 @@ js/player-ui.js    Head-to-head team phone (DOM + viewer + writes)
 js/daily-ui.js     Daily Challenge page: solo date-seeded run, no Firebase
 js/screen-ui.js    TV renderer, couch mode + shared entry/follow logic
 js/screen-h2h.js   TV renderer, head-to-head split panels + reveal
+js/viewer-ui.js    Instrumented MapillaryJS wrapper — the ONLY place a
+                   Viewer is constructed or moveTo'd; times, classifies
+                   and reports every load
+js/report-ui.js    "Report it" flow: reactive toast action, calm-state
+                   settings link, one-time diagnostic consent sheet
 ```
+
+### Observability layer (docs/field-observability-plan.md)
+
+Every panorama on every page now comes from `viewer-ui.js`:
+
+```
+  page (host / player / screen / daily / index)
+      │  createViewer({surface, container, component, moveAllowed})
+      ▼
+  js/viewer-ui.js   timing, timeout race, listeners, skip loop
+      │  decisions ──► js/imagery.js   (pure, tested)
+      │  capture   ──► js/consent.js → js/analytics.js (consent gate + schema)
+      ▼
+  PostHog EU: imagery_load / viewer_init / pano_session / imagery_report
+              + $exception issues + session replay + $web_vitals
+```
+
+`viewer-ui.js` owns three things the call sites used to duplicate: the
+dead-image skip loop (`loadRoundImage`), the pose/interaction listeners, and
+the per-purpose timeout race (20 s for `anchor`/`resume`/`seed`, 10 s for
+`follow`/`hero`). The migration invariant was **no behavior change** —
+every existing catch, skip, toast and fallback is untouched; a failed
+construction returns a stub viewer whose `moveTo` always rejects, so the
+`if (viewer)` guards that already existed handle it.
+
+Release stamping: `.github/workflows/pages.yml` writes `release.json` into
+the deploy artifact (never committed — it is in `.gitignore`), and
+`consent.js` registers `release`/`commit`/`deployed_at` as super properties
+after a consented init. A dev checkout has no `release.json` and reports
+`release: "dev"`.
 
 The split is deliberate: everything above `firebase.js` is dependency-free
 and runs in Node — that's what the test suite exercises. The `*-ui.js`

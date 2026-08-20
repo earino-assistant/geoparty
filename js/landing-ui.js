@@ -9,7 +9,6 @@
 //      the landing itself stays light and works offline.
 // Routing/copy decisions live in frontdoor.js (pure, tested).
 
-import { MAPILLARY_TOKEN } from "../config.js";
 import { isValidRoomCode } from "./game.js";
 import {
   joinHref,
@@ -18,6 +17,7 @@ import {
   heroSequence,
 } from "./frontdoor.js";
 import { track } from "./consent.js";
+import { createViewer } from "./viewer-ui.js";
 import { isStandaloneDisplay } from "./pwa.js";
 
 const $ = (id) => document.getElementById(id);
@@ -77,29 +77,29 @@ function submitCode() {
 
 function startHeroPano() {
   if (typeof mapillary === "undefined") return; // offline: gradient stays
-  let viewer;
-  try {
-    viewer = new mapillary.Viewer({
-      accessToken: MAPILLARY_TOKEN,
-      container: "heroPano",
-      component: {
-        cover: false,
-        bearing: false,
-        zoom: false,
-        direction: false,
-        sequence: false,
-        keyboard: false,
-      },
-    });
-  } catch {
-    return;
-  }
+  // Construction failure used to return silently; it is now a classified
+  // viewer_init event — the degradation (gradient stays) is unchanged.
+  const iv = createViewer({
+    surface: "landing",
+    container: "heroPano",
+    moveAllowed: false,
+    component: {
+      cover: false,
+      bearing: false,
+      zoom: false,
+      direction: false,
+      sequence: false,
+      keyboard: false,
+    },
+  });
+  const viewer = iv.viewer;
+  if (!viewer) return;
   const seq = heroSequence(
     HERO_PANOS, Math.floor(Math.random() * HERO_PANOS.length));
   (async () => {
     for (const id of seq) {
       try {
-        await viewer.moveTo(id);
+        await iv.moveTo(id, "hero");
         $("heroPano").classList.add("live");
         startDrift(viewer);
         return;

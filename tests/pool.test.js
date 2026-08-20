@@ -202,3 +202,86 @@ test("PoolSampler: round 1 of every new room is easy on a scored pool", () => {
     assert.equal(entryTier(s.advance()), 1);
   }
 });
+
+/* ================================================================
+ * §13 quarantine: loadPool filters proposal-reviewed dead ids.
+ * Each case imports a FRESH module instance (the query string defeats the
+ * ESM cache) because loadPool memoizes the pool by design.
+ * ================================================================ */
+
+const FAKE_POOL = [
+  { image_id: "alive-1", lat: 1, lng: 1 },
+  { image_id: "dead-1", lat: 2, lng: 2 },
+  { image_id: "alive-2", lat: 3, lng: 3 },
+];
+
+// Minimal fetch double: routes by URL, `null` means "file not there".
+function stubFetch(routes) {
+  const original = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = (url) => {
+    seen.push(String(url));
+    const body = routes[String(url)];
+    if (body === undefined) return Promise.reject(new Error("not found"));
+    if (body === null) return Promise.resolve({ ok: false, status: 404 });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+  };
+  return { seen, restore: () => { globalThis.fetch = original; } };
+}
+
+test("loadPool: quarantined ids are filtered out of the loaded pool", async () => {
+  const f = stubFetch({
+    "data/location_pool.json": FAKE_POOL,
+    "data/pool_quarantine.json": ["dead-1"],
+  });
+  try {
+    const mod = await import("../js/pool.js?case=quarantined");
+    const pool = await mod.loadPool();
+    assert.deepEqual(pool.map((e) => e.image_id), ["alive-1", "alive-2"]);
+  } finally { f.restore(); }
+});
+
+test("loadPool: an absent quarantine file is a no-op (file:// / old checkouts)", async () => {
+  const f = stubFetch({ "data/location_pool.json": FAKE_POOL });
+  try {
+    const mod = await import("../js/pool.js?case=absent");
+    const pool = await mod.loadPool();
+    assert.equal(pool.length, 3);
+  } finally { f.restore(); }
+});
+
+test("loadPool: a 404 or malformed quarantine file is a no-op too", async () => {
+  const f = stubFetch({
+    "data/location_pool.json": FAKE_POOL,
+    "data/pool_quarantine.json": null,
+  });
+  try {
+    const mod = await import("../js/pool.js?case=404");
+    assert.equal((await mod.loadPool()).length, 3);
+  } finally { f.restore(); }
+
+  const g = stubFetch({
+    "data/location_pool.json": FAKE_POOL,
+    "data/pool_quarantine.json": { not: "an array" },
+  });
+  try {
+    const mod = await import("../js/pool.js?case=malformed");
+    assert.equal((await mod.loadPool()).length, 3);
+  } finally { g.restore(); }
+});
+
+test("loadPool: the pool itself failing still throws (unchanged behavior)", async () => {
+  const f = stubFetch({ "data/location_pool.json": null });
+  try {
+    const mod = await import("../js/pool.js?case=poolfail");
+    await assert.rejects(() => mod.loadPool(), /Failed to load location pool: 404/);
+  } finally { f.restore(); }
+});
+
+test("the shipped quarantine file is a valid (empty) id array", async () => {
+  const { readFileSync } = await import("node:fs");
+  const raw = JSON.parse(readFileSync(
+    new URL("../data/pool_quarantine.json", import.meta.url), "utf8"));
+  assert.ok(Array.isArray(raw));
+  for (const id of raw) assert.equal(typeof id, "string");
+});

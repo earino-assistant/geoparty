@@ -1,0 +1,82 @@
+# GitHub Pages deployment (field-observability plan §11).
+#
+# The site stays static and no-build: this workflow checks out the repo,
+# runs the same checks CI runs, writes ONE generated file into the upload
+# artifact — release.json — and deploys. Nothing is ever committed per
+# deploy, and a plain checkout (or file://) simply has no release.json, so
+# the dev loop is unchanged and js/consent.js stamps `release: "dev"`.
+#
+# One-time setup by the owner: Settings → Pages → Source = "GitHub Actions".
+name: Deploy to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: read the repo, write the Pages deployment, mint the OIDC
+# token deploy-pages needs. No contents:write — nothing is pushed back.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One live deployment at a time; never cancel a run that is mid-deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The same gate as CI — a broken module never reaches production.
+      - name: Syntax-check all modules
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
+      # The release stamp. Artifact-only: `release.json` is in .gitignore, so
+      # it can never be committed by accident. consent.js fetches it after a
+      # successful (consented) PostHog init and registers release/commit/
+      # deployed_at as super properties, so every event, exception and replay
+      # is attributable to an exact deploy.
+      - name: Stamp the release
+        run: |
+          node -e '
+            const fs = require("fs");
+            const sha = process.env.GITHUB_SHA || "";
+            fs.writeFileSync("release.json", JSON.stringify({
+              commit: sha,
+              short: sha.slice(0, 7) || "dev",
+              deployed_at: new Date().toISOString(),
+              run: process.env.GITHUB_RUN_ID || "",
+              env: "pages",
+            }) + "\n");
+          '
+          cat release.json
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

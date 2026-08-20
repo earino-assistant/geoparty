@@ -2,7 +2,6 @@
 // state arrives from Firebase. The ONLY thing it ever writes is its own
 // presence heartbeat (spec §1, acceptance criterion 10).
 
-import { MAPILLARY_TOKEN } from "../config.js";
 import {
   subscribeRoom,
   writeScreenHeartbeat,
@@ -34,6 +33,7 @@ import { TV_VIAS, screenJoinVia } from "./tvlink.js";
 import { countdownTick, motionDuration, animFraction } from "./fx.js";
 import { initSound, playSound, prefersReducedMotion } from "./fx-ui.js";
 import { track } from "./consent.js";
+import { createViewer } from "./viewer-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = [
@@ -63,7 +63,8 @@ let unsubRoom = null;
 let heartbeatInterval = null;
 let latestState = null;
 
-let viewer = null;
+let iv = null;            // instrumented viewer wrapper (viewer-ui.js)
+let viewer = null;        // its raw MapillaryJS viewer (pose APIs unchanged)
 let currentImageId = null;
 let countdownInterval = null;
 
@@ -250,10 +251,11 @@ function renderLobby(state) {
 /* ---------------- Round: mirror the host's viewer ---------------- */
 
 function ensureViewer() {
-  if (viewer) return;
-  viewer = new mapillary.Viewer({
-    accessToken: MAPILLARY_TOKEN,
+  if (iv) return;
+  iv = createViewer({
+    surface: "tv",
     container: "screenViewer",
+    moveAllowed: false,
     component: {
       // Display-only: no controls whatsoever (spec §6).
       cover: false,
@@ -265,14 +267,16 @@ function ensureViewer() {
       bearing: false,
     },
   });
+  viewer = iv.viewer;   // null when construction failed; guards below cope
 }
 
 function destroyViewer() {
-  if (viewer) {
-    try { viewer.remove(); } catch { /* already gone */ }
-    viewer = null;
-    currentImageId = null;
+  if (iv) {
+    iv.destroy();   // flushes the open pano_session, then viewer.remove()
+    iv = null;
   }
+  viewer = null;
+  currentImageId = null;
 }
 
 function applyPose(pose) {
@@ -283,15 +287,25 @@ function applyPose(pose) {
   } catch { /* viewer between images; next pose write catches up */ }
 }
 
+let shownRoundNumber = null;
+
 function renderRound(state) {
   showScreen("s-round");
   ensureViewer();
   const round = state.round || {};
 
+  // One pano_session per (surface, round) — on the TV the interaction
+  // counters are all zero by construction, but `nav_available` and any
+  // webglcontextlost still tell us how TV-stick browsers are coping.
+  if (round.number && round.number !== shownRoundNumber) {
+    shownRoundNumber = round.number;
+    iv.beginRound(round.number);
+  }
+
   if (round.imageId && round.imageId !== currentImageId) {
     const target = round.imageId;
     currentImageId = target;
-    viewer.moveTo(target)
+    iv.moveTo(target, "follow")
       .then(() => {
         // Apply the freshest pose we have once the image is in.
         if (latestState && latestState.round &&
@@ -403,6 +417,7 @@ function ensureGuessTeamEl() {
   if (!guessTeamEl) {
     guessTeamEl = document.createElement("div");
     guessTeamEl.className = "tv-hud-corner tv-guess-team";
+    guessTeamEl.dataset.phMask = "";   // team name — replay masking (§9.4)
     $("s-guess").appendChild(guessTeamEl);
   }
   return guessTeamEl;
@@ -683,6 +698,7 @@ function ensureShowdownBoard() {
     el.id = "tvShowdown";
     el.className = "reveal-board tv-showdown";
     el.dataset.caption = "This round";
+    el.dataset.phMask = "";   // team names — replay masking (plan §9.4)
     $("tvBoard").before(el);
   }
   el.innerHTML = "";
