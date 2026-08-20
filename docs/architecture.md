@@ -24,8 +24,22 @@ js/chrome.js       Pure UI-chrome rules (docs/ui-ux-design-review.md §4.1,
 js/autoadvance.js  Pure S6 soft auto-advance: countdown, hold, firing      ← tested
 js/couchscreen.js  Pure S7 couch-without-a-TV: screen-liveness fold,
                    ungated lobby, phone-as-screen reveal pins, crown        ← tested
-js/daily.js        Pure Daily Challenge logic: date seed, run fold, lock   ← tested
-js/share.js        Pure share-artifact logic: UTM links, card text, grid   ← tested
+js/daily.js        Pure Daily Challenge logic: date seed, run fold, lock,
+                   day arithmetic (daysBetweenKeys), hard-mode constants,
+                   daily result v2 (pins+elapsed, hard slot)               ← tested
+js/records.js      Pure device memory: G1 streak fold (grace), G8 personal
+                   bests, G4 ACE counters/medals; geoparty_records v1      ← tested
+js/ghost.js        Pure G5 Ghost Duel codec (URL-fragment payload, FNV
+                   checksum, total decode), day window, pool check, score
+                   recomputation, verdict fold, fragment plumbing          ← tested
+js/twist.js        Pure G2 twist engine: deck, seeded standings-free draw,
+                   eligibility, timer/movement/multiplier + Long Haul curve ← tested
+js/night.js        Pure G3 Crown Night: tally fold, deterministic winner,
+                   champion-at-3, carry/reset, masked formatters           ← tested
+js/decoy.js        Pure G7 Decoy Pin: availability, deploy-state fold,
+                   reveal exposure, hidden-in-play guarantee               ← tested
+js/share.js        Pure share-artifact logic: UTM links, card text, grid,
+                   G1/G5/G6 streak/challenge/verdict/hard forms            ← tested
 js/fx.js           Pure S4 sound+motion: sound pref, tick scheduling,
                    synth specs as data, reduced-motion easing math         ← tested
 js/pool.js         Location pool: seeded shuffle, S3 difficulty tiers
@@ -123,8 +137,14 @@ rooms/KWPF
   teams/t1..t4     { name, total }
   activeTeam       whose turn (couch multi-team)
   poolCursor       sampler position, for host resume
+  lhCursor         G2 Long Haul sampler position (its own expert order;
+                   host-resume, like poolCursor; absent on pre-G2 rooms)
+  night            G3 Crown Night { v, games, crowns:{tN} } — the room-chain
+                   tally; absent until game ≥ 2 (see below)
   round
     number, imageId, startedAt, turnStartedAt, endsAt
+    twist          G2 { id } — written with the round-start patch by the
+                   round starter; every other device READS it, never redraws
     pose           { bearing, center, zoom }   ≤4 writes/s while exploring
     liveGuess      { lat, lng }                ≤4/s while aiming (preview only)
     liveView       { lat, lng, zoom }          ≤4/s guess-map framing
@@ -159,7 +179,19 @@ round
   live/tN          { stage, imageId, pose, view, pin }  ≤4/s per team
   results/tN       { guess, distanceKm, points, distancePoints, timeBonus,
                      elapsedMs, submittedAt, forfeited,
-                     superSure, superSureOutcome }
+                     superSure, superSureOutcome,
+                     decoy }   G7 { lat, lng } — the exposed decoy, written in
+                               the team's own lock-in patch (reveal-only render)
+  twist            G2 { id }  written at round start by the hostTeam phone
+```
+
+Additional additive paths (old clients ignore unknown paths):
+
+```
+  teams/tN/decoyUsed  G7 round number — own-team write at plant time (sibling
+                      of superSureUsed; carryTeams resets it for the next game)
+  night               G3 { v, games, crowns:{tN} } — carried into the NEW room
+                      by the next-room creator (below)
   revealAt         countdown target stamped by whoever closes the round
   autoAdvanceAt    S6 soft auto-advance deadline (revealAt + 15 s), stamped
                    in the same flip patch; null = the host held it
@@ -179,6 +211,29 @@ corrected absolute `teams/tN/total` values, so no subscriber ever renders
 an unsettled reveal. Couch solo rounds carry the bet on `round/score`
 (same fields); the host settles at confirm.
 
+### Crown Night / Twists / Decoy (G2/G3/G7 race posture)
+
+These extend the model without adding a contention class (spec §5.3):
+
+- **Twists** ride the round record: the round starter computes the seeded,
+  standings-free `drawTwist` (`twist.js`) and writes `round/twist` in the same
+  patch that starts the round. Every other device *reads* it — never redraws —
+  so a code change or version skew can't split a room. The reveal-flip writers
+  compute settlements only from data already in their atomic snapshot
+  (`round/twist` + results), so racing flip writers still produce identical
+  outcomes — the SUPER SURE settlement argument carries over verbatim.
+- **Decoy** adds no reveal-time write: exposure is pure rendering from
+  `round/results/tN/decoy`, written in the team's own lock-in patch. The live
+  feed carries the decoy as ordinary `round/live/tN/pin` coords — hidden in
+  play by construction (a test enforces the live-surface absence).
+- **Crown Night** rides the room chain and nowhere else (no localStorage). In
+  couch, the host increments `night` in the same patch as `phase: gameOver`. In
+  h2h, the winner's phone computes `carryNight(night, winnerId)` (`night.js`)
+  and writes it into the **new** room before the `nextRoom` pointer — the same
+  connection-ordering guarantee the pointer already relies on. Every device
+  computes `gameWinner` locally (deterministic), so the game-over crown display
+  needs no write. A broken/abandoned chain simply ends the night silently.
+
 ## Write ownership — the one rule that matters
 
 Writers never contend on the same path:
@@ -192,6 +247,9 @@ Writers never contend on the same path:
 | `autoAdvanceAt: null` (the S6 hold) | host phone | current `hostTeam`'s phone |
 | `screenHeartbeat` | TV | TV |
 | `teams/tN` slot claim | — | transaction (`claimTeamSlot`) — the only transactional write |
+| `round/twist`, `lhCursor` (G2) | host phone (round-start patch) | current `hostTeam`'s phone (round-start patch) |
+| `teams/tN/decoyUsed`, `round/results/tN/decoy` (G7) | — | team tN's phone (own-subtree; disjoint by construction) |
+| `night` (G3) | host phone (same patch as `phase: gameOver`) | next-room creator (winner's phone), written into the NEW room before the `nextRoom` pointer |
 
 Everything else is `update()` with last-write-wins, which is safe precisely
 because paths are disjoint. The two deliberate exceptions where concurrent
