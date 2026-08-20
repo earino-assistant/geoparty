@@ -16,6 +16,7 @@ import {
   soundSpec,
   soundToggleIcon,
   soundToggleTitle,
+  confettiSpec,
 } from "./fx.js";
 import { track } from "./consent.js";
 
@@ -149,4 +150,31 @@ export function prefersReducedMotion() {
   } catch {
     return false;
   }
+}
+
+/* ================================================================
+ * Confetti (#8): render fx.js's pure, deterministic strip specs into the
+ * existing .confetti loop. `seed` keeps a game's burst stable; `tier`
+ * ("champion" | "win") picks the richer gold-weighted set. Reduced motion
+ * yields an empty spec (and the CSS hides .confetti anyway) — no strips.
+ * ================================================================ */
+export function spawnConfetti(wrap, { seed, tier, count } = {}) {
+  if (!wrap) return 0;
+  wrap.innerHTML = "";
+  const bits = confettiSpec({
+    count, seed, tier, reducedMotion: prefersReducedMotion(),
+  });
+  for (const b of bits) {
+    const strip = document.createElement("i");
+    strip.style.left = `${b.left}%`;
+    strip.style.background = b.color;
+    strip.style.width = `${(1.4 * b.sizeScale).toFixed(2)}vh`;
+    strip.style.height = `${(2.8 * b.sizeScale).toFixed(2)}vh`;
+    strip.style.animationDuration = `${b.durationS}s`;
+    strip.style.animationDelay = `${b.delayS}s`;
+    strip.style.setProperty("--drift", `${b.driftVw}vw`);
+    strip.style.setProperty("--spin", `${b.spinDeg}deg`);
+    wrap.appendChild(strip);
+  }
+  return bits.length;
 }

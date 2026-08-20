@@ -37,6 +37,7 @@ import {
   isShowdownRound,
   showdownOrder,
   showdownResults,
+  sanitizePose,
 } from "./game.js";
 import { panoMoved } from "./h2h.js";
 import {
@@ -52,6 +53,10 @@ import {
   guessMapHintLines,
   lockNowEstimate,
   lockButtonLabel,
+  panoHintCard,
+  shouldHintSuperSure,
+  SUPER_SURE_HINT,
+  SUPER_SURE_HINT_ID,
 } from "./hints.js";
 import {
   oneShotHint,
@@ -524,7 +529,11 @@ function schedulePoseWrite() {
         viewer.getCenter(),
         viewer.getZoom(),
       ]);
-      const pose = { bearing: pov.bearing, center, zoom };
+      // A viewer read mid-navigation can hand back a NaN center/zoom; a NaN in
+      // the patch would make Firebase reject the whole update. Drop the bad
+      // pose (next tick catches up) rather than poison the write.
+      const pose = sanitizePose({ bearing: pov.bearing, center, zoom });
+      if (!pose) return;
       room.round.pose = pose;
       push({ "round/pose": pose });
     } catch { /* viewer mid-navigation; next tick catches up */ }
@@ -599,7 +608,10 @@ async function startRound(advance) {
     // handoffs reset it so each team's time bonus reflects its own turn.
     turnStartedAt: now,
     endsAt: secs > 0 ? now + secs * 1000 : null,
-    pose: { bearing: 0 },
+    // #4: an explicit, neutral round-start pose (not just a bearing) — the TV
+    // resets to a defined center/zoom for the new round instead of holding the
+    // previous round's framing until the host's first live pose write lands.
+    pose: { bearing: 0, center: [0.5, 0.5], zoom: 0 },
     truth: null,
     liveGuess: null,
     liveView: null,
@@ -643,7 +655,8 @@ async function startRound(advance) {
   if (showdown) {
     oneShotHint("showdown", HINT_CARDS.showdown);
   } else {
-    oneShotHint("pano", HINT_CARDS.pano);
+    // #7: teach the arrows when this round allows movement.
+    oneShotHint("pano", panoHintCard(twistMoveAllowed(room.settings, twistId)));
   }
   if (twistId) showTwistCard(twistId);   // G2 ritual interstitial
   startTimer();
@@ -968,6 +981,14 @@ function renderSuperSureChip() {
   btn.classList.toggle("hidden", !available); // spent = gone, not disabled
   btn.classList.toggle("armed", available && superSureArmed);
   btn.setAttribute("aria-pressed", String(available && superSureArmed));
+  // #7: one-shot nudge toward the 🔥 chip, only on the couch guess map, from
+  // round 2 on while unspent — points at the chip, never re-explains it.
+  if (!$("h-guess").classList.contains("hidden") && room && room.round &&
+      shouldHintSuperSure({
+        mode: "couch", roundNumber: room.round.number, available,
+      })) {
+    oneShotHint(SUPER_SURE_HINT_ID, SUPER_SURE_HINT);
+  }
 }
 
 function confirmGuess() {
@@ -1737,6 +1758,19 @@ onConnectionChange((isConnected) => {
   $("connPill").classList.toggle("hidden", isConnected);
   if (room && room.phase === "lobby") updateLobbyReadiness();
 });
+
+// #5: an orientation change (or the pano coming back on screen) can leave the
+// host pano sized to its old box and its nav components dropped. Re-size the
+// viewer and re-assert the movement lever whenever the round screen is up.
+function refreshHostViewer() {
+  if (!iv || $("h-round").classList.contains("hidden")) return;
+  iv.resize();
+  if (iv.reassertMove) iv.reassertMove();
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("orientationchange", refreshHostViewer);
+  window.addEventListener("resize", refreshHostViewer);
+}
 
 initSound("host"); // S4: muted by default on phones; 🔇 toggle persists
 enterSetup();

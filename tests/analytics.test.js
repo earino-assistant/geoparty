@@ -485,6 +485,34 @@ test("sanitizeEvent: game_created carries the difficulty pick, nothing extra", (
   assert.deepEqual(sanitizeEvent("game_created", { difficulty: 3 }).props, {});
 });
 
+test("sanitizeEvent: game_created.auto_submit is a strict bool (#2)", () => {
+  const base = { room: "KWPFRT", mode: "h2h" };
+  assert.equal(
+    sanitizeEvent("game_created", { ...base, auto_submit: true }).props.auto_submit,
+    true);
+  assert.equal(
+    sanitizeEvent("game_created", { ...base, auto_submit: false }).props.auto_submit,
+    false);
+  // Anything non-boolean is stripped, never coerced.
+  for (const bad of [1, 0, "true", "1", null, undefined, {}]) {
+    const out = sanitizeEvent("game_created", { ...base, auto_submit: bad });
+    assert.ok(!("auto_submit" in out.props), `coerced ${JSON.stringify(bad)}`);
+  }
+});
+
+test("sanitizeEvent: reveal_shown.forfeits is an aggregate int, nothing else (#2)", () => {
+  const out = sanitizeEvent("reveal_shown", {
+    room: "KWPFRT", mode: "h2h", round_number: 3, forfeits: 2,
+    team_name: "Losers", lat: 1.2, lng: 3.4,
+  });
+  assert.deepEqual(out.props, {
+    room: "KWPFRT", mode: "h2h", round_number: 3, forfeits: 2,
+  });
+  // Rounded to an int; non-finite stripped.
+  assert.equal(sanitizeEvent("reveal_shown", { forfeits: 1.9 }).props.forfeits, 2);
+  assert.ok(!("forfeits" in sanitizeEvent("reveal_shown", { forfeits: NaN }).props));
+});
+
 test("sanitizeEvent: wrong-typed props are stripped, not coerced", () => {
   const out = sanitizeEvent("game_created", {
     mode: 5, num_teams: "two", num_rounds: 5, round_seconds: 120,

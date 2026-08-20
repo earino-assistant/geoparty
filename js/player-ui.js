@@ -44,6 +44,7 @@ import {
   boardRowText,
   teamIds,
   standings,
+  sanitizePose,
 } from "./game.js";
 import {
   h2hCanTransition,
@@ -65,6 +66,11 @@ import {
   revealPins,
   shouldReanchorViewer,
   panoMoved,
+  normalizeAutoSubmit,
+  expiryConduct,
+  canGiveUp,
+  forfeitCount,
+  stompsHandoff,
 } from "./h2h.js";
 import {
   superSureAvailable,
@@ -78,6 +84,10 @@ import {
   guessMapHintLines,
   lockNowEstimate,
   lockButtonLabel,
+  panoHintCard,
+  shouldHintSuperSure,
+  SUPER_SURE_HINT,
+  SUPER_SURE_HINT_ID,
 } from "./hints.js";
 import {
   oneShotHint,
@@ -319,6 +329,10 @@ function collectSettings() {
     difficulty: normalizeDifficulty($("pSegDifficulty").dataset.value),
     twists: normalizeTwistSetting(   // G2
       $("pSegTwists") ? $("pSegTwists").dataset.value : "occasional"),
+    // Overnight bundle #2: default OFF ("wait for players"). Absent segment or
+    // any non-"1" value normalizes to false via normalizeAutoSubmit on read.
+    autoSubmitOnTimeout:
+      !!($("pSegAutoSubmit") && $("pSegAutoSubmit").dataset.value === "1"),
   };
 }
 
@@ -408,6 +422,7 @@ async function createRoom() {
       num_rounds: state.settings.roundCount,
       round_seconds: state.settings.roundSeconds,
       difficulty: state.settings.difficulty,
+      auto_submit: normalizeAutoSubmit(state.settings.autoSubmitOnTimeout),
     });
     track("team_joined", { mode: "h2h", team_count: 1 });
     enterRoom(code, "t1");
@@ -629,6 +644,13 @@ function onState(state) {
   }
   prevSubmitted = nowSubmitted;
 
+  // Overnight bundle #3: once the winner opens the next-game setup panel, the
+  // old room is still "gameOver" and its subscription is still live. A stray
+  // echo (another phone's heartbeat, a Firebase re-delivery) must not re-render
+  // the game-over screen over the open handoff panel and make them tap again.
+  // The nextRoom-follow and team-vanished guards above still run first.
+  if (stompsHandoff(state.phase, shownScreen)) return;
+
   switch (state.phase) {
     case "lobby": renderLobby(); break;
     case "roundActive": renderRoundActive(); break;
@@ -752,8 +774,10 @@ async function startRound(advance) {
     // dead-image skip as couch mode — everyone else just follows imageId.
     showScreen("p-round");
     // The host phone shows the pano screen before the state echoes back,
-    // so renderRoundActive's screen-change guard won't fire this for it.
-    oneShotHint("pano", HINT_CARDS.pano);
+    // so renderRoundActive's screen-change guard won't fire this for it. #7:
+    // the pano card teaches the arrows when movement is allowed (round 1 is
+    // twist-free, so the game-wide lever is the movement state here).
+    oneShotHint("pano", panoHintCard(room.settings.moveAllowed));
     if (!iv) makeViewer();
     panoRoundSeen = (room.round ? room.round.number : 0) + 1;
     iv.beginRound(panoRoundSeen);
@@ -820,6 +844,14 @@ async function startRound(advance) {
       twist: twistId ? { id: twistId } : null,   // G2
     };
     push({ phase: "roundActive", round, poolCursor: sampler.cursor });
+    // #5: the starter applies the drawn twist's movement lever LOCALLY now,
+    // rather than waiting for its own Firebase write to echo back through
+    // renderRoundActive — otherwise a Frozen round briefly allows movement on
+    // the starter's phone until the echo lands. Every other phone still reads
+    // round.twist from the echo, as before.
+    if (iv && iv.setMoveAllowed) {
+      iv.setMoveAllowed(twistMoveAllowed(room.settings, twistId));
+    }
     track("round_started", {
       room: roomCode, mode: "h2h", round_number: number,
       ...(via ? { advance: via } : {}),
@@ -845,6 +877,7 @@ function renderRoundActive() {
     lastRoundSeen = round.number;
     autoSubmitted = false;
     sweepDone = false;
+    hideGiveUp(); // #2: a stale give-up affordance never carries into a round
     localStage = "explore";
     superSureArmed = false; // the bet is armed per-pin, never carried over
     lastTickSecond = null;
@@ -883,8 +916,10 @@ function renderRoundActive() {
   } else {
     if (shownScreen !== "p-round") {
       showScreen("p-round");
-      // First pano ever on this device: teach the loop's first move (M5).
-      oneShotHint("pano", HINT_CARDS.pano);
+      // First pano ever on this device: teach the loop's first move (M5) — and
+      // the arrows when this round allows movement (#7).
+      oneShotHint("pano", panoHintCard(
+        twistMoveAllowed(room.settings, round.twist ? round.twist.id : null)));
       if (viewer) viewer.resize();
     }
     if (!iv) {
@@ -898,6 +933,10 @@ function renderRoundActive() {
           twistMoveAllowed(room.settings, round.twist ? round.twist.id : null));
       }
     }
+    // #5: reassert the movement lever every active-round render, so a transient
+    // activateComponent failure recovers on a later render instead of stranding
+    // the movement controls for the whole round. A no-op once it has stuck.
+    if (iv && iv.reassertMove) iv.reassertMove();
     // One pano_session per round on THIS phone. startRound() only runs on
     // the h2h host, so without this every non-host player would be invisible
     // to the navigation/interaction panels.
@@ -1187,6 +1226,14 @@ function renderSuperSureChip() {
   btn.classList.toggle("hidden", !available); // spent = gone, not disabled
   btn.classList.toggle("armed", available && superSureArmed);
   btn.setAttribute("aria-pressed", String(available && superSureArmed));
+  // #7: a one-shot nudge toward the 🔥 chip, only on the guess map, from round
+  // 2 on while the bet is unspent — points at the chip, never re-explains it.
+  if (shownScreen === "p-guess" && room && room.round &&
+      shouldHintSuperSure({
+        mode: "h2h", roundNumber: room.round.number, available,
+      })) {
+    oneShotHint(SUPER_SURE_HINT_ID, SUPER_SURE_HINT);
+  }
 }
 
 /* ---------------- G7 Decoy: plant a fake pin for rivals ---------------- */
@@ -1278,7 +1325,10 @@ function scheduleLiveWrite() {
           viewer.getCenter(),
           viewer.getZoom(),
         ]);
-        live.pose = { bearing: pov.bearing, center, zoom };
+        // A NaN center/zoom from a viewer mid-navigation would make Firebase
+        // reject the ENTIRE round/live/<tid> patch (dropping stage + pin too);
+        // sanitizePose keeps a bad pose out so the rest of the live write lands.
+        live.pose = sanitizePose({ bearing: pov.bearing, center, zoom });
       } else if (localStage === "map" && guessMap) {
         const c = guessMap.getCenter();
         live.view = {
@@ -1308,15 +1358,19 @@ function cancelLiveWrite() {
 
 /* ---------------- Lock in ---------------- */
 
-function lockIn(auto = false) {
+// `auto`: the timeout auto-lock (auto-submit mode) — may forfeit with no pin.
+// `voluntary`: a give-up (wait-for-players mode) — always a forfeit, even if a
+// pin happens to be down, and it carries its own copy.
+function lockIn(auto = false, voluntary = false) {
   if (!room || room.phase !== "roundActive" || !room.round || myResult()) return;
   const truth = room.round.truth;
   let guess = null;
-  if (guessMarker) {
+  if (guessMarker && !voluntary) {
     const g = guessMarker.getLatLng();
     guess = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
   }
-  if (!guess && !auto) return; // manual lock needs a pin; timeout may forfeit
+  // manual lock needs a pin; a timeout auto-lock or a voluntary give-up forfeit.
+  if (!guess && !auto && !voluntary) return;
   if (guess) { playSound("stamp"); buzz(35); } // S4: the lock-in beat
   const distanceKm = guess
     ? haversineKm(truth.lat, truth.lng, guess.lat, guess.lng)
@@ -1428,13 +1482,47 @@ function lockIn(auto = false) {
       decoy: !!(result.decoy),                          // G7 (set when a decoy was planted)
     });
   }
-  if (auto && !guess) {
+  if (voluntary) {
+    toast(betting
+      ? "You gave up — SUPER SURE burned."
+      : "You gave up — no points this round.");
+  } else if (auto && !guess) {
     toast(betting
       ? "Time! No pin — SUPER SURE burned."
       : "Time! No pin — no points this round.");
   } else if (auto) {
     toast("Time! Your pin was locked in.");
   }
+}
+
+/* Wait-for-players give-up: a voluntary forfeit. The only way to close out a
+ * round with no pin once the clock is up in auto_submit=OFF mode (a manual
+ * Lock It In still needs a pin). An armed SUPER SURE burns, per doctrine. */
+function giveUp() {
+  if (!room) return;
+  if (!canGiveUp({
+    autoSubmit: normalizeAutoSubmit(room.settings && room.settings.autoSubmitOnTimeout),
+    phase: room.phase,
+    hasResult: !!myResult(),
+  })) return;
+  hideGiveUp();
+  lockIn(false, true);
+}
+
+// Show/hide the give-up affordance on whichever play screen is active. Called
+// from the ticker (offerGiveUp) and cleared once a result exists.
+function updateGiveUp(offer) {
+  // Give-up is the pinless straggler's exit; with a pin down the move is Lock
+  // It In, so only surface it when there is genuinely no pin (spec: "after
+  // expiry and no pin").
+  const show = offer && !guessMarker;
+  $("btnPGiveUpStreet").classList.toggle("hidden", !(show && shownScreen === "p-round"));
+  $("btnPGiveUpMap").classList.toggle("hidden", !(show && shownScreen === "p-guess"));
+}
+
+function hideGiveUp() {
+  $("btnPGiveUpStreet").classList.add("hidden");
+  $("btnPGiveUpMap").classList.add("hidden");
 }
 
 function renderLockedRoster() {
@@ -1524,6 +1612,7 @@ function tick() {
     mapTimerEl.textContent = "";
     timerEl.classList.remove("low");
     mapTimerEl.classList.remove("low");
+    updateGiveUp(false); // no clock, no expiry — nothing to give up on
   } else {
     const left = endsAt - Date.now();
     timerEl.textContent = formatCountdown(left);
@@ -1540,18 +1629,31 @@ function tick() {
         playSound(t.urgent ? "tickUrgent" : "tick");
       }
     }
-    if (left <= 0 && !myResult() && !autoSubmitted) {
+    // Overnight bundle #2: the room's timeout doctrine decides what happens at
+    // zero. Auto-lock mode reproduces the legacy forfeit/sweep; the default
+    // wait-for-players mode auto-locks nothing and offers a voluntary give-up.
+    const now = Date.now();
+    const conduct = expiryConduct({
+      autoSubmit: normalizeAutoSubmit(room.settings && room.settings.autoSubmitOnTimeout),
+      expired: left <= 0,
+      hasResult: !!myResult(),
+      isHost: isHost(),
+      overGrace: now > endsAt + FORFEIT_GRACE_MS,
+      overGrace3: now > endsAt + FORFEIT_GRACE_MS * 3,
+    });
+    if (conduct.autoLock && !autoSubmitted) {
       // Time's up: lock whatever pin this phone has (or forfeit with none).
       autoSubmitted = true;
       lockIn(true);
     }
-    if (isHost() && Date.now() > endsAt + FORFEIT_GRACE_MS) {
+    if (conduct.hostSweep) {
       // Referee of last resort: a phone that died can't stall the party.
       sweepAndReveal();
-    } else if (myResult() && Date.now() > endsAt + FORFEIT_GRACE_MS * 3) {
+    } else if (conduct.forceSweep) {
       // ...and if the dead phone IS the host's, any locked-in phone steps up.
       sweepAndReveal(true);
     }
+    updateGiveUp(conduct.offerGiveUp);
   }
 }
 
@@ -1606,6 +1708,7 @@ function renderReveal() {
     revealTracked = round.number;
     track("reveal_shown", {
       room: roomCode, mode: "h2h", round_number: round.number,
+      forfeits: forfeitCount(round), // how many closed with no pin (#2 KPI)
     });
     // One super_sure_resolved per bet, host phone only (same cardinality
     // discipline as reveal_shown). Burned bets appear ONLY here — a
@@ -1929,6 +2032,8 @@ function openNextGameSetup() {
     ["pSegMove", room.settings.moveAllowed ? "1" : "0"],
     ["pSegDifficulty", normalizeDifficulty(room.settings.difficulty)],
     ["pSegTwists", normalizeTwistSetting(room.settings.twists)],
+    ["pSegAutoSubmit",
+      normalizeAutoSubmit(room.settings.autoSubmitOnTimeout) ? "1" : "0"],
   ]) {
     const el = $(seg);
     el.dataset.value = val;
@@ -1944,6 +2049,10 @@ async function createNextGame() {
   $("btnOpenRoom").disabled = true;
   try {
     const oldCode = roomCode;
+    // Overnight bundle #3: stop reacting to the OLD room BEFORE the async
+    // room-code search — otherwise a stray gameOver echo arriving during the
+    // await snaps the handoff panel back to the game-over screen.
+    switchingRooms = true;
     const code = await pickFreeRoomCode();
     const teams = carryTeams(room.teams);
     const state = initialH2hRoomState(collectSettings(), teams, myTeam);
@@ -1951,7 +2060,6 @@ async function createNextGame() {
     // bumped for the game just won, or reset to zero after a champion — before
     // the nextRoom pointer (the same ordering the pointer already relies on).
     state.night = carryNight(room.night || defaultNight(), myTeam);
-    switchingRooms = true; // stop reacting to the old room mid-handoff
     writeRoom(code, state).catch((e) =>
       console.warn("Firebase write failed:", scrubErrorMessage(e)));
     // Queued after the new room's write on the same connection: by the time
@@ -1969,6 +2077,7 @@ async function createNextGame() {
       num_rounds: state.settings.roundCount,
       round_seconds: state.settings.roundSeconds,
       difficulty: state.settings.difficulty,
+      auto_submit: normalizeAutoSubmit(state.settings.autoSubmitOnTimeout),
     });
     enterRoom(code, myTeam);
   } catch (e) {
@@ -2024,6 +2133,7 @@ wireSeg("pSegSeconds");
 wireSeg("pSegMove");
 wireSeg("pSegDifficulty");
 wireSeg("pSegTwists");
+wireSeg("pSegAutoSubmit");
 
 $("btnStartNew").addEventListener("click", startNewGame);
 $("btnSetupBack").addEventListener("click", showHome);
@@ -2045,6 +2155,8 @@ $("btnBackToStreet").addEventListener("click", backToStreet);
 $("btnSuperSure").addEventListener("click", openSuperSureSheet);
 $("btnDecoy").addEventListener("click", openDecoySheet);
 $("btnLockIn").addEventListener("click", () => lockIn(false));
+$("btnPGiveUpStreet").addEventListener("click", giveUp);
+$("btnPGiveUpMap").addEventListener("click", giveUp);
 $("btnCloseRound").addEventListener("click", sweepAndReveal);
 $("btnPNext").addEventListener("click", nextOrFinish);
 $("btnPHold").addEventListener("click", holdAdvance);

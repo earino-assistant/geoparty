@@ -5,6 +5,8 @@
 // the JS-driven animations share. No DOM, no Web Audio — the browser glue
 // (AudioContext, the toggle button, vibration) lives in fx-ui.js.
 
+import { hashSeed, mulberry32 } from "./pool.js";
+
 /* ================================================================
  * Sound preference. Spec §2.4: muted by default on phones, ON by
  * default on the TV; an explicit choice persists either way.
@@ -132,4 +134,76 @@ export function animFraction(elapsedMs, durationMs) {
   if (!(durationMs > 0)) return 1;
   const f = Math.min(1, Math.max(0, elapsedMs / durationMs));
   return 1 - Math.pow(1 - f, 3);
+}
+
+/* ================================================================
+ * Confetti (overnight bundle #8). The TV game-over confetti was a fixed 90
+ * strips on a 137.5°-modulo layout with no sway and one linear fall — it read
+ * flat. confettiSpec is a PURE, deterministic generator (seeded, no
+ * Math.random) that fx-ui.js renders into the existing .confetti loop: varied
+ * per-strip fall duration/delay, a horizontal drift (sway) and a randomized
+ * spin, so the loop stays conservative and sparse but no longer marches in
+ * lockstep. A champion (Crown Night first-to-3) gets a visibly richer,
+ * gold-weighted burst; an ordinary win gets the colorful palette. Reduced
+ * motion yields NO confetti at all. Tested in tests/fx.test.js.
+ * ================================================================ */
+
+// The colorful ordinary-win palette (unchanged hues) and the champion's
+// gold-weighted set. Both frozen so the render layer can't mutate them.
+export const CONFETTI_COLORS = Object.freeze(
+  ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a", "#f4f4f6"]);
+export const CONFETTI_GOLD = Object.freeze(
+  ["#ffd700", "#ffcf3f", "#ffe89a", "#f6b73c", "#fff4c2"]);
+
+export const CONFETTI_TV_COUNT = 90;   // the sparse-but-full TV loop default
+export const CONFETTI_MAX = 160;       // hard cap (champion, still cheap)
+
+function confettiSeedInt(seed) {
+  if (typeof seed === "number" && Number.isFinite(seed)) return seed >>> 0;
+  return hashSeed(String(seed == null ? "confetti" : seed));
+}
+
+// { count, seed, tier, reducedMotion } → an array of strip specs. Same inputs
+// always yield the same array (deterministic for tests and for a stable loop
+// per game). Each strip:
+//   left      0..100  (% of width)
+//   color     one of the tier's palette
+//   durationS positive fall duration (s)
+//   delayS    >= 0 start delay (s)
+//   driftVw   horizontal sway at the bottom (vw, signed)
+//   spinDeg   total rotation over the fall (deg, >= 360)
+//   sizeScale > 0 strip-size multiplier
+export function confettiSpec({ count, seed, tier, reducedMotion } = {}) {
+  if (reducedMotion === true) return [];   // reduced motion → no confetti
+  const champion = tier === "champion";
+  const base = Number.isFinite(count) && count > 0
+    ? Math.floor(count) : CONFETTI_TV_COUNT;
+  const n = Math.min(CONFETTI_MAX, champion ? Math.round(base * 1.4) : base);
+  const palette = champion ? CONFETTI_GOLD : CONFETTI_COLORS;
+  const rand = mulberry32(confettiSeedInt(seed));
+  const round1 = (x) => Math.round(x * 10) / 10;
+  const round2 = (x) => Math.round(x * 100) / 100;
+  const bits = [];
+  for (let i = 0; i < n; i++) {
+    const rColor = rand();
+    const rLeft = rand();
+    const rDur = rand();
+    const rDelay = rand();
+    const rDrift = rand();
+    const rSpin = rand();
+    const rSize = rand();
+    // Champion biases toward the gold end of the palette (squared → front-loaded).
+    const pick = champion ? rColor * rColor : rColor;
+    const idx = Math.min(palette.length - 1, Math.floor(pick * palette.length));
+    bits.push({
+      left: round1(rLeft * 100),
+      color: palette[idx],
+      durationS: round2(2.6 + rDur * (champion ? 2.6 : 3.4)),
+      delayS: round2(rDelay * (champion ? 2.5 : 3.8)),
+      driftVw: round1((rDrift * 2 - 1) * (champion ? 10 : 7)),
+      spinDeg: 360 + Math.floor(rSpin * 720),
+      sizeScale: round2(champion ? 1.1 + rSize * 0.7 : 0.85 + rSize * 0.6),
+    });
+  }
+  return bits;
 }

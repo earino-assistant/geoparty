@@ -77,6 +77,47 @@ export const HINT_CARDS = Object.freeze({
   },
 });
 
+/* #7 movement-aware pano hint. The first-pano card teaches the loop's first
+ * move once per device (M5). When street movement is allowed this round, its
+ * second beat also points at the on-pano arrows / sequence controls that let
+ * you walk the street — the "little movie controls" players found unclear —
+ * WITHOUT touching the Mapillary SDK's own DOM/ARIA. Stays within the two-line
+ * budget. panoHintCard(false) is the pre-#7 copy, byte-for-byte, so a
+ * no-movement round is unchanged. */
+export function panoHintCard(moveAllowed) {
+  return {
+    title: "Where are you?",
+    lines: moveAllowed
+      ? [
+        "Look around 👀 — tap the arrows to walk the street.",
+        "Then Make Guess.",
+      ]
+      : [
+        "Look around 👀 — figure out where you are.",
+        "Then Make Guess.",
+      ],
+  };
+}
+
+/* #7 SUPER SURE discoverability. A one-shot (per device) nudge that POINTS at
+ * the 🔥 chip so the bet is findable without a permanent pill — it never
+ * re-explains the mechanic (that lives in exactly one place, SUPER_SURE_SHEET).
+ * Shown from round 2 onward (round 1 is deliberately calm), only while the bet
+ * is still unspent, and NEVER on the Daily (which has no bet). */
+export const SUPER_SURE_HINT_ID = "supersure";
+export const SUPER_SURE_HINT = Object.freeze({
+  title: "Feeling SUPER SURE?",
+  lines: Object.freeze([
+    "Tap 🔥 to place your once-a-game bet.",
+  ]),
+});
+
+export function shouldHintSuperSure({ mode, roundNumber, available }) {
+  return (mode === "h2h" || mode === "couch") &&
+    typeof roundNumber === "number" && roundNumber >= 2 &&
+    available === true;
+}
+
 // First guess map (id "guessmap"): the scoring one-liner always, plus the
 // rival-pins warning where rivals can actually watch (h2h). The SUPER SURE
 // line is deliberately absent — after the de-clutter pass the bet is

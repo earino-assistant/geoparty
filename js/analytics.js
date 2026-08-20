@@ -248,9 +248,13 @@ export const EVENT_SCHEMA = Object.freeze({
   // "expert". room is the join key that lets the tier KPI break
   // guess_submitted.distance_km down by the room's difficulty (h2h guesses
   // fire on other phones, so a device/person join can't do it).
+  // auto_submit (overnight bundle #2): the h2h room's autoSubmitOnTimeout
+  // setting — did the host opt into auto-locking pins at the buzzer, or leave
+  // the default "wait for players"? Answers whether the forced-forfeit default
+  // was ever what hosts actually wanted. h2h only; absent on couch/daily.
   game_created: {
     room: "string", mode: "string", num_teams: "int", num_rounds: "int",
-    round_seconds: "int", difficulty: "string",
+    round_seconds: "int", difficulty: "string", auto_submit: "bool",
   },
   team_joined: { mode: "string", team_count: "int" },
   // via: how this screen got attached — "qr" (scanned, usually then cast to
@@ -283,7 +287,13 @@ export const EVENT_SCHEMA = Object.freeze({
     time_seconds: "float1", super_sure: "bool", moved: "bool",
     round_number: "int", twist: "string", decoy: "bool",
   },
-  reveal_shown: { room: "string", mode: "string", round_number: "int" },
+  // forfeits (overnight bundle #2): how many teams closed this round with no
+  // pin (timed-out, swept, or gave up). Paired with game_created.auto_submit it
+  // measures whether "wait for players" actually cuts forfeits vs. auto-lock.
+  // A count only — never who forfeited.
+  reveal_shown: {
+    room: "string", mode: "string", round_number: "int", forfeits: "int",
+  },
   // One event per SUPER SURE bet, fired from the host phone at the reveal
   // (a burned bet has no guess_submitted — a forfeit is not a guess — and
   // win/lose is only known at reveal). outcome: "won" | "lost" | "burned";

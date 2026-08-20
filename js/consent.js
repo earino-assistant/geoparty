@@ -13,7 +13,7 @@ import {
   CONSENT_ACCEPTED,
   POSTHOG_SCRIPT_URL,
 } from "./analytics.js";
-import { mayPromptConsent } from "./chrome.js";
+import { consentBannerAction } from "./chrome.js";
 import { currentScreen, onScreenChange } from "./chrome-ui.js";
 
 // §9.3 remote kill switch: recording is linked to this PostHog feature flag
@@ -260,6 +260,14 @@ function closeBanner() {
   ensureGear().classList.remove("hidden");
 }
 
+// #6: retract the still-undecided banner when play begins. Unlike closeBanner
+// this records NO choice and does NOT reveal the 🍪 gear (that is the
+// post-decision revoke control) — the banner simply reoffers at the next calm
+// promptable screen. The consent gate is untouched: nothing loads or fires.
+function retractBanner() {
+  if (banner) banner.classList.add("hidden");
+}
+
 // The revoke/change control: a quiet cookie button in the corner once a
 // choice has been made. Reopens the banner.
 function ensureGear() {
@@ -295,16 +303,22 @@ function ensureGear() {
  * privacy-safe outcome by construction: no consent means no capture. */
 if (getConsent(window.localStorage) === null) {
   const page = surfaceName();
-  if (mayPromptConsent(page, currentScreen())) {
-    openBanner();
-  } else {
-    const stopWatching = onScreenChange((screenId) => {
-      if (getConsent(window.localStorage) !== null) { stopWatching(); return; }
-      if (!mayPromptConsent(page, screenId)) return;
-      stopWatching();
-      openBanner();
-    });
-  }
+  // First appearance: (re)offer only where allowed, retract on a play screen.
+  const applyBannerAction = (screenId) => {
+    const action = consentBannerAction(page, screenId);
+    if (action === "prompt") openBanner();
+    else if (action === "retract") retractBanner();
+    // "hold": leave the banner exactly as it is (a join/setup form).
+  };
+  applyBannerAction(currentScreen());
+  // #6: keep watching for the WHOLE undecided lifetime — do NOT unsubscribe
+  // after the first prompt. That is what lets the banner retract when a round
+  // starts and reoffer when the reveal/lobby returns, instead of floating over
+  // the panorama. The watch stops only once a choice is finally recorded.
+  const stopWatching = onScreenChange((screenId) => {
+    if (getConsent(window.localStorage) !== null) { stopWatching(); return; }
+    applyBannerAction(screenId);
+  });
 } else {
   // Returning visitor with a stored choice. init() only loads PostHog if they
   // had accepted; stampRelease registers the deploy super properties once the

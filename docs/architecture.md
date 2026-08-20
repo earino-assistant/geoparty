@@ -95,6 +95,17 @@ every existing catch, skip, toast and fallback is untouched; a failed
 construction returns a stub viewer whose `moveTo` always rejects, so the
 `if (viewer)` guards that already existed handle it.
 
+Two round-transition behaviors also live entirely inside `viewer-ui.js`
+(overnight #4/#5): an `anchor`/`resume` load resets the view and drops an
+opaque `.pano-cover` over the container **before** the move, lifting it only
+when the new image actually arrives (a genuine failure leaves it up — the
+caller's failure overlay / map fallback takes over), so the up-to-20 s load
+never exposes the previous round's street; and the movement lever
+(`setMoveAllowed`) records whether its `activateComponent` calls stuck and
+retries — via a short internal timer and `reassertMove()`, which the active-
+round render loops call every render — so a transient activation failure can
+no longer silently strand the movement controls for the round.
+
 Release stamping: `.github/workflows/pages.yml` writes `release.json` into
 the deploy artifact (never committed — it is in `.gitignore`), and
 `consent.js` registers `release`/`commit`/`deployed_at` as super properties
@@ -147,6 +158,10 @@ rooms/KWPF
     twist          G2 { id } — written with the round-start patch by the
                    round starter; every other device READS it, never redraws
     pose           { bearing, center, zoom }   ≤4 writes/s while exploring
+                   (validated by `game.js#sanitizePose` before EVERY write and
+                   TV apply — a viewer read mid-navigation can hand back a NaN
+                   center/zoom, and one NaN would make RTDB reject the whole
+                   multi-path patch; a bad pose is dropped, the rest lands)
     liveGuess      { lat, lng }                ≤4/s while aiming (preview only)
     liveView       { lat, lng, zoom }          ≤4/s guess-map framing
     truth          { lat, lng, name }          written ONLY at reveal
@@ -171,6 +186,17 @@ Head-to-head differs: `mode: "h2h"`, `hostTeam` (rotates to the winner),
 is optional in this mode: every phone renders its own reveal map and shows
 rivals' live pins, so two people can play over the internet with no shared
 screen (the phones adapt copy via `screenAttached` on `screenHeartbeat`).
+
+`settings` also carries `autoSubmitOnTimeout` (overnight #2, h2h only):
+`false` (the default — absent/legacy/garbage all normalize to `false` via
+`h2h.js#normalizeAutoSubmit`) is "wait for players" — the round clock never
+auto-locks a pinless zero-score forfeit and the host never force-sweeps on
+the clock; an out-of-time player with no pin gets a voluntary **give-up**
+affordance instead (a normal forfeit; an armed SUPER SURE still burns). `true`
+reproduces the legacy auto-lock/forfeit/host-sweep exactly. The decision
+logic is pure: `h2h.js#expiryConduct` (what to do at the buzzer, both modes)
+and `#canGiveUp`. Couch (guess map after the buzzer) and Daily/Hard
+(doctrine-fixed clocks) are unaffected.
 
 ```
 round
@@ -287,6 +313,19 @@ round would hang forever. The guard in `player-ui.js onState()` closes it:
 any phone that observes `phase === roundActive` with a complete result set
 pushes the reveal flip (once per round, duplicates harmless). The
 regression test is `tests/h2h.test.js` ("deadlock regression").
+
+### The next-game handoff stomp (fixed — keep the guard)
+
+When the winner opens the "your game now" setup panel (`p-setup`) at game
+over, the OLD room is still `phase: gameOver` and its subscription is still
+live. A stray echo of that state (another phone's heartbeat, a Firebase
+re-delivery) used to re-render the game-over screen over the open panel,
+forcing the winner to tap "Set up the next game" again. Two guards close it
+(overnight #3): `h2h.js#stompsHandoff(phase, shownScreen)` — pure, tested —
+suppresses a `gameOver` render while `p-setup` is shown, and `createNextGame`
+sets `switchingRooms = true` **before** its async room-code search so no old-
+room echo is processed during the await. The `nextRoom`-follow and
+team-vanished guards still run first, so neither is affected.
 
 ## Phase machines
 

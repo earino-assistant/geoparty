@@ -265,3 +265,27 @@ export function standings(teams) {
   return teamIds(teams).map((id) => ({ id, ...teams[id] }))
     .sort((a, b) => b.total - a.total);
 }
+
+/* A MapillaryJS viewer pose — {bearing, center:[x,y], zoom} — is written into
+ * live room state (couch: round/pose; h2h: round/live/<tid>/pose) and mirrored
+ * onto the TV. A viewer read mid-navigation can hand back a NaN/Infinity center
+ * coordinate or zoom, and Firebase rejects an ENTIRE multi-path update when any
+ * value is non-finite ("update failed: values argument contains NaN in property
+ * rooms.…round.live.t1.pose.center.0"). One bad center would therefore drop the
+ * whole live patch — the pin, the phase flip, everything.
+ *
+ * sanitizePose validates a pose before it is written OR applied: a fully finite
+ * pose passes through as a fresh copy (so a caller can't alias room state), and
+ * anything non-finite or structurally wrong (missing/short center, NaN bearing/
+ * zoom, nullish) returns null so writers simply omit the pose and TV appliers
+ * skip it — the rest of the patch/frame is untouched. Pure — tested in
+ * tests/game.test.js. */
+export function sanitizePose(pose) {
+  if (!pose || typeof pose !== "object") return null;
+  const { bearing, center, zoom } = pose;
+  if (!Number.isFinite(bearing)) return null;
+  if (!Array.isArray(center) || center.length !== 2) return null;
+  if (!Number.isFinite(center[0]) || !Number.isFinite(center[1])) return null;
+  if (!Number.isFinite(zoom)) return null;
+  return { bearing, center: [center[0], center[1]], zoom };
+}

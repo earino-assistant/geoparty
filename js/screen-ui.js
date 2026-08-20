@@ -16,6 +16,7 @@ import {
   teamIds,
   standings,
   showdownResults,
+  sanitizePose,
 } from "./game.js";
 import {
   H2H_SCREEN_IDS,
@@ -37,7 +38,9 @@ import { twistHudTag, twistCard } from "./twist.js";
 import { adjustedPoints, superSureLabel } from "./supersure.js";
 import { TV_VIAS, screenJoinVia } from "./tvlink.js";
 import { countdownTick, motionDuration, animFraction } from "./fx.js";
-import { initSound, playSound, prefersReducedMotion, stampFlash } from "./fx-ui.js";
+import {
+  initSound, playSound, prefersReducedMotion, stampFlash, spawnConfetti,
+} from "./fx-ui.js";
 import { medalForDistance } from "./records.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
@@ -305,10 +308,14 @@ function destroyViewer() {
 }
 
 function applyPose(pose) {
-  if (!viewer || !pose) return;
+  if (!viewer) return;
+  // Guard the applier too: a legacy/racing writer could still hold a non-finite
+  // pose, and setCenter([NaN, …]) throws inside the SDK.
+  const p = sanitizePose(pose);
+  if (!p) return;
   try {
-    if (Array.isArray(pose.center)) viewer.setCenter(pose.center);
-    if (typeof pose.zoom === "number") viewer.setZoom(pose.zoom);
+    viewer.setCenter(p.center);
+    viewer.setZoom(p.zoom);
   } catch { /* viewer between images; next pose write catches up */ }
 }
 
@@ -994,7 +1001,13 @@ function renderGameOver(state) {
   if (!confettiDone) {
     confettiDone = true;
     playSound("fanfare"); // S4: podium + confetti get their chord
-    spawnConfetti();
+    // #8: a Crown Night champion (first-to-3) earns the richer gold burst;
+    // an ordinary game winner gets the colorful one. Seeded per game so the
+    // loop is stable. renderTvNight already recomputed the night bump.
+    const winnerId = state.hostTeam || gameWinner(state.teams, roomCode);
+    const night = bumpNight(state.night || defaultNight(), winnerId);
+    const tier = champion(night) ? "champion" : "win";
+    spawnConfetti($("confetti"), { seed: `${roomCode}:${winnerId}`, tier });
   }
 }
 
@@ -1018,20 +1031,6 @@ function renderTvNight(state) {
     const line = tallyLineText(night, state.teams);
     tallyEl.textContent = line;
     tallyEl.classList.toggle("hidden", !line);
-  }
-}
-
-function spawnConfetti() {
-  const wrap = $("confetti");
-  wrap.innerHTML = "";
-  const colors = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a", "#f4f4f6"];
-  for (let i = 0; i < 90; i++) {
-    const bit = document.createElement("i");
-    bit.style.left = `${(i * 137.5) % 100}%`;
-    bit.style.background = colors[i % colors.length];
-    bit.style.animationDuration = `${3 + (i % 7) * 0.55}s`;
-    bit.style.animationDelay = `${(i % 11) * 0.35}s`;
-    wrap.appendChild(bit);
   }
 }
 

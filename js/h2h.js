@@ -220,6 +220,84 @@ export function initialH2hRoomState(settings, teams, hostTeam) {
   };
 }
 
+/* ================================================================
+ * Round-timer expiry conduct (overnight bundle #2). Historically the h2h
+ * round timer auto-locked a zero-point forfeit on every phone that hadn't
+ * pinned, and the host phone force-swept stragglers — a hard cut nobody chose.
+ * `autoSubmitOnTimeout` makes that an explicit, opt-in room setting; the
+ * DEFAULT is OFF ("wait for players"), and OFF surfaces a voluntary give-up
+ * instead of a forced forfeit. Couch (guess map after the buzzer) and Daily/
+ * Hard (doctrine-fixed clocks) are untouched — this only governs h2h.
+ * ================================================================ */
+
+// Absent / legacy / garbage → false, so an existing room and an un-upgraded
+// client both read OFF (the safe default). Only a strict `true` opts in.
+export function normalizeAutoSubmit(value) {
+  return value === true;
+}
+
+/* What a phone should do at/after the round clock runs out. Pure so both modes
+ * are tested without a live room. Mirrors the legacy tick decisions exactly
+ * when autoSubmit is ON.
+ *   autoSubmit  the room's normalized autoSubmitOnTimeout
+ *   expired     the round clock has passed 0 (endsAt && now >= endsAt)
+ *   hasResult   this phone already submitted this round (never re-acts)
+ *   isHost      this device holds host authority
+ *   overGrace   now > endsAt + FORFEIT_GRACE_MS   (host sweep window)
+ *   overGrace3  now > endsAt + FORFEIT_GRACE_MS*3 (host-died failover window)
+ * Returns { autoLock, hostSweep, forceSweep, offerGiveUp }. */
+export function expiryConduct({
+  autoSubmit, expired, hasResult, isHost, overGrace, overGrace3,
+}) {
+  if (!autoSubmit) {
+    // Wait-for-players: nothing is auto-locked and the clock never force-sweeps.
+    // A phone with no result yet, once the clock is up, gets a give-up option.
+    return {
+      autoLock: false, hostSweep: false, forceSweep: false,
+      offerGiveUp: expired === true && hasResult !== true,
+    };
+  }
+  // Auto-lock mode reproduces the legacy behavior byte for byte:
+  //   left<=0 & no result           → this phone auto-locks (forfeit if pinless)
+  //   host & past grace             → host sweeps remaining stragglers
+  //   non-host with a result & ×3   → steps up when the host's own phone died
+  return {
+    autoLock: expired === true && hasResult !== true,
+    hostSweep: isHost === true && overGrace === true,
+    forceSweep: isHost !== true && hasResult === true && overGrace3 === true,
+    offerGiveUp: false,
+  };
+}
+
+// May this phone voluntarily forfeit the current h2h round? Only in
+// wait-for-players mode — auto-lock mode ends the round on the clock — while
+// the round is live and this phone has no result yet.
+export function canGiveUp({ autoSubmit, phase, hasResult }) {
+  return autoSubmit !== true && phase === "roundActive" && hasResult !== true;
+}
+
+/* Next-game handoff guard (overnight bundle #3). When the winner opens the
+ * "your game now" setup panel (screen p-setup) at game over, the OLD room is
+ * still phase "gameOver" and its live subscription is still attached. A stray
+ * echo of that state — another phone's heartbeat, a Firebase re-delivery —
+ * must NOT re-render the game-over screen over the open handoff panel and make
+ * the winner tap the button again. True when an incoming render for `phase`
+ * would stomp the open handoff setup. */
+export function stompsHandoff(phase, shownScreen) {
+  return shownScreen === "p-setup" && phase === "gameOver";
+}
+
+// Reveal-time forfeit count (reveal_shown.forfeits): how many teams closed the
+// round with no pin — a swept/timed-out/gave-up straggler. Aggregate only.
+export function forfeitCount(round) {
+  const results = (round && round.results) || {};
+  let n = 0;
+  for (const id of Object.keys(results)) {
+    if (results[id] && !results[id].guess) n++;
+  }
+  return n;
+}
+
 // Teams carried into the next game: same slots, names and devices, zeroed
 // scores. joinedAt survives so lobby ordering stays familiar.
 export function carryTeams(teams) {

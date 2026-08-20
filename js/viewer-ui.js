@@ -187,6 +187,7 @@ function stubViewer(surface, errorClass) {
     noteReanchor() {},
     session: () => null,
     setMoveAllowed(allowed) { this.moveEnabled = allowed === true; },
+    reassertMove() {},
     resize() {},
     destroy() {},
   };
@@ -258,6 +259,33 @@ function instrument({ surface, container, viewer }) {
   let expectImage = null;      // image id our own moveTo is steering toward
   let destroyed = false;
 
+  // #5 movement-lever state. activateComponent can throw when the viewer is not
+  // laid out yet; historically that was swallowed and the movement controls
+  // stayed dead for the whole round. Now a failed apply schedules one retry AND
+  // reassertMove()/setMoveAllowed on a later render re-drives it.
+  let desiredMove = false;
+  let moveApplied = true;
+  let moveRetryTimer = null;
+  function applyMove() {
+    let ok = true;
+    for (const name of ["direction", "sequence", "keyboard"]) {
+      try {
+        if (desiredMove) viewer.activateComponent(name);
+        else viewer.deactivateComponent(name);
+      } catch { ok = false; /* SDK build without this component, or not ready */ }
+    }
+    moveApplied = ok;
+    if (!ok && moveRetryTimer === null && typeof setTimeout !== "undefined") {
+      // A component wasn't ready (viewer mid-layout): retry once shortly so a
+      // transient failure doesn't strand movement for the round.
+      moveRetryTimer = setTimeout(() => {
+        moveRetryTimer = null;
+        if (!destroyed && !moveApplied) applyMove();
+      }, 300);
+    }
+    return ok;
+  }
+
   const on = (name, fn) => {
     try { viewer.on(name, fn); } catch { /* SDK build without this event */ }
   };
@@ -309,6 +337,44 @@ function instrument({ surface, container, viewer }) {
   const canvasTimer = typeof setTimeout !== "undefined"
     ? setTimeout(attachCanvas, 1500) : null;
 
+  /* Round-transition cover (§ overnight bundle #4). A round-anchor moveTo can
+   * take up to 20s (SLOW_TIMEOUT_MS); until it settles, the container still
+   * holds the PREVIOUS round's panorama at the previous zoom. Left visible,
+   * latency exposes stale state — the player studies last round's street.
+   * So an anchor/resume load resets the view and drops an opaque cover over the
+   * pano BEFORE the move, and lifts it only when the new image actually
+   * arrives. A genuine failure leaves the cover up (the caller's failure
+   * overlay/map fallback takes over) — the stale pano is never re-exposed.
+   * The cover lives INSIDE the container, below the HUD/action-bar siblings,
+   * so the timer and Make Guess stay usable while imagery loads. */
+  let coverEl = null;
+  function ensureCover() {
+    if (coverEl) return coverEl;
+    if (!el || typeof document === "undefined" || !document.createElement) {
+      return null;
+    }
+    coverEl = document.createElement("div");
+    coverEl.className = "pano-cover hidden";
+    if (el.appendChild) el.appendChild(coverEl);
+    return coverEl;
+  }
+  function showCover() {
+    const c = ensureCover();
+    if (c && c.classList) c.classList.remove("hidden");
+  }
+  function hideCover() {
+    if (coverEl && coverEl.classList) coverEl.classList.add("hidden");
+  }
+  // Neutralize the previous round's zoom/center so the new image never inherits
+  // it. SDK-tolerant: a viewer between images may not accept these yet.
+  function resetView() {
+    try { if (viewer.setCenter) viewer.setCenter([0.5, 0.5]); } catch { /* between images */ }
+    try { if (viewer.setZoom) viewer.setZoom(0); } catch { /* between images */ }
+  }
+  // Only round-anchor transitions cover: nav (user movement), follow (TV
+  // mirroring), seed/hero (decorative) must never blank the pano.
+  const coversRound = (purpose) => purpose === "anchor" || purpose === "resume";
+
   // One attempt: timed, timeout-raced, classified, exception-captured.
   // NEVER rejects — it resolves a result record, so the skip loop and the
   // single-shot path can both decide what to emit.
@@ -323,6 +389,11 @@ function instrument({ surface, container, viewer }) {
       : imageryTimeoutMs(purpose);
     let timedOut = false;
     let settled = false;
+
+    // #4: reset the view and cover the old pano BEFORE a round-anchor move, so
+    // the previous round's street (at the previous zoom) is never on screen
+    // while the new image loads. The cover lifts only when the image arrives.
+    if (coversRound(purpose)) { resetView(); showCover(); }
 
     const injected = c && typeof c.moveTo === "function"
       ? c.moveTo(imageId, purpose)
@@ -362,6 +433,8 @@ function instrument({ surface, container, viewer }) {
 
       real.then(
         () => {
+          // The image actually arrived: reveal it (whether on time or late).
+          if (coversRound(purpose)) hideCover();
           if (settled) {
             // The SDK finished late: correct the record rather than leave a
             // timeout standing against a load that actually worked (§6.1).
@@ -376,6 +449,9 @@ function instrument({ surface, container, viewer }) {
           finish(true, null);
         },
         (err) => {
+          // A genuine rejection leaves the cover UP — the caller's failure
+          // overlay / "guess from the map" fallback takes the surface; a stale
+          // pano must never be re-exposed on a failed round-anchor load.
           if (settled) return;   // already timed out; the timeout owns it
           settled = true;
           finish(false, err);
@@ -439,15 +515,19 @@ function instrument({ surface, container, viewer }) {
     // G2 Frozen / G6 Hard: toggle street navigation mid-surface by
     // (de)activating the direction/sequence/keyboard components. The ONLY
     // legal place to touch the viewer's components (CLAUDE.md). Idempotent and
-    // SDK-build-tolerant.
+    // SDK-build-tolerant; a failed activation retries (see applyMove) so the
+    // movement controls can't be silently stranded for the round.
     setMoveAllowed(allowed) {
       iv.moveEnabled = allowed === true;
-      for (const name of ["direction", "sequence", "keyboard"]) {
-        try {
-          if (allowed) viewer.activateComponent(name);
-          else viewer.deactivateComponent(name);
-        } catch { /* SDK build without this component */ }
-      }
+      desiredMove = allowed === true;
+      applyMove();
+    },
+
+    // Re-drive the movement lever on a later active-round render. A no-op when
+    // the last apply already stuck (so it never re-toggles a healthy viewer);
+    // it re-applies only when a previous activation had thrown.
+    reassertMove() {
+      if (!moveApplied) applyMove();
     },
 
     resize() {
@@ -459,10 +539,13 @@ function instrument({ surface, container, viewer }) {
       destroyed = true;
       iv.endRound();
       if (canvasTimer) clearTimeout(canvasTimer);
+      if (moveRetryTimer) { clearTimeout(moveRetryTimer); moveRetryTimer = null; }
       if (canvas) canvas.removeEventListener("webglcontextlost", onContextLost);
       if (el && el.removeEventListener) {
         el.removeEventListener("pointerdown", onPointerDown, true);
       }
+      if (coverEl && coverEl.remove) { try { coverEl.remove(); } catch { /* gone */ } }
+      coverEl = null;
       try { viewer.remove(); } catch { /* already gone */ }
       if (typeof window !== "undefined" && Array.isArray(window.__gpViewers)) {
         const i = window.__gpViewers.indexOf(iv);

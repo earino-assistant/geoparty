@@ -10,6 +10,7 @@ import {
   isCalmScreen,
   utilitiesVisible,
   mayPromptConsent,
+  consentBannerAction,
 } from "../js/chrome.js";
 
 /* ---------------- calm vs play ---------------- */
@@ -128,4 +129,40 @@ test("every prompt screen is a calm screen — the two rules never disagree", ()
       assert.equal(isCalmScreen(id), true, `${page}/${id}`);
     }
   }
+});
+
+/* ---------------- #6 undecided-banner retract on play ---------------- */
+
+test("consentBannerAction: retracts the moment a play screen shows", () => {
+  // The whole fix: an undecided banner may not float over the round.
+  for (const [page, id] of [
+    ["player", "p-round"], ["player", "p-guess"],
+    ["host", "h-round"], ["host", "h-guess"],
+    ["daily", "d-round"], ["daily", "d-guess"],
+  ]) {
+    assert.equal(consentBannerAction(page, id), "retract", `${page}/${id}`);
+  }
+});
+
+test("consentBannerAction: prompts on the calm promptable screens", () => {
+  assert.equal(consentBannerAction("player", "p-lobby"), "prompt");
+  assert.equal(consentBannerAction("player", "p-reveal"), "prompt");
+  assert.equal(consentBannerAction("host", "h-gameover"), "prompt");
+  assert.equal(consentBannerAction("landing", null), "prompt");
+  assert.equal(consentBannerAction("daily", "d-intro"), "prompt");
+});
+
+test("consentBannerAction: holds on a calm-but-not-promptable join/setup form", () => {
+  // p-home / p-setup / h-setup / s-entry were never prompt moments; the banner
+  // is only forcibly cleared on play, not on these.
+  assert.equal(consentBannerAction("player", "p-home"), "hold");
+  assert.equal(consentBannerAction("player", "p-setup"), "hold");
+  assert.equal(consentBannerAction("host", "h-setup"), "hold");
+  assert.equal(consentBannerAction("tv", "s-entry"), "hold");
+});
+
+test("consentBannerAction: an unknown surface never prompts (holds)", () => {
+  assert.equal(consentBannerAction("bogus", "whatever"), "hold");
+  // …but a play screen still retracts regardless of surface — a fail-safe.
+  assert.equal(consentBannerAction("bogus", "p-round"), "retract");
 });

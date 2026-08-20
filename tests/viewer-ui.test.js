@@ -140,7 +140,9 @@ function installFakeMapillary() {
     }
     on(name, fn) { (this.handlers[name] = this.handlers[name] || []).push(fn); }
     emit(name, ev) { for (const fn of this.handlers[name] || []) fn(ev); }
-    moveTo() { return Promise.resolve(); }   // chaos overrides this in tests
+    moveTo() { (this.calls = this.calls || []).push("moveTo"); return Promise.resolve(); }
+    setCenter(c) { (this.calls = this.calls || []).push("setCenter"); this.center = c; }
+    setZoom(z) { (this.calls = this.calls || []).push("setZoom"); this.zoom = z; }
     remove() { this.removed = true; }
     resize() {}
     activateComponent(name) { (this.activated = this.activated || []).push(name); }
@@ -667,5 +669,154 @@ test("D: a production page never exposes the __gpViewers harness handle", (t) =>
   delete window.__gpViewers;
   const iv = makeHostViewer();
   assert.equal(window.__gpViewers, undefined);
+  iv.destroy();
+});
+
+/* ================================================================
+ * #4 — round-transition cover: reset + cover before the move, uncover on
+ * arrival, stay covered on failure (stale pano never re-exposed)
+ * ================================================================ */
+
+const coverOf = (cid) => document.getElementById(cid).querySelector(".pano-cover");
+const makeCoverViewer = (cid) => viewerUi.createViewer({
+  surface: "host", container: cid, moveAllowed: true, component: HOST_COMPONENT,
+});
+
+test("#4: an anchor load resets the view and covers the pano BEFORE the move",
+  async () => {
+    const cid = "cover-order";
+    const iv = makeCoverViewer(cid);
+    const seen = {};
+    window.__gpChaos.moveTo = () => {
+      const cover = coverOf(cid);
+      seen.coverUp = !!(cover && !cover.classList.contains("hidden"));
+      seen.resetCalls = (iv.viewer.calls || []).slice();
+      return Promise.resolve();
+    };
+    await iv.moveTo("123456789012345", "anchor");
+    assert.equal(seen.coverUp, true, "the cover is up while the image loads");
+    assert.deepEqual(seen.resetCalls, ["setCenter", "setZoom"],
+      "zoom/center are reset before the move, so the new image starts neutral");
+    assert.ok(coverOf(cid).classList.contains("hidden"),
+      "the cover lifts once the image actually arrives");
+    iv.destroy();
+  });
+
+test("#4: a failed anchor load leaves the cover UP (no stale pano)", async () => {
+  const cid = "cover-fail";
+  window.__gpChaos.moveTo = () => Promise.reject(new Error("Image does not exist"));
+  const iv = makeCoverViewer(cid);
+  await iv.moveTo("123456789012345", "anchor").catch(() => {});
+  const cover = coverOf(cid);
+  assert.ok(cover && !cover.classList.contains("hidden"),
+    "on failure the caller's overlay/map fallback takes over, cover stays up");
+  iv.destroy();
+});
+
+test("#4: a late anchor success lifts the cover when the image finally lands",
+  async () => {
+    const cid = "cover-late";
+    window.__gpChaos.timeoutMs = 5;
+    window.__gpChaos.moveTo = () => new Promise((res) => setTimeout(res, 40));
+    const iv = makeCoverViewer(cid);
+    await iv.moveTo("123456789012345", "anchor").catch(() => {});
+    assert.ok(!coverOf(cid).classList.contains("hidden"),
+      "still covered while the load is only a timeout so far");
+    await new Promise((r) => setTimeout(r, 80));
+    assert.ok(coverOf(cid).classList.contains("hidden"),
+      "the late SDK success reveals the image");
+    iv.destroy();
+  });
+
+test("#4: nav and follow loads never cover the pano", async () => {
+  for (const purpose of ["nav", "follow"]) {
+    const cid = `cover-none-${purpose}`;
+    const iv = makeCoverViewer(cid);
+    await iv.moveTo("123456789012345", purpose);
+    const cover = coverOf(cid);
+    assert.ok(!cover || cover.classList.contains("hidden"),
+      `${purpose} must not blank the pano`);
+    iv.destroy();
+  }
+});
+
+test("#4: the round-anchor skip loop keeps the cover up across dead entries",
+  async () => {
+    // Dead first entry (skipped), good second: the cover must stay up through
+    // the skip and lift only when a real image lands.
+    const cid = "cover-skip";
+    const dead = new Set(["dead-a"]);
+    window.__gpChaos.moveTo = (id) => (dead.has(id)
+      ? Promise.reject(new Error("Node does not exist"))
+      : Promise.resolve());
+    const iv = makeCoverViewer(cid);
+    const s = sampler("dead-a", "good-1");
+    const { entry } = await viewerUi.loadRoundImage(s, iv, "anchor");
+    assert.equal(entry.image_id, "good-1");
+    assert.ok(coverOf(cid).classList.contains("hidden"),
+      "the cover lifts on the entry that loaded, not the skipped dead one");
+    iv.destroy();
+  });
+
+/* ================================================================
+ * #5 — movement-lever hardening: a transient activation failure must
+ * recover on a later render/retry, never strand the controls for the round
+ * ================================================================ */
+
+function throwOnceActivate(raw) {
+  let throwsLeft = 1;
+  const real = raw.activateComponent.bind(raw);
+  raw.activateComponent = (name) => {
+    if (throwsLeft-- > 0) throw new Error("component not laid out yet");
+    real(name);
+  };
+}
+
+test("#5: a failed activation recovers on the next render via reassertMove", () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  throwOnceActivate(raw);
+  iv.setMoveAllowed(true);
+  assert.equal(iv.moveEnabled, true);
+  assert.ok(!(raw.activated || []).includes("direction"),
+    "the throwing component did not activate on the first attempt");
+  iv.reassertMove(); // a later active-round render re-drives the lever
+  assert.ok((raw.activated || []).includes("direction"),
+    "the movement control recovers on the next render, not stranded for the round");
+  iv.destroy();
+});
+
+test("#5: a failed activation also auto-retries without an explicit render", async () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  throwOnceActivate(raw);
+  iv.setMoveAllowed(true);
+  assert.ok(!(raw.activated || []).includes("direction"));
+  await new Promise((r) => setTimeout(r, 350));
+  assert.ok((raw.activated || []).includes("direction"),
+    "the scheduled retry recovered the stranded control");
+  iv.destroy();
+});
+
+test("#5: reassertMove is a no-op once the lever has stuck (no re-toggle churn)", () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  iv.setMoveAllowed(true);
+  const count = (raw.activated || []).length;
+  iv.reassertMove();
+  iv.reassertMove();
+  assert.equal((raw.activated || []).length, count,
+    "a healthy lever is not re-activated on every render");
+  iv.destroy();
+});
+
+test("#5: Frozen stays frozen — deactivate is not undone by a reassert", () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  iv.setMoveAllowed(false);      // G2 Frozen for this round
+  assert.deepEqual(raw.deactivated, ["direction", "sequence", "keyboard"]);
+  iv.reassertMove();             // a mid-round render must not re-enable it
+  assert.equal(iv.moveEnabled, false);
+  assert.ok(!(raw.activated || []).includes("direction"));
   iv.destroy();
 });

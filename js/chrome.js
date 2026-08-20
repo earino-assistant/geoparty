@@ -82,3 +82,23 @@ export function mayPromptConsent(page, screenId) {
   if (allowed === null) return true;
   return allowed.includes(screenId);
 }
+
+/* Overnight bundle #6: an undecided consent banner must never linger over
+ * active play. Before, the banner opened at the first calm promptable screen
+ * and then STOPPED watching — so a transition into a round left the GDPR dialog
+ * floating over the panorama at z3000. This folds the whole "where may the
+ * undecided banner be, right now?" rule into one pure call, so consent.js can
+ * react to every screen change declaratively:
+ *   "prompt"  — a calm, promptable screen: (re)offer the choice here.
+ *   "retract" — a play screen: hide it now, recording NO choice, and reoffer
+ *               at the next promptable calm screen (privacy-safe by design —
+ *               a player who never idles is simply never asked, never captured).
+ *   "hold"    — any other calm-but-not-promptable screen (a join/setup form):
+ *               leave the banner as it is; the join hotspot was never a prompt
+ *               moment, and a play screen is the only thing we forcibly clear.
+ * The consent GATE is untouched: this only governs the ASK's visibility. */
+export function consentBannerAction(page, screenId) {
+  if (isPlayScreen(screenId)) return "retract";
+  if (mayPromptConsent(page, screenId)) return "prompt";
+  return "hold";
+}

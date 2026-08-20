@@ -12,6 +12,9 @@ import {
   guessMapHintLines,
   lockNowEstimate,
   lockButtonLabel,
+  panoHintCard,
+  shouldHintSuperSure,
+  SUPER_SURE_HINT,
 } from "../js/hints.js";
 import { scoreForDistance, timeBonus, bonusWindowMs } from "../js/game.js";
 
@@ -216,4 +219,44 @@ test("lockButtonLabel: the label never restates the SUPER SURE rule", () => {
 test("lockButtonLabel: thousands separators, so 3,240 never reads as 3240", () => {
   const parts = lockButtonLabel(LOCK_LABELS.h2h, { points: 12345 }, false);
   assert.equal(parts.sub, `≈ +${(12345).toLocaleString()}`);
+});
+
+/* ---------------- #7 movement-aware pano hint ---------------- */
+
+test("panoHintCard: movement-allowed copy points at the arrows, two lines", () => {
+  const moving = panoHintCard(true);
+  assert.equal(moving.lines.length, 2, "stays within the two-line budget");
+  assert.match(moving.lines.join(" "), /arrow/i, "teaches the movie/movement arrows");
+  assert.match(moving.lines.join(" "), /Make Guess/);
+});
+
+test("panoHintCard(false) is the pre-#7 copy, byte-for-byte", () => {
+  assert.deepEqual(panoHintCard(false).lines, [
+    "Look around 👀 — figure out where you are.",
+    "Then Make Guess.",
+  ]);
+  // A no-movement round must not tell the player to walk the street.
+  assert.ok(!/arrow|walk/i.test(panoHintCard(false).lines.join(" ")));
+});
+
+/* ---------------- #7 SUPER SURE discoverability ---------------- */
+
+test("shouldHintSuperSure: from round 2 on, unspent, h2h/couch only", () => {
+  assert.equal(shouldHintSuperSure({ mode: "h2h", roundNumber: 2, available: true }), true);
+  assert.equal(shouldHintSuperSure({ mode: "couch", roundNumber: 5, available: true }), true);
+  // Never round 1 (deliberately calm).
+  assert.equal(shouldHintSuperSure({ mode: "h2h", roundNumber: 1, available: true }), false);
+  // Never once the bet is spent.
+  assert.equal(shouldHintSuperSure({ mode: "h2h", roundNumber: 3, available: false }), false);
+  // NEVER on the Daily (no bet exists there).
+  assert.equal(shouldHintSuperSure({ mode: "daily", roundNumber: 3, available: true }), false);
+});
+
+test("SUPER SURE hint points at the chip and does NOT re-explain the rule", () => {
+  const copy = `${SUPER_SURE_HINT.title} ${SUPER_SURE_HINT.lines.join(" ")}`;
+  assert.match(copy, /🔥/, "points at the chip");
+  // §5 one-place rule: the ×2 / 0 mechanic is only ever in SUPER_SURE_SHEET.
+  assert.ok(!/×2|x2|score 0|anyone closer/i.test(copy),
+    "the nudge must not restate the mechanic");
+  assert.ok(SUPER_SURE_HINT.lines.length <= 2, "within the hint budget");
 });

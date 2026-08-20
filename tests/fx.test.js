@@ -19,6 +19,11 @@ import {
   soundSpec,
   motionDuration,
   animFraction,
+  confettiSpec,
+  CONFETTI_COLORS,
+  CONFETTI_GOLD,
+  CONFETTI_TV_COUNT,
+  CONFETTI_MAX,
 } from "../js/fx.js";
 
 // localStorage-shaped in-memory store (same double as analytics.test.js).
@@ -186,4 +191,66 @@ test("animFraction: clamped, monotonic ease-out", () => {
   }
   // Ease-OUT: the first half covers more ground than the second.
   assert.ok(animFraction(500, 1000) > 0.5);
+});
+
+/* ---------------- #8 confetti ---------------- */
+
+test("confettiSpec: deterministic — same inputs, identical output", () => {
+  const a = confettiSpec({ seed: "ROOMAB:t1", tier: "win" });
+  const b = confettiSpec({ seed: "ROOMAB:t1", tier: "win" });
+  assert.deepEqual(a, b);
+  // A numeric seed is accepted too, and is stable.
+  assert.deepEqual(confettiSpec({ seed: 42, tier: "win" }),
+    confettiSpec({ seed: 42, tier: "win" }));
+});
+
+test("confettiSpec: different seeds give different bursts", () => {
+  const a = confettiSpec({ seed: "AAA", tier: "win" });
+  const b = confettiSpec({ seed: "BBB", tier: "win" });
+  assert.notDeepEqual(a, b);
+});
+
+test("confettiSpec: reduced motion yields NO confetti", () => {
+  assert.deepEqual(confettiSpec({ seed: "X", tier: "champion", reducedMotion: true }), []);
+  assert.deepEqual(confettiSpec({ seed: "X", tier: "win", reducedMotion: true }), []);
+});
+
+test("confettiSpec: every strip is within bounds", () => {
+  for (const tier of ["win", "champion"]) {
+    for (const b of confettiSpec({ seed: `seed-${tier}`, tier })) {
+      assert.ok(b.left >= 0 && b.left <= 100, "left");
+      assert.ok(b.durationS > 0, "durationS positive");
+      assert.ok(b.delayS >= 0, "delayS non-negative");
+      assert.ok(b.sizeScale > 0, "sizeScale positive");
+      assert.ok(b.spinDeg >= 360, "spinDeg at least one turn");
+      assert.ok(Number.isFinite(b.driftVw), "driftVw finite");
+    }
+  }
+});
+
+test("confettiSpec: each tier draws only from its own palette", () => {
+  for (const b of confettiSpec({ seed: "win-seed", tier: "win" })) {
+    assert.ok(CONFETTI_COLORS.includes(b.color), b.color);
+  }
+  for (const b of confettiSpec({ seed: "champ-seed", tier: "champion" })) {
+    assert.ok(CONFETTI_GOLD.includes(b.color), b.color);
+  }
+});
+
+test("confettiSpec: champion is visibly richer than an ordinary win", () => {
+  const win = confettiSpec({ seed: "S", tier: "win", count: 90 });
+  const champ = confettiSpec({ seed: "S", tier: "champion", count: 90 });
+  assert.equal(win.length, 90, "win uses the given count");
+  assert.ok(champ.length > win.length, "champion spawns more strips");
+  // Gold-weighting: the champion burst leans on the front (gold) palette
+  // entries far more than a uniform draw would.
+  const goldFront = champ.filter((b) => b.color === CONFETTI_GOLD[0]).length;
+  assert.ok(goldFront > champ.length / CONFETTI_GOLD.length,
+    "champion over-samples the gold end of the palette");
+});
+
+test("confettiSpec: the default count is the sparse TV loop, capped", () => {
+  assert.equal(confettiSpec({ seed: "d", tier: "win" }).length, CONFETTI_TV_COUNT);
+  assert.ok(confettiSpec({ seed: "d", tier: "champion", count: 1000 }).length
+    <= CONFETTI_MAX, "an absurd count is capped so the loop stays cheap");
 });

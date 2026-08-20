@@ -6,7 +6,7 @@
 
 import { createViewer } from "./viewer-ui.js";
 import { scrubErrorMessage } from "./imagery.js";
-import { formatCountdown, formatDistance, resultRowText, teamIds, standings } from "./game.js";
+import { formatCountdown, formatDistance, resultRowText, teamIds, standings, sanitizePose } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest, revealAceKm } from "./h2h.js";
 import { twistHudTag, twistHidesRivalPins, twistCardForRound } from "./twist.js";
 import { tallyLineText } from "./night.js";
@@ -483,14 +483,16 @@ function applyTeamFeed(p, state, round, feed, result, tid) {
   } else {
     showPanelViewer(p);
     panelStatus(p, "exploring");
-    const pose = feed && feed.pose;
+    // Guard against a non-finite pose (a racing/legacy writer): setCenter on a
+    // NaN center throws in the SDK.
+    const pose = sanitizePose(feed && feed.pose);
     if (p.viewer && pose) {
       const key = `${pose.bearing}|${JSON.stringify(pose.center)}|${pose.zoom}`;
       if (key !== p.poseKey) {
         p.poseKey = key;
         try {
-          if (Array.isArray(pose.center)) p.viewer.setCenter(pose.center);
-          if (typeof pose.zoom === "number") p.viewer.setZoom(pose.zoom);
+          p.viewer.setCenter(pose.center);
+          p.viewer.setZoom(pose.zoom);
         } catch { /* viewer between images; next write catches up */ }
       }
     }

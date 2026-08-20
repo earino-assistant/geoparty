@@ -112,6 +112,8 @@
       <div class="hud-item" id="pHudTimer">2:00</div>
     </div>
     <div class="action-bar">
+      <!-- Wait-for-players mode: out of time with no pin? Bow out cleanly. -->
+      <button id="btnPGiveUpStreet" class="btn-ghost hidden" type="button">Give up</button>
       <button id="btnOpenMap" class="btn-primary">Make Guess</button>
     </div>
   </section>
@@ -133,6 +135,7 @@
       <!-- G7 Decoy: shares the chip dock with 🔥; only while unspent + not blind. -->
       <button id="btnDecoy" class="ss-chip hidden" type="button"
               aria-label="Decoy — plant a fake pin for rivals">🎭</button>
+      <button id="btnPGiveUpMap" class="btn-ghost hidden" type="button">Give up</button>
       <button id="btnBackToStreet" class="btn-ghost">Back to street</button>
       <button id="btnLockIn" class="btn-primary" disabled>Lock It In</button>
     </div>
@@ -234,6 +237,15 @@
           <div class="seg" id="pSegMove" data-value="1">
             <button data-v="1" class="sel">Allowed</button>
             <button data-v="0">No moving</button>
+          </div>
+        </div>
+        <!-- Overnight bundle #2: what the round timer does at zero. Default is
+             "Wait for players" — no forced pinless forfeit at the buzzer. -->
+        <div class="settings-group">
+          <div class="label">When time runs out</div>
+          <div class="seg" id="pSegAutoSubmit" data-value="0">
+            <button data-v="0" class="sel">Wait for players</button>
+            <button data-v="1">Auto-lock pins</button>
           </div>
         </div>
         <!-- G2 Twists -->

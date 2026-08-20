@@ -968,7 +968,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 .podium .slot:nth-child(3) .bar { height: 13vh; background: var(--team-3); }
 .podium .slot:nth-child(4) .bar { height: 9vh; background: var(--team-4); }
 
-/* Cheap CSS-only confetti (spec §6): fixed strips falling on loop. */
+/* Cheap CSS-only confetti (spec §6): strips falling on loop. #8: js/fx.js seeds
+   per-strip fall duration/delay and two custom properties — --drift (a signed
+   horizontal sway) and --spin (a randomized total rotation) — set inline by
+   fx-ui.js#spawnConfetti, so the loop varies instead of marching in lockstep.
+   A gentle ease keeps the sway from reading mechanical. */
 .confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .confetti i {
   position: absolute;
@@ -976,11 +980,15 @@ button:disabled { opacity: 0.4; cursor: default; }
   width: 1.4vh;
   height: 2.8vh;
   opacity: 0.9;
-  animation: confetti-fall linear infinite;
+  animation: confetti-fall cubic-bezier(0.37, 0.02, 0.63, 1) infinite;
 }
 @keyframes confetti-fall {
-  0% { transform: translateY(-5vh) rotate(0deg); }
-  100% { transform: translateY(110vh) rotate(720deg); }
+  0% { transform: translate(0, -6vh) rotate(0deg); opacity: 0; }
+  8% { opacity: 0.9; }
+  100% {
+    transform: translate(var(--drift, 0), 112vh) rotate(var(--spin, 720deg));
+    opacity: 0.9;
+  }
 }
 
 /* Reveal line-draw + count-up hooks (used from JS) */
@@ -1542,6 +1550,13 @@ body:has(.action-bar) .sound-toggle {
 body[data-play="1"] .consent-settings,
 body[data-play="1"] .sound-toggle { display: none !important; }
 
+/* Overnight bundle #6 safety net: the undecided consent banner is retracted by
+   consent.js when play begins, but pin the rule in CSS too — no GDPR dialog may
+   float over a panorama or guess map at z3000 even if that JS ever fails to
+   run. It reappears on the next calm screen (data-play="0"), exactly as the
+   consent.js reoffer does. */
+body[data-play="1"] .consent-banner { display: none !important; }
+
 /* The joiner's home panel (§6.2) is the one phone screen with no action
    bar, so the corners sit low rather than dodging a bar that isn't there. */
 body[data-screen="p-home"] .consent-settings,
@@ -1825,6 +1840,19 @@ body[data-screen="p-home"] .sound-toggle {
 /* ================================================================
    Retryable imagery-degraded overlay (stabilization: review P1-3/P2-1)
    ================================================================ */
+
+/* Overnight bundle #4: the round-transition cover. Sits INSIDE the pano
+   container (below the HUD/action-bar siblings), opaque, so the previous
+   round's street is neutralized while the next image loads (a moveTo can take
+   up to 20s). viewer-ui.js lifts it only when the new image actually arrives;
+   on a failed load it stays up and the .imagery-degraded overlay / map fallback
+   takes over. Static — no motion to reduce. */
+.pano-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 500;
+  background: radial-gradient(circle at 50% 42%, #1b2647, #0b1020 72%);
+}
 
 /* Shown when a stub viewer (SDK blocked / no WebGL) or a transient timeout
    left the round with no playable panorama. It is deliberately NOT pool

@@ -30,7 +30,69 @@ import {
   revealResultLine,
   revealBoardRows,
   boardRowText,
+  sanitizePose,
 } from "../js/game.js";
+
+/* ---------------- sanitizePose (Firebase NaN pose guard) ---------------- */
+
+test("sanitizePose: a fully finite pose passes through as a fresh copy", () => {
+  const src = { bearing: 90, center: [0.4, 0.6], zoom: 1.5 };
+  const out = sanitizePose(src);
+  assert.deepEqual(out, { bearing: 90, center: [0.4, 0.6], zoom: 1.5 });
+  assert.notEqual(out, src, "returns a new object");
+  assert.notEqual(out.center, src.center, "center is a fresh array (no aliasing)");
+});
+
+test("sanitizePose: a NaN or Infinity center coordinate is rejected", () => {
+  assert.equal(sanitizePose({ bearing: 0, center: [NaN, 0.5], zoom: 0 }), null);
+  assert.equal(sanitizePose({ bearing: 0, center: [0.5, NaN], zoom: 0 }), null);
+  assert.equal(sanitizePose({ bearing: 0, center: [Infinity, 0.5], zoom: 0 }), null);
+  assert.equal(sanitizePose({ bearing: 0, center: [0.5, -Infinity], zoom: 0 }), null);
+});
+
+test("sanitizePose: a NaN/Infinity bearing or zoom is rejected", () => {
+  assert.equal(sanitizePose({ bearing: NaN, center: [0.5, 0.5], zoom: 0 }), null);
+  assert.equal(sanitizePose({ bearing: 0, center: [0.5, 0.5], zoom: NaN }), null);
+  assert.equal(sanitizePose({ bearing: 0, center: [0.5, 0.5], zoom: Infinity }), null);
+});
+
+test("sanitizePose: short, non-array, or missing center is rejected", () => {
+  assert.equal(sanitizePose({ bearing: 0, center: [0.5], zoom: 0 }), null);
+  assert.equal(sanitizePose({ bearing: 0, center: [0.5, 0.5, 0.5], zoom: 0 }), null);
+  assert.equal(sanitizePose({ bearing: 0, center: "0.5,0.5", zoom: 0 }), null);
+  assert.equal(sanitizePose({ bearing: 0, zoom: 0 }), null);
+  // The bearing-only round-start literal ({bearing:0}) has no center → null.
+  assert.equal(sanitizePose({ bearing: 0 }), null);
+});
+
+test("sanitizePose: nullish and non-object inputs are rejected, never throw", () => {
+  for (const bad of [null, undefined, 0, "", "pose", 42, true, []]) {
+    assert.equal(sanitizePose(bad), null, String(bad));
+  }
+});
+
+test("sanitizePose: no accepted pose ever carries a NaN into a patch", () => {
+  // The scan the Firebase-rejection bug demands: across a matrix of poses, any
+  // pose sanitizePose accepts must serialize with no NaN/Infinity anywhere.
+  const matrix = [
+    { bearing: 0, center: [0, 0], zoom: 0 },
+    { bearing: 359.9, center: [0.999, 0.001], zoom: 4 },
+    { bearing: NaN, center: [0.5, 0.5], zoom: 1 },
+    { bearing: 10, center: [NaN, 0.5], zoom: 1 },
+    { bearing: 10, center: [0.5, Infinity], zoom: 1 },
+    { bearing: 10, center: [0.5, 0.5], zoom: NaN },
+    null,
+    { center: [0.5, 0.5] },
+  ];
+  for (const pose of matrix) {
+    const out = sanitizePose(pose);
+    if (out === null) continue;
+    const flat = [out.bearing, out.center[0], out.center[1], out.zoom];
+    for (const n of flat) {
+      assert.ok(Number.isFinite(n), `accepted pose has non-finite ${n}`);
+    }
+  }
+});
 
 /* ---------------- haversine ---------------- */
 

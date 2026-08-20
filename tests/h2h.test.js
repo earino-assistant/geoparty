@@ -26,6 +26,11 @@ import {
   revealAceKm,
   shouldReanchorViewer,
   panoMoved,
+  normalizeAutoSubmit,
+  expiryConduct,
+  canGiveUp,
+  forfeitCount,
+  stompsHandoff,
 } from "../js/h2h.js";
 
 const teams = {
@@ -392,4 +397,92 @@ test("panoMoved: true only when the pin's pano left the anchor", () => {
   assert.equal(panoMoved(null, "img-x"), false);
   assert.equal(panoMoved("img-x", null), false);
   assert.equal(panoMoved(null, null), false);
+});
+
+/* ---------------- #2 round-timer expiry doctrine ---------------- */
+
+test("normalizeAutoSubmit: only a strict true opts in; all else is OFF", () => {
+  assert.equal(normalizeAutoSubmit(true), true);
+  for (const v of [false, undefined, null, 0, 1, "1", "true", "", {}, "on"]) {
+    assert.equal(normalizeAutoSubmit(v), false, String(v));
+  }
+});
+
+test("expiryConduct OFF (wait for players): no auto-lock or sweep, ever", () => {
+  const base = { autoSubmit: false, isHost: true, overGrace: true, overGrace3: true };
+  // Before the clock is up: nothing offered.
+  assert.deepEqual(
+    expiryConduct({ ...base, expired: false, hasResult: false }),
+    { autoLock: false, hostSweep: false, forceSweep: false, offerGiveUp: false });
+  // Expired, no result: only a voluntary give-up is offered.
+  assert.deepEqual(
+    expiryConduct({ ...base, expired: true, hasResult: false }),
+    { autoLock: false, hostSweep: false, forceSweep: false, offerGiveUp: true });
+  // Expired but already submitted: nothing (never re-acts, never sweeps).
+  assert.deepEqual(
+    expiryConduct({ ...base, expired: true, hasResult: true }),
+    { autoLock: false, hostSweep: false, forceSweep: false, offerGiveUp: false });
+});
+
+test("expiryConduct ON: reproduces the legacy auto-lock exactly", () => {
+  // A phone with no pin at the buzzer auto-locks (forfeit).
+  assert.deepEqual(
+    expiryConduct({ autoSubmit: true, expired: true, hasResult: false,
+      isHost: false, overGrace: false, overGrace3: false }),
+    { autoLock: true, hostSweep: false, forceSweep: false, offerGiveUp: false });
+  // The host past grace sweeps stragglers.
+  assert.deepEqual(
+    expiryConduct({ autoSubmit: true, expired: true, hasResult: true,
+      isHost: true, overGrace: true, overGrace3: true }),
+    { autoLock: false, hostSweep: true, forceSweep: false, offerGiveUp: false });
+  // A locked-in non-host steps up only at ×3 grace (host-died failover).
+  assert.deepEqual(
+    expiryConduct({ autoSubmit: true, expired: true, hasResult: true,
+      isHost: false, overGrace: true, overGrace3: true }),
+    { autoLock: false, hostSweep: false, forceSweep: true, offerGiveUp: false });
+  // ON never offers give-up.
+  assert.equal(
+    expiryConduct({ autoSubmit: true, expired: true, hasResult: false,
+      isHost: true, overGrace: false, overGrace3: false }).offerGiveUp, false);
+});
+
+test("expiryConduct ON: host and force sweep are mutually exclusive per phone", () => {
+  const host = expiryConduct({ autoSubmit: true, expired: true, hasResult: true,
+    isHost: true, overGrace: true, overGrace3: true });
+  assert.equal(host.hostSweep, true);
+  assert.equal(host.forceSweep, false);
+});
+
+test("canGiveUp: only in wait-for-players mode, live round, no result", () => {
+  assert.equal(canGiveUp({ autoSubmit: false, phase: "roundActive", hasResult: false }), true);
+  assert.equal(canGiveUp({ autoSubmit: true, phase: "roundActive", hasResult: false }), false);
+  assert.equal(canGiveUp({ autoSubmit: false, phase: "reveal", hasResult: false }), false);
+  assert.equal(canGiveUp({ autoSubmit: false, phase: "roundActive", hasResult: true }), false);
+});
+
+test("forfeitCount: counts pinless results only", () => {
+  assert.equal(forfeitCount(null), 0);
+  assert.equal(forfeitCount({ results: {} }), 0);
+  assert.equal(forfeitCount({ results: {
+    t1: { guess: { lat: 1, lng: 2 } },
+    t2: { guess: null, forfeited: true },
+    t3: { forfeited: true },
+    t4: { guess: { lat: 3, lng: 4 } },
+  } }), 2);
+});
+
+/* ---------------- #3 next-game handoff stomp guard ---------------- */
+
+test("stompsHandoff: a gameOver echo would stomp the open setup panel", () => {
+  assert.equal(stompsHandoff("gameOver", "p-setup"), true);
+});
+
+test("stompsHandoff: leaves every other combination alone", () => {
+  // Not on the setup panel: gameOver renders normally (non-winner phones).
+  assert.equal(stompsHandoff("gameOver", "p-gameover"), false);
+  assert.equal(stompsHandoff("gameOver", "p-reveal"), false);
+  assert.equal(stompsHandoff("gameOver", null), false);
+  // On the setup panel but a non-gameOver phase never reaches this guard.
+  assert.equal(stompsHandoff("lobby", "p-setup"), false);
+  assert.equal(stompsHandoff("roundActive", "p-setup"), false);
 });

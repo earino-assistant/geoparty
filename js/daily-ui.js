@@ -58,6 +58,7 @@ import {
   lockNowEstimate,
   lockButtonLabel,
   LOCK_LABELS,
+  panoHintCard,
 } from "./hints.js";
 import { oneShotHint, dismissHintCard, paintLockButton } from "./hints-ui.js";
 import { countdownTick } from "./fx.js";
@@ -308,9 +309,15 @@ async function startRound() {
   updateLockButton();
   destroyRevealMap();
   showScreen("d-round");
-  oneShotHint("pano", HINT_CARDS.pano);
+  // #7: teach the arrows in a normal (movement-allowed) daily; Hard reads the
+  // single frame, so it keeps the plain copy.
+  oneShotHint("pano", panoHintCard(dailyMoveAllowed(mode === "hard")));
   if (!iv) makeViewer();
   hideImageryDegraded();
+  // #5: assert the movement lever explicitly each round (Hard = no movement),
+  // not only via the construction seed, and reassert so a transient activation
+  // failure recovers instead of stranding the controls.
+  if (iv && iv.setMoveAllowed) iv.setMoveAllowed(dailyMoveAllowed(mode === "hard"));
   iv.beginRound(run.rounds.length + 1);
   const { entry, skips, degraded } = await loadRoundImage(sampler, iv, "anchor");
   if (!entry) {
