@@ -83,6 +83,18 @@ export function dailyNumberForKey(key) {
   return dailyNumber(key);
 }
 
+// The inverse of dailyNumber: the "YYYYMMDD" key for a given Daily #N, built in
+// UTC so it round-trips exactly (dailyNumber(dailyKeyFromNumber(n)) === n). A
+// Ghost Duel recipient uses this to play the LINK's day-seed (§3.5.2) even when
+// it isn't their own local today.
+export function dailyKeyFromNumber(n) {
+  const ms = keyToUtcMs(DAILY_EPOCH_KEY) + (n - 1) * 86_400_000;
+  const d = new Date(ms);
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${d.getUTCFullYear()}${mm}${dd}`;
+}
+
 /* ================================================================
  * The run: a fold over rounds. Same scorer as the party game —
  * scoreForDistance + timeBonus against the fixed 60s window — so a

@@ -83,6 +83,16 @@ one.
 ### daily.html
 - `#dRevealPlace` — the round's answer (now the reveal headline)
 - `#dRevealResult` — unmasked, deliberately: aggregates only (see above)
+- `#dRevealDuel`, `#dRevealTotal` — unmasked, deliberately: the ghost duel's
+  per-round and running scores are aggregates; the ghost is anonymous by design
+  (the chat context, not the link, names the sender), so there is **nothing to
+  mask here — keep it that way** (G5, spec §3.5.6)
+- `#dDoneDuel`, `#dDoneStreak`, `#dDonePB`, `#dIntroRecords` — unmasked,
+  deliberately: streaks, personal bests, and duel margins are non-identifying
+  scores/counts. No name or user-entered text ever reaches these nodes
+- `#dChallengeEyebrow` — unmasked: it shows the public Daily number only. The
+  ghost payload is stripped from the URL (`history.replaceState`) before any
+  capture and never renders (G5)
 - `#toast` — masked wholesale for parity with the host/player toasts. The
   Daily is solo (no team names), but masking here keeps the rule uniform and
   future-proof

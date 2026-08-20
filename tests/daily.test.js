@@ -12,6 +12,7 @@ import {
   dailyKey,
   dailySeed,
   dailyNumber,
+  dailyKeyFromNumber,
   daysBetweenKeys,
   dailyRoundSeconds,
   dailyMoveAllowed,
@@ -71,6 +72,13 @@ test("dailyNumber: 1-based day counter from the epoch", () => {
   // so DST days can't make the counter skip or repeat).
   assert.equal(dailyNumber("20260901"), 14);
   assert.equal(dailyNumber("20270819"), 366); // one plain 365-day year later
+});
+
+test("dailyKeyFromNumber: exact inverse of dailyNumber (ghost day seed)", () => {
+  for (const key of ["20260819", "20260820", "20260901", "20270819", "20261231"]) {
+    assert.equal(dailyKeyFromNumber(dailyNumber(key)), key);
+  }
+  assert.equal(dailyKeyFromNumber(1), DAILY_EPOCH_KEY);
 });
 
 /* ---------------- the run fold ---------------- */

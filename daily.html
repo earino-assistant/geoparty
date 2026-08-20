@@ -39,9 +39,13 @@
     <div class="host-wrap">
       <h1><span style="color: var(--accent)">Geo</span>Party <span class="h2h-tag">daily challenge</span></h1>
       <div class="stat-card">
+        <!-- G5: the challenge eyebrow, shown only for an inbound ghost link. -->
+        <div id="dChallengeEyebrow" class="challenge-eyebrow hidden"></div>
         <div class="label">Today</div>
         <div class="big" id="dDailyNum">#—</div>
         <div id="dDailyDate" class="daily-date"></div>
+        <!-- G1/G8: the muted streak + personal-best line (scores only). -->
+        <div id="dIntroRecords" class="daily-records"></div>
       </div>
       <!-- §2.10: two lines. The pano and map hints teach the rest in place,
            so the intro no longer restates the scoring rule a third time. -->
@@ -49,6 +53,13 @@
         Five mystery places — the <strong>same five for everyone</strong> today.<br />
         One run per day. Closer + faster = more points.
       </p>
+      <!-- G5: the challenge explainer replaces the rules copy for a duel. -->
+      <p id="dChallengeExplain" class="daily-rules hidden"></p>
+      <!-- G6: hard-mode entry, revealed only after today's normal run. -->
+      <div id="dHardIntro" class="hard-entry hidden">
+        <span>⚡ Hard mode — no moving, 30 seconds</span>
+        <button id="btnDHardStart" class="btn-ghost">Try Hard Mode</button>
+      </div>
       <div id="dIntroErr" class="join-err"></div>
     </div>
     <div class="action-bar">
@@ -89,8 +100,10 @@
       <div id="dRevealMap" class="p-reveal-map"></div>
       <div id="dRevealPlace" class="reveal-headline" data-ph-mask>—</div>
       <div id="dRevealResult" class="reveal-result">—</div>
+      <!-- G5: the per-round duel verdict line (hidden outside a ghost duel). -->
+      <div id="dRevealDuel" class="reveal-duel hidden"></div>
       <div class="total-row">
-        <span class="label">Total so far</span>
+        <span class="label" id="dRevealTotalLabel">Total so far</span>
         <span class="val" id="dRevealTotal">—</span>
       </div>
     </div>
@@ -107,6 +120,16 @@
         <div class="label">Your score</div>
         <div class="big" id="dDoneScore" style="color: var(--accent)">—</div>
         <div id="dDoneEmoji" class="daily-emoji"></div>
+        <!-- G1/G8: streak line + personal-best banner (scores only). -->
+        <div id="dDoneStreak" class="daily-records hidden"></div>
+        <div id="dDonePB" class="daily-pb hidden">New personal best! 🏆</div>
+      </div>
+      <!-- G5: the duel verdict block (headline, margin, paired grid). -->
+      <div id="dDoneDuel" class="done-duel hidden"></div>
+      <!-- G6: hard-mode entry after a normal run. -->
+      <div id="dHardDone" class="hard-entry hidden">
+        <span>⚡ Hard mode — no moving, 30 seconds</span>
+        <button id="btnDHardDone" class="btn-ghost">Try Hard Mode</button>
       </div>
       <div class="share-row">
         <button id="btnDShare" class="btn-primary">📤 Share your result</button>

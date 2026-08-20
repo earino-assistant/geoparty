@@ -1,22 +1,35 @@
-// daily-ui.js — the Daily Challenge page (roadmap S2): a solo, date-seeded
-// run of five locations — the SAME five for everyone on a given day, so
-// scores are comparable and the S1 share card ("Beat me") means something.
-// No Firebase, no room, no teams: this page talks only to Mapillary, OSM
-// tiles, and localStorage. Every decision (seed, day number, scoring, run
-// fold, replay lock) lives in daily.js / share.js (pure, tested); this
-// module is DOM glue in the player-ui mold.
+// daily-ui.js — the Daily Challenge page (roadmap S2; G1/G4/G5/G6/G8 expansion,
+// spec §3.1/§3.4/§3.5/§3.6/§3.8). A solo, date-seeded run of five locations —
+// the SAME five for everyone on a given day. No Firebase, no room, no teams:
+// this page talks only to Mapillary, OSM tiles, and localStorage. Every
+// decision (seed, day number, scoring, run fold, replay lock, streak/PB fold,
+// ghost codec, medal grading) lives in daily.js / share.js / records.js /
+// ghost.js (pure, tested); this module is DOM glue in the player-ui mold.
+//
+// GHOST DUEL PRIVACY (CLAUDE.md): a challenge link's payload is the sender's
+// own guesses only. It rides the URL fragment, which we parse then STRIP
+// (history.replaceState) at the top of this module — before any analytics init
+// can observe the URL (§3.5.6). It never reaches Firebase/PostHog/replay/logs.
 
 import {
   haversineKm,
   formatCountdown,
+  formatDistance,
   revealResultLine,
+  scoreForDistance,
+  timeBonus,
+  bonusWindowMs,
 } from "./game.js";
 import {
   DAILY_ROUNDS,
-  DAILY_ROUND_SECONDS,
   dailyKey,
   dailySeed,
   dailyNumber,
+  dailyKeyFromNumber,
+  dailyRoundSeconds,
+  dailyMoveAllowed,
+  DAILY_RESULT_KEY,
+  DAILY_RESULT_HARD_KEY,
   newDailyRun,
   recordDailyRound,
   dailyRunComplete,
@@ -25,7 +38,17 @@ import {
   loadDailyResult,
   saveDailyResult,
 } from "./daily.js";
-import { withUtm, dailyShareText, emojiRow } from "./share.js";
+import {
+  withUtm, dailyShareText, dailyChallengeUrl, emojiRow, distanceEmoji,
+} from "./share.js";
+import {
+  loadRecords, saveRecords, applyDailyResult, applyDuelResult,
+  seedBestFromResult, medalForDistance,
+} from "./records.js";
+import {
+  parseGhostFragment, decodeGhost, ghostExpired, poolMatches, poolCheck,
+  buildGhostPayload, duelVerdict,
+} from "./ghost.js";
 import { shareResult } from "./share-ui.js";
 import {
   HINT_CARDS,
@@ -36,13 +59,30 @@ import {
 } from "./hints.js";
 import { oneShotHint, dismissHintCard, paintLockButton } from "./hints-ui.js";
 import { countdownTick } from "./fx.js";
-import { initSound, playSound, buzz } from "./fx-ui.js";
+import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { scrubErrorMessage } from "./imagery.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
 import { toastWithReport, toastPlain } from "./report-ui.js";
+
+/* ================================================================
+ * Ghost fragment: parse, then STRIP immediately (§3.5.6 braces layer). This
+ * runs at module eval, before PostHog is even loaded (consent.js only schedules
+ * an async script injection), so no pageview can observe the payload.
+ * ================================================================ */
+
+const ghostPayload = (() => {
+  try {
+    const p = parseGhostFragment(location.hash);
+    if (location.hash) {
+      // Drop the fragment from the address bar and from history entirely.
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+    return p;
+  } catch { return null; }
+})();
 
 /* ================================================================
  * DOM helpers (same shape as the other pages)
@@ -56,14 +96,10 @@ function showScreen(id) {
   shownScreen = id;
   dismissHintCard();
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
-  // §4.1: the utility corners (🍪/🔊) leave while a play screen is up, and
-  // a deferred first-run consent ask waits for a calm one (§6.5).
   setActiveScreen(id);
 }
 
 let toastTimer = null;
-// `reportCtx` adds the REACTIVE inline Report action — only on toasts that
-// already fire for a broken/degraded imagery condition (plan §10.1).
 function toast(msg, reportCtx) {
   const el = $("toast");
   if (reportCtx) toastWithReport(el, msg, reportCtx); else toastPlain(el, msg);
@@ -73,7 +109,6 @@ function toast(msg, reportCtx) {
     () => el.classList.remove("show"), reportCtx ? 6000 : 2500);
 }
 
-// One degraded-imagery nudge per run.
 let degradedNoticeShown = false;
 function noticeDegradedImagery(skips) {
   if (degradedNoticeShown || skips < 2) return;
@@ -81,11 +116,6 @@ function noticeDegradedImagery(skips) {
   toast("Some images wouldn’t load — we skipped ahead.", { surface: "daily" });
 }
 
-// Retryable imagery-degraded overlay (stabilization: review P1-3). A stub
-// viewer (SDK blocked / no WebGL / offline) or a transient timeout hands back
-// NO entry with `degraded: true` — the run is not scored, nothing is saved,
-// and the player simply retries the same round. Injected (no HTML id lookup),
-// carries no team name or place, so nothing new to mask.
 let degradedEl = null;
 function showImageryDegraded() {
   if (!degradedEl) {
@@ -114,23 +144,60 @@ function hideImageryDegraded() {
  * ================================================================ */
 
 const todayKey = dailyKey(new Date());
-const dayNum = dailyNumber(todayKey);
+const todayNum = dailyNumber(todayKey);
+const records = loadRecords(localStorage);
 
-let sampler = null;        // seeded from the date — same order for everyone
-let run = newDailyRun(todayKey);
-let current = null;        // pool entry backing the active round
+// Decode the ghost (if any). decode is total — never throws.
+const ghost = ghostPayload ? decodeGhost(ghostPayload) : null;
+
+// The run's mode + day are decided at boot (§3.5.2). A valid, in-window ghost
+// routes the run to the LINK's day-seed and ruleset; otherwise it's a plain
+// daily for today. duelStatus is resolved after the pool loads (poolCheck).
+let mode = "normal";              // "normal" | "hard"
+let isDuel = false;               // a live ghost duel this run
+let isExhibition = false;         // a duel that must NOT save (day/mode mismatch)
+let ghostLinkReason = null;       // set when a link was present but unusable
+let runKey = todayKey;
+let runDayNum = todayNum;
+
+if (ghost && ghost.ok) {
+  if (ghostExpired(ghost.dayNumber, todayNum)) {
+    ghostLinkReason = "expired";
+  } else {
+    isDuel = true;
+    mode = ghost.hard ? "hard" : "normal";
+    runDayNum = ghost.dayNumber;
+    runKey = dailyKeyFromNumber(ghost.dayNumber);
+    // A run on a day that isn't the recipient's local today, or a hard duel we
+    // won't let overwrite the hard slot, is an exhibition (plays, never saves).
+    isExhibition = ghost.dayNumber !== todayNum;
+  }
+} else if (ghost && ghost.error) {
+  ghostLinkReason = ghost.error;   // "malformed" | "version"
+}
+
+let sampler = null;
+let run = newDailyRun(runKey, mode === "hard");
+let current = null;
 let roundStartedAt = 0;
 let endsAt = 0;
 let locked = false;
-let stage = "explore";     // "explore" (pano) | "map"
+let stage = "explore";
 
-let iv = null;             // instrumented viewer wrapper (viewer-ui.js)
-let viewer = null;         // its raw MapillaryJS viewer
+// Ghost bookkeeping (duel runs). Each entry: { points, distanceKm, pin }.
+const ghostRoundResults = [];
+let ghostTotalSoFar = 0;
+// The day's five image ids in seeded order (for the OUTGOING ghost's poolCheck,
+// §3.5.1). Populated lazily from the seeded order (deterministic, skip-free).
+let peekIdsCache = null;
+
+let iv = null;
+let viewer = null;
 let guessMap = null;
 let guessMarker = null;
 let revealMap = null;
 let tickInterval = null;
-let lastTickSecond = null; // S4: last countdown second this page ticked for
+let lastTickSecond = null;
 
 /* ================================================================
  * Start
@@ -141,18 +208,52 @@ async function startChallenge() {
   $("dIntroErr").textContent = "";
   try {
     const pool = await loadPool();
-    // PoolSampler's seed parameter is any string; the date seed makes the
-    // shuffled order a property of the DAY, not of a room or a device.
-    sampler = new PoolSampler(pool, dailySeed(todayKey));
-    track("daily_challenge_started", { day_number: dayNum });
+    sampler = new PoolSampler(pool, dailySeed(runKey));
+    // Confirm a ghost duel's day still matches (poolCheck) before it counts.
+    if (isDuel) {
+      const ids = await peekDayIds(runKey);
+      if (!poolMatches(ghost.poolCheck, ids)) {
+        isDuel = false;
+        isExhibition = false;
+        ghostLinkReason = "pool";
+        mode = "normal";
+        runKey = todayKey;
+        runDayNum = todayNum;
+        run = newDailyRun(runKey, false);
+        sampler = new PoolSampler(pool, dailySeed(runKey));
+        track("ghost_link_invalid", { reason: "pool" });
+        toast("This challenge was built on an older Daily — playing without the ghost.");
+      }
+    }
+    track("daily_challenge_started", {
+      day_number: runDayNum,
+      hard: mode === "hard",
+      vs_ghost: isDuel,
+      streak: records.streak.count,
+    });
     await startRound();
   } catch (e) {
-    // Scrub before logging: console capture rides into replays, and an SDK
-    // rejection can carry a raw image id / tokened URL (review P1-1).
     console.error(scrubErrorMessage(e));
     $("dIntroErr").textContent = "Couldn't load today's places — try again.";
     $("btnDailyStart").disabled = false;
   }
+}
+
+// The seeded order's first DAILY_ROUNDS image ids (deterministic, skip-free) —
+// the stable basis for the poolCheck on both sender and recipient (§3.5.1).
+async function peekDayIds(key) {
+  if (peekIdsCache && peekIdsCache.key === key) return peekIdsCache.ids;
+  const pool = await loadPool();
+  const s = new PoolSampler(pool, dailySeed(key));
+  const ids = [];
+  for (let i = 0; i < DAILY_ROUNDS; i++) {
+    const e = s.peek();
+    if (!e) break;
+    ids.push(e.image_id);
+    s.advance();
+  }
+  peekIdsCache = { key, ids };
+  return ids;
 }
 
 /* ================================================================
@@ -174,21 +275,9 @@ async function startRound() {
   if (!iv) makeViewer();
   hideImageryDegraded();
   iv.beginRound(run.rounds.length + 1);
-  // Same DEAD-image skip as the party hosts: everyone shares the seeded order
-  // and skips the same provably-dead entries to the same five spots. A
-  // transient timeout is NOT a dead entry, so loadRoundImage keeps the seeded
-  // entry and hands back `degraded` rather than advancing to a different live
-  // spot — that is what preserves "the same five for everyone" on a slow
-  // network (review P2-5).
   const { entry, skips, degraded } = await loadRoundImage(sampler, iv, "anchor");
   if (!entry) {
-    // A stub viewer or a transient failure must NOT burn the Daily's one run
-    // of the day (review P1-3): show a retryable state and consume nothing.
-    // Only a genuinely exhausted pool scores what we have so far.
     if (degraded) {
-      // If the viewer itself is a stub (SDK blocked / no WebGL), drop it so a
-      // retry rebuilds from scratch — the SDK may have finished loading since.
-      // A transient timeout keeps its working viewer and just re-attempts.
       if (iv && iv.ok === false) destroyViewer();
       showImageryDegraded();
       return;
@@ -200,36 +289,35 @@ async function startRound() {
   sampler.advance();
   current = entry;
   roundStartedAt = Date.now();
-  endsAt = roundStartedAt + DAILY_ROUND_SECONDS * 1000;
-  $("dHudRound").textContent = `Round ${run.rounds.length + 1}/${DAILY_ROUNDS}`;
+  const seconds = dailyRoundSeconds(mode === "hard");
+  endsAt = roundStartedAt + seconds * 1000;
+  const tag = mode === "hard" ? " ⚡" : "";
+  $("dHudRound").textContent = `Round ${run.rounds.length + 1}/${DAILY_ROUNDS}${tag}`;
   startTick();
 }
 
-// Full navigation, matching regular play with moveAllowed on: everyone
-// gets the same rules (look around AND move down the street), so scores
-// stay comparable — movement is part of the fixed ruleset, like scoring.
+// G6: hard mode reads the single frame (no movement). The viewer's navigation
+// components are the G2 Frozen lever too — built off here for a hard run.
 function makeViewer() {
+  const moveAllowed = dailyMoveAllowed(mode === "hard");
   iv = createViewer({
     surface: "daily",
     container: "dailyViewer",
-    moveAllowed: true,
+    moveAllowed,
     component: {
       cover: false,
-      direction: true,
-      sequence: true,
-      keyboard: true,
+      direction: moveAllowed,
+      sequence: moveAllowed,
+      keyboard: moveAllowed,
       zoom: true,
       bearing: true,
     },
   });
-  viewer = iv.viewer;   // null when construction failed; guards below cope
+  viewer = iv.viewer;
 }
 
 function destroyViewer() {
-  if (iv) {
-    iv.destroy();   // flushes the open pano_session, then viewer.remove()
-    iv = null;
-  }
+  if (iv) { iv.destroy(); iv = null; }
   viewer = null;
 }
 
@@ -263,8 +351,6 @@ function openGuessMap() {
   ensureGuessMap();
   $("btnDLockIn").disabled = !guessMarker;
   updateGuessBanner();
-  // First guess map ever on this device: the scoring one-liner (M5) — the
-  // daily is solo, so no rival-pins or SUPER SURE lines.
   oneShotHint("guessmap", {
     title: "Drop your pin",
     lines: guessMapHintLines("daily"),
@@ -280,15 +366,10 @@ function backToStreet() {
   if (viewer) viewer.resize();
 }
 
-// §6.1: one banner, and only until the first pin exists — a draggable pin
-// teaches itself, so there is no second "drag to adjust" state.
 function updateGuessBanner() {
   $("dGuessHint").classList.toggle("hidden", !!guessMarker);
 }
 
-// M3's "if you locked in now" estimate, now ON the primary button (§6.1) —
-// same pure estimator as the party phones, priced locally against the
-// current entry's coordinates.
 function updateLockButton() {
   const btn = $("btnDLockIn");
   if (locked || stage !== "map" || !guessMarker || !current) {
@@ -302,7 +383,7 @@ function updateLockButton() {
   const elapsed = Math.max(0, Date.now() - roundStartedAt);
   paintLockButton(btn, lockButtonLabel(
     LOCK_LABELS.daily,
-    lockNowEstimate(km, elapsed, DAILY_ROUND_SECONDS),
+    lockNowEstimate(km, elapsed, dailyRoundSeconds(mode === "hard")),
     false));
 }
 
@@ -324,7 +405,6 @@ function tick() {
   const left = endsAt - Date.now();
   $("dHudTimer").textContent = formatCountdown(left);
   $("dGuessTimer").textContent = formatCountdown(left);
-  // S4: countdown pulse (CSS .low) + tick over the final seconds.
   const low = left > 0 && left <= 10_500;
   $("dHudTimer").classList.toggle("low", low);
   $("dGuessTimer").classList.toggle("low", low);
@@ -333,7 +413,7 @@ function tick() {
     lastTickSecond = t.second;
     playSound(t.urgent ? "tickUrgent" : "tick");
   }
-  if (left <= 0) lockIn(true); // pin if placed, forfeit if not
+  if (left <= 0) lockIn(true);
 }
 
 /* ---------------- Lock in -> reveal ---------------- */
@@ -345,15 +425,17 @@ function lockIn(auto = false) {
     const g = guessMarker.getLatLng();
     guess = { lat: g.lat, lng: L.Util.wrapNum(g.lng, [-180, 180], true) };
   }
-  if (!guess && !auto) return; // manual lock needs a pin; timeout may forfeit
+  if (!guess && !auto) return;
   locked = true;
   stopTick();
-  if (guess) { playSound("stamp"); buzz(35); } // S4: the lock-in beat
+  if (guess) { playSound("stamp"); buzz(35); }
   const elapsedMs = Math.max(0, Date.now() - roundStartedAt);
   const distanceKm = guess
     ? haversineKm(current.lat, current.lng, guess.lat, guess.lng)
     : null;
-  run = recordDailyRound(run, guess ? { distanceKm, elapsedMs } : null);
+  // v2 (§5.2): store the pin + elapsed so this run can later become a ghost.
+  run = recordDailyRound(run, guess
+    ? { distanceKm, elapsedMs, lat: guess.lat, lng: guess.lng } : null);
   if (auto) {
     toast(guess
       ? "Time! Your pin was locked in."
@@ -364,26 +446,64 @@ function lockIn(auto = false) {
 
 function renderReveal(guess) {
   showScreen("d-reveal");
-  playSound("sting"); // S4: the reveal beat (called once per round)
+  playSound("sting");
   oneShotHint("reveal", HINT_CARDS.reveal);
   const r = run.rounds[run.rounds.length - 1];
+  const idx = run.rounds.length - 1;
   $("dRevealHeading").textContent =
     `Round ${run.rounds.length} of ${DAILY_ROUNDS}`;
   $("dRevealPlace").textContent = current.name || "—";
-  // §2.10: the four stat cards collapse to the §6.4 shape — map, place
-  // headline, one result line, and "Total so far" as a row.
+
+  // G4: medal caption on the result line; the ACE stamp on a sub-1km pin.
+  const medal = medalForDistance(r.distanceKm);
   $("dRevealResult").textContent = revealResultLine(
     r.distanceKm != null
-      ? { guess: true, distanceKm: r.distanceKm, points: r.points,
-          timeBonus: r.timeBonus }
+      ? {
+          guess: true, distanceKm: r.distanceKm, points: r.points,
+          timeBonus: r.timeBonus, medalCaption: medal.caption,
+        }
       : null);
-  $("dRevealTotal").textContent = run.score.toLocaleString();
+  if (medal.ace) stampFlash(`🎯 ACE — ${formatDistance(r.distanceKm)}`);
+
+  // G5: the ghost materializes and the running comparison replaces the total.
+  let ghostRes = null;
+  if (isDuel) {
+    ghostRes = scoreGhostRound(idx);
+    ghostRoundResults[idx] = ghostRes;
+    ghostTotalSoFar += ghostRes.points;
+    const you = r.points;
+    const gp = ghostRes.points;
+    const verdict = you > gp ? "you take the round"
+      : gp > you ? "👻 takes the round" : "dead heat";
+    $("dRevealDuel").textContent =
+      `You +${you.toLocaleString()} · 👻 +${gp.toLocaleString()} — ${verdict}`;
+    $("dRevealDuel").classList.remove("hidden");
+    $("dRevealTotalLabel").textContent = "You";
+    $("dRevealTotal").textContent =
+      `${run.score.toLocaleString()} · 👻 ${ghostTotalSoFar.toLocaleString()}`;
+  } else {
+    $("dRevealDuel").classList.add("hidden");
+    $("dRevealTotalLabel").textContent = "Total so far";
+    $("dRevealTotal").textContent = run.score.toLocaleString();
+  }
+
   $("btnDNext").textContent =
     dailyRunComplete(run) ? "See My Score" : "Next Round";
-  renderRevealMap(guess);
+  renderRevealMap(guess, ghostRes);
 }
 
-function renderRevealMap(guess) {
+// The ghost's result for the round just revealed, recomputed on THIS device
+// against the actual truth (`current`) — the integrity posture (§3.5.4).
+function scoreGhostRound(idx) {
+  const gr = ghost.rounds[idx];
+  if (!gr || !gr.pinned) return { points: 0, distanceKm: null, pin: null };
+  const km = haversineKm(current.lat, current.lng, gr.lat, gr.lng);
+  const dp = scoreForDistance(km);
+  const tb = timeBonus(dp, gr.elapsedMs, bonusWindowMs(dailyRoundSeconds(ghost.hard)));
+  return { points: dp + tb, distanceKm: km, pin: { lat: gr.lat, lng: gr.lng } };
+}
+
+function renderRevealMap(guess, ghostRes) {
   destroyRevealMap();
   revealMap = L.map("dRevealMap", {
     zoomControl: false, dragging: false, scrollWheelZoom: false,
@@ -394,14 +514,31 @@ function renderRevealMap(guess) {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(revealMap);
   const truth = L.latLng(current.lat, current.lng);
+  const bounds = [truth];
   if (guess) {
     const pin = L.latLng(guess.lat, guess.lng);
-    revealMap.fitBounds(L.latLngBounds([truth, pin]).pad(0.25), { maxZoom: 10 });
+    bounds.push(pin);
     L.polyline([pin, truth], { color: "#4dd6ff", weight: 3, dashArray: "6 8" })
       .addTo(revealMap);
     L.circleMarker(pin, {
       radius: 8, color: "#fff", weight: 2, fillColor: "#4dd6ff", fillOpacity: 1,
     }).addTo(revealMap);
+  }
+  // G5: the ghost marker — distinct (dashed, muted, 👻), no polyline, with a
+  // distance chip. Maps stay replay-blocked, so it can never leak.
+  if (ghostRes && ghostRes.pin) {
+    const gpin = L.latLng(ghostRes.pin.lat, ghostRes.pin.lng);
+    bounds.push(gpin);
+    L.circleMarker(gpin, {
+      radius: 8, color: "#c9a2ff", weight: 2, dashArray: "3 3",
+      fillColor: "#2a2140", fillOpacity: 0.85,
+    }).addTo(revealMap);
+    L.marker(gpin, {
+      icon: L.divIcon({ className: "ghost-chip", html: `👻 ${formatDistance(ghostRes.distanceKm)}` }),
+    }).addTo(revealMap);
+  }
+  if (bounds.length > 1) {
+    revealMap.fitBounds(L.latLngBounds(bounds).pad(0.25), { maxZoom: 10 });
   } else {
     revealMap.setView(truth, 4);
   }
@@ -425,69 +562,263 @@ function nextOrFinish() {
 
 /* ---------------- Done ---------------- */
 
-function finishRun() {
+async function finishRun() {
   stopTick();
   destroyViewer();
-  playSound("fanfare"); // S4
-  saveDailyResult(localStorage, run);
-  // best_distance_km is absent for an all-forfeit run (sanitizer drops the
-  // null) — rounds_played: 0 already tells that story.
+  playSound("fanfare");
+
+  // The duel verdict (recipient's device), computed once at the end.
+  let verdict = null;
+  if (isDuel) {
+    const yourPoints = run.rounds.map((r) => r.points);
+    const ghostPoints = run.rounds.map((_, i) =>
+      (ghostRoundResults[i] || { points: 0 }).points);
+    verdict = duelVerdict(yourPoints, ghostPoints);
+    track("ghost_duel_completed", {
+      day_number: runDayNum,
+      outcome: verdict.outcome,
+      margin: verdict.margin,
+      hard: mode === "hard",
+    });
+  }
+
+  // Records + replay lock — exhibitions save NOTHING (§3.5.2 case 6).
+  let streakCount = records.streak.count;
+  let graceUsed = false;
+  let pb = false;
+  const aces = run.rounds.filter(
+    (r) => typeof r.distanceKm === "number" && r.distanceKm < 1).length;
+  if (!isExhibition) {
+    saveDailyResult(localStorage, run);
+    const applied = applyDailyResult(records, run, { day: runDayNum, key: runKey });
+    Object.assign(records, applied.records);
+    streakCount = applied.streak;
+    graceUsed = applied.graceUsed;
+    pb = applied.pb;
+    if (isDuel) {
+      const dueled = applyDuelResult(records, verdict.outcome === "won");
+      Object.assign(records, dueled.records);
+    }
+    saveRecords(localStorage, records);
+  }
+
   track("daily_challenge_completed", {
-    day_number: dayNum,
+    day_number: runDayNum,
     score: run.score,
     rounds_played: guessedRounds(run),
     best_distance_km: bestDailyDistance(run),
+    hard: mode === "hard",
+    vs_ghost: isDuel,
+    streak: mode === "hard" ? records.streak.count : streakCount,
+    pb,
+    aces,
   });
-  renderDone(run, false);
+
+  renderDone(run, false, { verdict, streakCount, graceUsed, pb });
 }
 
-function renderDone(result, alreadyPlayed) {
+function renderDone(result, alreadyPlayed, extra = {}) {
   showScreen("d-done");
+  const star = result.hard ? "*" : "";
   $("dDoneTitle").textContent = alreadyPlayed
-    ? `You played Daily #${dayNum} ✓`
-    : `Daily #${dayNum} done!`;
+    ? `You played Daily #${runDayNum}${star} ✓`
+    : `Daily #${runDayNum}${star} done!`;
   $("dDoneScore").textContent = result.score.toLocaleString();
   $("dDoneEmoji").textContent = emojiRow(result.rounds);
-  if (alreadyPlayed) {
+
+  // G1/G8 lines (never on an exhibition — it changed nothing).
+  const streakEl = $("dDoneStreak");
+  const pbEl = $("dDonePB");
+  streakEl.classList.add("hidden");
+  pbEl.classList.add("hidden");
+  if (!isExhibition && !result.hard && (extra.streakCount || 0) >= 1) {
+    streakEl.textContent = extra.graceUsed
+      ? `Missed a day — your streak survived. 🔥 ${extra.streakCount}`
+      : `🔥 ${extra.streakCount} — day streak`;
+    streakEl.classList.remove("hidden");
+  }
+  if (!isExhibition && extra.pb) pbEl.classList.remove("hidden");
+
+  // G5 duel verdict block.
+  renderDuelDone(extra.verdict, result);
+
+  // Exhibition footnote (an exhibition that ends in an ad for the ritual).
+  if (isExhibition) {
+    $("dDoneNote").textContent =
+      "That was another day's five — today's Daily is still waiting for you.";
+  } else if (alreadyPlayed) {
     $("dDoneNote").textContent =
       "One run per day keeps scores honest — a fresh five tomorrow.";
   }
-  $("btnDShare").onclick = () =>
-    shareResult(
-      dailyShareText({
-        dayNumber: dayNum,
-        score: result.score,
-        rounds: result.rounds,
-        // The card links straight into the challenge, UTM-tagged so
-        // arrivals (and the rooms they go on to create) attribute to it.
-        url: withUtm(new URL("daily.html", location.href).href, "daily"),
-      }),
-      "daily",
-      toast
-    );
+
+  // G6 hard-mode entry: after a normal run is done, once, if hard isn't played.
+  const hardDone = $("dHardDone");
+  const showHard = !result.hard && !isExhibition &&
+    !loadDailyResult(localStorage, todayKey, DAILY_RESULT_HARD_KEY) &&
+    runDayNum === todayNum;
+  hardDone.classList.toggle("hidden", !showHard);
+
+  wireShare(result, extra.verdict);
+}
+
+function renderDuelDone(verdict, result) {
+  const box = $("dDoneDuel");
+  box.textContent = "";
+  if (!verdict) { box.classList.add("hidden"); return; }
+  const head = document.createElement("div");
+  head.className = "done-duel-head";
+  head.textContent = verdict.outcome === "won" ? "You won the duel! 🏆"
+    : verdict.outcome === "lost" ? "The ghost got you 👻" : "Dead heat.";
+  const margin = document.createElement("div");
+  margin.className = "done-duel-margin";
+  margin.textContent = verdict.outcome === "tie"
+    ? `${verdict.yourTotal.toLocaleString()} apiece`
+    : `${verdict.yourTotal.toLocaleString()} to ${verdict.ghostTotal.toLocaleString()} — by ${verdict.margin.toLocaleString()}`;
+  const strip = document.createElement("div");
+  strip.className = "done-duel-strip";
+  const yours = document.createElement("div");
+  yours.textContent = `You  ${emojiRow(result.rounds)}`;
+  const theirs = document.createElement("div");
+  theirs.textContent = `👻  ${ghostRoundResults.map((g) => distanceEmoji(g && g.distanceKm != null ? g.distanceKm : undefined)).join("")}`;
+  strip.append(yours, theirs);
+  box.append(head, margin, strip);
+  box.classList.remove("hidden");
+}
+
+// The share is a Ghost Duel challenge link by DEFAULT once G5 ships (§3.5.1) —
+// the return challenge is the default share, not a separate mechanic.
+function wireShare(result, verdict) {
+  $("btnDShare").onclick = async () => {
+    let payload = null;
+    try {
+      const ids = await peekDayIds(runKey);
+      payload = buildGhostPayload(result, ids, runDayNum);
+    } catch { /* offline: fall back to a plain card below */ }
+    const base = new URL("daily.html", location.href).href;
+    const url = payload ? dailyChallengeUrl(base, payload, "daily")
+      : withUtm(base, "daily");
+    const text = dailyShareText({
+      dayNumber: runDayNum,
+      score: result.score,
+      rounds: result.rounds,
+      url,
+      streak: (!result.hard && !isExhibition) ? records.streak.count : 0,
+      hard: !!result.hard,
+      challenge: !!payload,
+      verdict: verdict ? { outcome: verdict.outcome, margin: verdict.margin } : null,
+    });
+    shareResult(text, "daily", toast, { challenge: !!payload });
+  };
+}
+
+/* ================================================================
+ * Hard mode entry (G6) — restart the page state into a hard run.
+ * ================================================================ */
+
+function startHardMode() {
+  mode = "hard";
+  isDuel = false;
+  isExhibition = false;
+  runKey = todayKey;
+  runDayNum = todayNum;
+  run = newDailyRun(runKey, true);
+  ghostRoundResults.length = 0;
+  ghostTotalSoFar = 0;
+  destroyViewer();
+  renderIntro();
+  startChallenge();
+}
+
+/* ================================================================
+ * Intro / boot
+ * ================================================================ */
+
+function renderIntro() {
+  // Challenge eyebrow + explainer (G5), or the plain intro.
+  const eyebrow = $("dChallengeEyebrow");
+  const explain = $("dChallengeExplain");
+  const rules = document.querySelector("#d-intro .daily-rules:not(#dChallengeExplain)");
+  if (isDuel) {
+    const hardTag = mode === "hard" ? "* ⚡" : "";
+    eyebrow.textContent = `⚔️ CHALLENGE — Daily #${runDayNum}${hardTag}`;
+    eyebrow.classList.remove("hidden");
+    explain.textContent =
+      "A friend sent you their run. Their ghost pin appears at every reveal — " +
+      "same five places, same rules.";
+    explain.classList.remove("hidden");
+    if (rules) rules.classList.add("hidden");
+    $("btnDailyStart").textContent = "Take the challenge";
+  } else {
+    eyebrow.classList.add("hidden");
+    explain.classList.add("hidden");
+    if (rules) rules.classList.remove("hidden");
+    $("btnDailyStart").textContent = mode === "hard"
+      ? "Play Hard Mode ⚡" : "Play Today's Daily";
+  }
+
+  // Records line (G1/G8) — streak + PB, normal board on a normal intro.
+  const recLine = $("dIntroRecords");
+  const parts = [];
+  const board = mode === "hard" ? records.hard : records.daily;
+  if (board.bestScore) {
+    parts.push(`Your best: ${board.bestScore.score.toLocaleString()} (Daily #${board.bestScore.day})`);
+  }
+  if (mode !== "hard" && records.streak.count >= 1) {
+    parts.push(`🔥 ${records.streak.count}`);
+  }
+  recLine.textContent = parts.join(" · ");
+
+  $("dHardIntro").classList.add("hidden");   // hard is offered on the done screen
+  $("dDailyNum").textContent = `#${runDayNum}${mode === "hard" ? "*" : ""}`;
+  $("dDailyDate").textContent = new Date().toLocaleDateString(undefined, {
+    weekday: "long", month: "long", day: "numeric",
+  });
 }
 
 /* ================================================================
  * Boot
  * ================================================================ */
 
-initSound("daily"); // S4: muted by default on phones; 🔇 toggle persists
+initSound("daily");
 $("btnDailyStart").addEventListener("click", startChallenge);
 $("btnDOpenMap").addEventListener("click", openGuessMap);
 $("btnDBackToStreet").addEventListener("click", backToStreet);
 $("btnDLockIn").addEventListener("click", () => lockIn(false));
 $("btnDNext").addEventListener("click", nextOrFinish);
+$("btnDHardStart").addEventListener("click", startHardMode);
+$("btnDHardDone").addEventListener("click", startHardMode);
 
-$("dDailyNum").textContent = `#${dayNum}`;
-$("dDailyDate").textContent = new Date().toLocaleDateString(undefined, {
-  weekday: "long", month: "long", day: "numeric",
-});
+// Report a link that arrived broken (before any run), and seed the PB from an
+// existing same-device result so day-one players don't see "no best" (§3.8).
+if (ghostLinkReason === "malformed" || ghostLinkReason === "version") {
+  track("ghost_link_invalid", { reason: ghostLinkReason });
+}
+{
+  const seedNormal = loadDailyResult(localStorage, todayKey, DAILY_RESULT_KEY);
+  if (seedNormal) Object.assign(records, seedBestFromResult(records, seedNormal, todayNum, false));
+  const seedHard = loadDailyResult(localStorage, todayKey, DAILY_RESULT_HARD_KEY);
+  if (seedHard) Object.assign(records, seedBestFromResult(records, seedHard, todayNum, true));
+}
 
-// Replay lock: today's run already exists on this device — show it (with
-// the share card ready) instead of a second scored attempt.
-const played = loadDailyResult(localStorage, todayKey);
-if (played) {
-  renderDone(played, true);
+renderIntro();
+
+// Replay lock: a saved run for THIS run's mode/day already exists.
+const savedForRun = loadDailyResult(localStorage, runKey,
+  mode === "hard" ? DAILY_RESULT_HARD_KEY : DAILY_RESULT_KEY);
+
+if (ghostLinkReason === "malformed") {
+  toast("That challenge link got damaged in transit — today's Daily is right here.");
+} else if (ghostLinkReason === "version") {
+  toast("This challenge needs a newer GeoParty — play today's Daily meanwhile.");
+} else if (ghostLinkReason === "expired") {
+  toast("This challenge expired — the Daily is a fresh five every day.");
+}
+
+if (savedForRun && !isExhibition) {
+  // Already played this board today. (A duel arriving on an already-played day
+  // still shows the plain done screen; the instant no-replay verdict is a
+  // documented follow-up — see docs/g1-g8 §3.5.2 case 5.)
+  renderDone(savedForRun, true, { streakCount: records.streak.count });
 } else {
   showScreen("d-intro");
 }

@@ -1263,6 +1263,76 @@ body:has(.action-bar) .consent-settings {
 /* ---------- Daily Challenge (S2) ---------- */
 
 .daily-date { color: var(--muted); font-size: 0.95rem; margin-top: 4px; }
+
+/* ---------- G1/G4/G5/G6/G8 daily expansion ---------- */
+
+/* G1/G8: muted streak + personal-best lines on the calm intro/done screens. */
+.daily-records {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-top: 8px;
+  min-height: 1em;
+}
+.daily-pb {
+  color: var(--accent);
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+/* G5: the challenge eyebrow above the daily number. */
+.challenge-eyebrow {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+}
+
+/* G6: the hard-mode entry row — a quiet, earned invitation. */
+.hard-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border, #333);
+  border-radius: 12px;
+  color: var(--muted);
+}
+.hard-entry .btn-ghost { min-height: 44px; }
+
+/* G5: the per-round duel verdict line + the done-screen verdict block. */
+.reveal-duel {
+  color: var(--fg);
+  font-size: 0.95rem;
+  margin-top: 6px;
+}
+.done-duel {
+  margin: 14px 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(201, 162, 255, 0.08);
+}
+.done-duel-head { font-size: 1.3rem; font-weight: 800; }
+.done-duel-margin { color: var(--muted); margin-top: 4px; }
+.done-duel-strip {
+  margin-top: 10px;
+  font-size: 1.4rem;
+  letter-spacing: 4px;
+  line-height: 1.5;
+}
+
+/* G5: the ghost pin's distance chip on the reveal map (map is replay-blocked). */
+.ghost-chip {
+  color: #e9dcff;
+  font-weight: 700;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px #000, 0 0 2px #000;
+}
+
 .daily-rules {
   color: var(--muted);
   font-size: 1rem;
