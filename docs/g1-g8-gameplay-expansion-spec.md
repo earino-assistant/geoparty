@@ -1324,8 +1324,10 @@ user-visible work):**
 - **TV twist interstitial (C1):** the full-screen `.twist-card-overlay` ritual
   fires once per round on **both** the couch TV (`screen-ui.js`) **and** the h2h
   TV (`screen-h2h.js`) — Blind Duel included — not the HUD tag alone; the host
-  phone shows its own card. Gated by the pure `twist.js#twistCardForRound` so all
-  three surfaces decide identically; reduced-motion → fade (CSS).
+  phone shows its own card. The h2h TV uses the pure
+  `twist.js#twistCardForRound` gate; couch TV and host phone use equivalent inline
+  gating. All three surfaces therefore decide identically; reduced-motion → fade
+  (CSS).
 - **Party ACE (C2):** medal caption on the h2h reveal result line, an ACE stamp
   on the acing phone, and an ACE burst on the TV reveal that fires in **every**
   farthest-first cascade — the couch solo reveal, the couch Final Showdown, and
