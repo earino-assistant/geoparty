@@ -1114,16 +1114,11 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
 }
 
 /* P1.1 REVISED: the sequence/play transport above the pano (play, prev,
-   next) is a control players DO use — it auto-walks connected scenery. Keep
-   it visible but restyled to the dark+gold language. The zoom/bearing
-   clusters stay too. (The original polish pass hid it outright; the owner
-   flagged the top play control as missing — restore it.) */
-.viewer-full .mapillary-sequence-container {
-  background: rgba(23, 23, 30, 0.75);
-  border: 1px solid var(--panel-2);
-  border-radius: 8px;
-  color: var(--fg);
-}
+   next) is a control players DO use — it auto-walks connected scenery.
+   Restore it (the polish pass's display:none was removed) with NO extra box
+   treatment — the owner flagged a small opaque block above the control from
+   an earlier boxed restyle. Mapillary's native compact transport renders
+   cleanly; only its position is nudged to sit at the top. */
 .viewer-full .mapillary-zoom-container button,
 .viewer-full .mapillary-bearing-indicator-container {
   background: rgba(23, 23, 30, 0.75);
