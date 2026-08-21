@@ -59,6 +59,18 @@ export function partyShareText({ best, points, url }) {
   return `GeoParty 🌍 ${brag}${points.toLocaleString()} pts — beat us: ${url}`;
 }
 
+// The win screen's own brag line (distinct from the share-card text above):
+// the winner's closest pin, ACE-tagged the same way the party card is.
+// "" when there's nothing to brag about (an all-forfeit win).
+export function winBragText(best) {
+  if (!best || typeof best.km !== "number") return "";
+  const dist = formatDistance(best.km);
+  const lead = best.km < ACE_MAX_KM
+    ? `🎯 Your ACE pin — ${dist}`
+    : `Your closest pin — ${dist}`;
+  return best.place ? `${lead} from ${best.place}` : lead;
+}
+
 /* ================================================================
  * The daily card: puzzle number, score, and the emoji row — one
  * square per round, graded by distance. The row is the Wordle grid:

@@ -175,8 +175,11 @@
 
   <!-- 7. Game over: winner takes the crown — and the host seat -->
   <section id="p-gameover" class="phase-screen hidden">
+    <div id="pConfetti" class="confetti" aria-hidden="true"></div>
+    <div class="win-bloom" aria-hidden="true"></div>
     <div class="host-wrap">
-      <h1 id="pGameOverTitle">Game over!</h1>
+      <h1 id="pGameOverTitle" data-ph-mask role="status">Game over!</h1>
+      <div id="pWinStat" class="win-stat hidden" data-ph-mask></div>
       <!-- G3 Crown Night: full-screen champion, else the muted tally. -->
       <div id="pChampion" data-ph-mask class="night-champion hidden"></div>
       <div id="pNightTally" data-ph-mask class="night-tally hidden"></div>

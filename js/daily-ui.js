@@ -61,8 +61,10 @@ import {
   panoHintCard,
 } from "./hints.js";
 import { oneShotHint, dismissHintCard, paintLockButton } from "./hints-ui.js";
-import { countdownTick } from "./fx.js";
-import { initSound, playSound, buzz, stampFlash, prefersReducedMotion } from "./fx-ui.js";
+import { countdownTick, celebrationSpec } from "./fx.js";
+import {
+  initSound, playSound, buzz, stampFlash, prefersReducedMotion, spawnConfetti,
+} from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
 import { scrubErrorMessage } from "./imagery.js";
 import { track } from "./consent.js";
@@ -629,7 +631,6 @@ function nextOrFinish() {
 async function finishRun() {
   stopTick();
   destroyViewer();
-  playSound("fanfare");
 
   // R1 idempotency: a duel whose day+mode is already resolved (an earlier
   // instant-verdict, or a replay that raced the boot guard) folds NOTHING
@@ -679,6 +680,13 @@ async function finishRun() {
     saveRecords(localStorage, records);
   }
 
+  // "Your Color Takes the Room": a notable run (a PB, an ACE, or the streak
+  // landing on a week boundary) earns the bigger championFanfare instead of
+  // the plain one — never on an exhibition, which changed nothing real.
+  const notable = !isExhibition &&
+    (pb || aces > 0 || (!run.hard && streakCount > 0 && streakCount % 7 === 0));
+  playSound(notable ? "championFanfare" : "fanfare");
+
   if (plan.emitCompleted) {
     track("daily_challenge_completed", {
       day_number: runDayNum,
@@ -693,7 +701,7 @@ async function finishRun() {
     });
   }
 
-  renderDone(run, false, { verdict, streakCount, graceUsed, pb, aces });
+  renderDone(run, false, { verdict, streakCount, graceUsed, pb, aces, notable });
 }
 
 // "3rd", "21st" — the ACE counter's ordinal (spec §3.4). Handles the 11–13
@@ -779,11 +787,40 @@ async function instantVerdict(saved) {
 function renderDone(result, alreadyPlayed, extra = {}) {
   showScreen("d-done");
   const star = result.hard ? "*" : "";
-  $("dDoneTitle").textContent = alreadyPlayed
+  const doneEl = $("d-done");
+  const titleEl = $("dDoneTitle");
+  titleEl.textContent = alreadyPlayed
     ? `You played Daily #${runDayNum}${star} ✓`
     : `Daily #${runDayNum}${star} done!`;
   $("dDoneScore").textContent = result.score.toLocaleString();
   $("dDoneEmoji").textContent = emojiRow(result.rounds);
+
+  // "Your Color Takes the Room": only a genuinely fresh, non-exhibition run
+  // gets the celebration — replaying an already-played day or an exhibition
+  // duel earns neither confetti nor the punched-up headline (no winLine:
+  // the Daily is solo, so there's no room's-worth of team names to remix).
+  const fresh = !alreadyPlayed && !isExhibition;
+  const plan = fresh ? celebrationSpec({
+    won: true,
+    champion: !!extra.notable,
+    teamColor: null,
+    seed: `daily:${runDayNum}:${result.score}`,
+    surface: "daily",
+  }) : null;
+  if (plan) {
+    doneEl.style.setProperty("--win", plan.winVar);
+    doneEl.classList.add("is-win");
+    doneEl.classList.toggle("is-champion", plan.tier === "champion");
+    titleEl.classList.add("win-headline");
+    spawnConfetti($("dConfetti"), {
+      seed: plan.seed, tier: plan.tier, accentColor: plan.accentColor,
+      spread: plan.spread, count: plan.count,
+    });
+  } else {
+    doneEl.style.removeProperty("--win");
+    doneEl.classList.remove("is-win", "is-champion");
+    titleEl.classList.remove("win-headline");
+  }
 
   // G1/G8 lines (never on an exhibition — it changed nothing).
   const streakEl = $("dDoneStreak");

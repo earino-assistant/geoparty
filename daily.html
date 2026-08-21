@@ -114,8 +114,10 @@
 
   <!-- 5. Done: the score, the emoji row, the share card -->
   <section id="d-done" class="phase-screen hidden">
+    <div id="dConfetti" class="confetti" aria-hidden="true"></div>
+    <div class="win-bloom" aria-hidden="true"></div>
     <div class="host-wrap">
-      <h1 id="dDoneTitle">Daily done!</h1>
+      <h1 id="dDoneTitle" role="status">Daily done!</h1>
       <div class="stat-card">
         <div class="label">Your score</div>
         <div class="big" id="dDoneScore" style="color: var(--accent)">—</div>

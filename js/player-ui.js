@@ -104,11 +104,11 @@ import {
   countdownText,
   holdAdvancePatch,
 } from "./autoadvance.js";
-import { withUtm, partyShareText, foldBestMoment } from "./share.js";
+import { withUtm, partyShareText, foldBestMoment, winBragText } from "./share.js";
 import { shareResult, shareTvLink } from "./share-ui.js";
 import { screenLink, tvBrowserLine, phoneJoinLine } from "./tvlink.js";
-import { countdownTick } from "./fx.js";
-import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
+import { countdownTick, winLine, celebrationSpec } from "./fx.js";
+import { initSound, playSound, buzz, stampFlash, spawnConfetti } from "./fx-ui.js";
 import {
   loadRecords, saveRecords, applyPartyGuess, medalForDistance,
 } from "./records.js";
@@ -300,6 +300,7 @@ let revealTickSecond = null; // S4: same, for the no-TV reveal 3-2-1
 let stungFor = null;        // S4: round number the reveal sting played for
 let acedFor = null;         // G4: round number the ACE stamp fired for
 let fanfarePlayed = false;  // S4: game-over fanfare, once per room
+let winCelebrated = false;  // win celebration: confetti + buzz, once per room
 
 const isHost = () => !!room && room.hostTeam === myTeam;
 const myResult = () =>
@@ -502,6 +503,7 @@ function enterRoom(code, teamId) {
   stungFor = null;
   acedFor = null;
   fanfarePlayed = false;
+  winCelebrated = false;
   localStage = "explore";
   superSureArmed = false;
   switchingRooms = false;
@@ -1962,12 +1964,55 @@ function nextOrFinish(advance) {
 
 function renderGameOver() {
   showScreen("p-gameover");
-  if (!fanfarePlayed) { fanfarePlayed = true; playSound("fanfare"); } // S4
   destroyViewer();
   const winner = room.hostTeam; // rotated to the winner at finish
   const winnerName = room.teams[winner] ? room.teams[winner].name : "The winner";
   const iWon = winner === myTeam;
-  $("pGameOverTitle").textContent = iWon ? "🏆 You won!" : "Game over!";
+  const bumped = bumpNight(room.night || defaultNight(), winner);
+  const isChampion = !!champion(bumped);
+  // S4: the game-over cue plays once per room, regardless of who's watching;
+  // a Crown Night win earns the bigger championFanfare instead.
+  if (!fanfarePlayed) {
+    fanfarePlayed = true;
+    playSound(isChampion ? "championFanfare" : "fanfare");
+  }
+  const gameOverEl = $("p-gameover");
+  const titleEl = $("pGameOverTitle");
+  const statEl = $("pWinStat");
+  // "Your Color Takes the Room": the celebration renders on the WINNER's own
+  // phone only — everyone else's game-over screen stays exactly as before.
+  if (iWon) {
+    const seed = `${roomCode}:${bumped.games}`;
+    const plan = celebrationSpec({
+      won: true,
+      champion: isChampion,
+      teamColor: teamHex(room.teams, winner),
+      seed,
+      surface: "phone",
+    });
+    gameOverEl.style.setProperty("--win", plan.winVar);
+    gameOverEl.classList.add("is-win");
+    gameOverEl.classList.toggle("is-champion", isChampion);
+    titleEl.textContent = isChampion ? "🏆 You won!" : winLine(seed, winnerName);
+    titleEl.classList.add("win-headline");
+    const brag = winBragText(myBest);
+    statEl.textContent = brag;
+    statEl.classList.toggle("hidden", !brag);
+    if (!winCelebrated) {
+      winCelebrated = true;
+      spawnConfetti($("pConfetti"), {
+        seed: plan.seed, tier: plan.tier, accentColor: plan.accentColor,
+        spread: plan.spread, count: plan.count,
+      });
+      buzz([40, 30, 70]);
+    }
+  } else {
+    gameOverEl.style.removeProperty("--win");
+    gameOverEl.classList.remove("is-win", "is-champion");
+    titleEl.textContent = "Game over!";
+    titleEl.classList.remove("win-headline");
+    statEl.classList.add("hidden");
+  }
   renderTotalsList($("pFinalTotals"));
   // §2.9 / §4.1: exactly one primary per state. The winner's primary is the
   // next game; for everyone else Share becomes the primary, so the bar is
@@ -1978,7 +2023,7 @@ function renderGameOver() {
   $("pHandoffNote").textContent = iWon
     ? "Winner runs the table: your phone is the host now. Set up the next game and everyone follows automatically."
     : `${winnerName} won — their phone is the host now. Stay here; you'll follow into their next game automatically.`;
-  renderNightTally(bumpNight(room.night || defaultNight(), winner), iWon);
+  renderNightTally(bumped, iWon);
 }
 
 // G3: the night tally + champion ceremony on the h2h game-over screen, and the

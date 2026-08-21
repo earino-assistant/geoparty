@@ -24,6 +24,9 @@ import {
   CONFETTI_GOLD,
   CONFETTI_TV_COUNT,
   CONFETTI_MAX,
+  WIN_LINES,
+  winLine,
+  celebrationSpec,
 } from "../js/fx.js";
 
 // localStorage-shaped in-memory store (same double as analytics.test.js).
@@ -253,4 +256,141 @@ test("confettiSpec: the default count is the sparse TV loop, capped", () => {
   assert.equal(confettiSpec({ seed: "d", tier: "win" }).length, CONFETTI_TV_COUNT);
   assert.ok(confettiSpec({ seed: "d", tier: "champion", count: 1000 }).length
     <= CONFETTI_MAX, "an absurd count is capped so the loop stays cheap");
+});
+
+/* ---------------- "Your Color Takes the Room" ---------------- */
+
+test("confettiSpec: omitting accentColor/spread reproduces the pre-existing baseline", () => {
+  const base = confettiSpec({ seed: "R:1", tier: "win", count: 40 });
+  const explicit = confettiSpec({
+    seed: "R:1", tier: "win", count: 40, accentColor: undefined, spread: undefined,
+  });
+  assert.deepEqual(explicit, base);
+  assert.deepEqual(
+    confettiSpec({ seed: "R:1", tier: "champion", count: 40 }),
+    confettiSpec({ seed: "R:1", tier: "champion", count: 40, accentColor: null }));
+});
+
+test("confettiSpec: accentColor weights roughly 40% of an ordinary win's strips", () => {
+  const bits = confettiSpec({
+    seed: "accent-seed", tier: "win", count: 160, accentColor: "#123456",
+  });
+  const accented = bits.filter((b) => b.color === "#123456").length;
+  const frac = accented / bits.length;
+  assert.ok(frac > 0.3 && frac < 0.5, `accent fraction was ${frac}`);
+});
+
+test("confettiSpec: champion tier ignores accentColor — always CONFETTI_GOLD", () => {
+  const bits = confettiSpec({
+    seed: "champ-accent", tier: "champion", count: 100, accentColor: "#123456",
+  });
+  for (const b of bits) assert.ok(CONFETTI_GOLD.includes(b.color), b.color);
+});
+
+test("confettiSpec: spread='burst' compresses duration/delay only", () => {
+  const rain = confettiSpec({ seed: "S", tier: "win", count: 80 });
+  const burst = confettiSpec({ seed: "S", tier: "win", count: 80, spread: "burst" });
+  const maxOf = (arr, k) => Math.max(...arr.map((b) => b[k]));
+  assert.ok(maxOf(burst, "durationS") < maxOf(rain, "durationS"));
+  assert.ok(maxOf(burst, "delayS") < maxOf(rain, "delayS"));
+  for (let i = 0; i < rain.length; i++) {
+    assert.equal(burst[i].left, rain[i].left, "left untouched");
+    assert.equal(burst[i].color, rain[i].color, "color untouched");
+    assert.equal(burst[i].driftVw, rain[i].driftVw, "driftVw untouched");
+    assert.equal(burst[i].spinDeg, rain[i].spinDeg, "spinDeg untouched");
+    assert.equal(burst[i].sizeScale, rain[i].sizeScale, "sizeScale untouched");
+  }
+});
+
+test("confettiSpec: bounds hold with accentColor + burst spread together", () => {
+  const bits = confettiSpec({
+    seed: "bounds", tier: "win", accentColor: "#fff", spread: "burst",
+  });
+  for (const b of bits) {
+    assert.ok(b.left >= 0 && b.left <= 100, "left");
+    assert.ok(b.durationS > 0, "durationS positive");
+    assert.ok(b.delayS >= 0, "delayS non-negative");
+  }
+  assert.deepEqual(confettiSpec({
+    seed: "bounds", tier: "win", accentColor: "#fff", spread: "burst", reducedMotion: true,
+  }), []);
+});
+
+test("SOUND_SPECS.championFanfare: longer and higher than the ordinary fanfare", () => {
+  const totalDur = (notes) => Math.max(...notes.map((n) => n.at + n.dur));
+  const peakFreq = (notes) => Math.max(...notes.map((n) => n.freq));
+  assert.ok(totalDur(SOUND_SPECS.championFanfare) > totalDur(SOUND_SPECS.fanfare),
+    "championFanfare rings longer");
+  assert.ok(peakFreq(SOUND_SPECS.championFanfare) > peakFreq(SOUND_SPECS.fanfare),
+    "championFanfare climbs higher");
+});
+
+test("winLine: deterministic for a given seed + subject", () => {
+  assert.equal(winLine("room:1", "Team Blue"), winLine("room:1", "Team Blue"));
+});
+
+test("winLine: always contains the subject", () => {
+  for (let i = 0; i < 30; i++) {
+    assert.ok(winLine(`seed-${i}`, "Team Blue").includes("Team Blue"), `seed-${i}`);
+  }
+});
+
+test("winLine: covers all five lines across enough seeds", () => {
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) {
+    const text = winLine(`s${i}`, "X");
+    for (const line of WIN_LINES) if (text.includes(line)) seen.add(line);
+  }
+  assert.equal(seen.size, WIN_LINES.length);
+});
+
+test("celebrationSpec: won:false (or missing) yields null", () => {
+  assert.equal(celebrationSpec({ won: false }), null);
+  assert.equal(celebrationSpec(), null);
+});
+
+test("celebrationSpec: champion win — gold, no accent, championFanfare", () => {
+  const spec = celebrationSpec({
+    won: true, champion: true, teamColor: "#4dd6ff", seed: "s", surface: "phone",
+  });
+  assert.equal(spec.tier, "champion");
+  assert.equal(spec.winVar, "gold");
+  assert.equal(spec.accentColor, null);
+  assert.equal(spec.sound, "championFanfare");
+});
+
+test("celebrationSpec: ordinary win with a team color — teamColor/accent/fanfare", () => {
+  const spec = celebrationSpec({
+    won: true, champion: false, teamColor: "#4dd6ff", seed: "s", surface: "phone",
+  });
+  assert.equal(spec.tier, "win");
+  assert.equal(spec.winVar, "#4dd6ff");
+  assert.equal(spec.accentColor, "#4dd6ff");
+  assert.equal(spec.sound, "fanfare");
+});
+
+test("celebrationSpec: no team color falls back to var(--accent), no accent color", () => {
+  const spec = celebrationSpec({
+    won: true, champion: false, teamColor: null, seed: "s", surface: "daily",
+  });
+  assert.equal(spec.winVar, "var(--accent)");
+  assert.equal(spec.accentColor, null);
+});
+
+test("celebrationSpec: tv gets 'rain'/no fixed count; every other surface gets 'burst'/70", () => {
+  const tv = celebrationSpec({
+    won: true, champion: false, teamColor: "#fff", seed: "s", surface: "tv",
+  });
+  assert.equal(tv.spread, "rain");
+  assert.equal(tv.count, undefined);
+  const phone = celebrationSpec({
+    won: true, champion: false, teamColor: "#fff", seed: "s", surface: "phone",
+  });
+  assert.equal(phone.spread, "burst");
+  assert.equal(phone.count, 70);
+  const daily = celebrationSpec({
+    won: true, champion: false, teamColor: null, seed: "s", surface: "daily",
+  });
+  assert.equal(daily.spread, "burst");
+  assert.equal(daily.count, 70);
 });

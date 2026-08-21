@@ -67,6 +67,15 @@ one.
   merged board that replaced `#pRoundResults` + `#pRevealTotals`
 - `#pChampion`, `#pNightTally`, `#pNightHook` — G3 Crown Night champion /
   tally / "Game N?" hook carry team names
+- `#pGameOverTitle` — the win celebration's headline: a non-champion win
+  renders `fx.js#winLine`, which interpolates the winning team's name
+  (`player-ui.js#renderGameOver`)
+- `#pWinStat` — the win screen's own brag line (`share.js#winBragText`);
+  aggregates only (distance, place name from the pool), but masked anyway
+  for consistency with the rest of this game-over screen
+- `#pConfetti`, `.win-bloom` — unmasked, deliberately: decorative only, the
+  confetti strips and radial bloom render inline colors/geometry, never
+  text or a coordinate
 - `#pRevealPlace` — the round's answer (now the reveal headline)
 - `#pRevealResult` — unmasked, deliberately: aggregates only (see above)
 - `#pLobbyNote` — the lobby status line names the host team ("Waiting for
@@ -104,6 +113,12 @@ one.
 - `#toast` — masked wholesale for parity with the host/player toasts. The
   Daily is solo (no team names), but masking here keeps the rule uniform and
   future-proof
+- `#dConfetti`, `.win-bloom`, `#dDoneTitle` — unmasked, deliberately:
+  `#dConfetti`/`.win-bloom` are decorative only (inline colors/geometry,
+  same as the party win screen above); `#dDoneTitle` carries no team name
+  either — the Daily win celebration has no `winLine` (solo, no team name
+  to interpolate), so its headline is only ever the existing static
+  done-title copy
 
 ### Cross-page
 - `.leaflet-tooltip` — Leaflet pin labels carry team names on reveal maps

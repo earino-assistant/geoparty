@@ -13,6 +13,7 @@ import {
   emojiRow,
   dailyShareText,
   dailyChallengeUrl,
+  winBragText,
 } from "../js/share.js";
 import { parseGhostFragment, encodeGhost } from "../js/ghost.js";
 
@@ -101,6 +102,30 @@ test("partyShareText: a sub-1km best moment adds the 🎯 ACE expression", () =>
     best: { km: 3.2, place: "Kyoto, Japan" }, points: 5200, url: "https://x.test/",
   });
   assert.doesNotMatch(notAce, /🎯 ACE/);
+});
+
+/* ---------------- winBragText (win-screen brag line) ---------------- */
+
+test("winBragText: no best moment (or no distance) is silent", () => {
+  assert.equal(winBragText(null), "");
+  assert.equal(winBragText(undefined), "");
+  assert.equal(winBragText({ km: null, place: "Kyoto" }), "");
+  assert.equal(winBragText({ place: "Kyoto" }), "");
+});
+
+test("winBragText: a sub-1km best moment gets the ACE tag", () => {
+  assert.equal(winBragText({ km: 0.4, place: null }), "🎯 Your ACE pin — 0.4 km");
+});
+
+test("winBragText: an ordinary closest pin has no ACE tag", () => {
+  assert.equal(winBragText({ km: 3.2, place: null }), "Your closest pin — 3.2 km");
+});
+
+test("winBragText: a place name is appended when present", () => {
+  assert.equal(winBragText({ km: 3.2, place: "Kyoto, Japan" }),
+    "Your closest pin — 3.2 km from Kyoto, Japan");
+  assert.equal(winBragText({ km: 0.4, place: "Kyoto, Japan" }),
+    "🎯 Your ACE pin — 0.4 km from Kyoto, Japan");
 });
 
 /* ---------------- the daily card ---------------- */

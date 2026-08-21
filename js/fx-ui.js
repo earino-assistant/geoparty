@@ -158,11 +158,11 @@ export function prefersReducedMotion() {
  * ("champion" | "win") picks the richer gold-weighted set. Reduced motion
  * yields an empty spec (and the CSS hides .confetti anyway) — no strips.
  * ================================================================ */
-export function spawnConfetti(wrap, { seed, tier, count } = {}) {
+export function spawnConfetti(wrap, { seed, tier, count, accentColor, spread } = {}) {
   if (!wrap) return 0;
   wrap.innerHTML = "";
   const bits = confettiSpec({
-    count, seed, tier, reducedMotion: prefersReducedMotion(),
+    count, seed, tier, accentColor, spread, reducedMotion: prefersReducedMotion(),
   });
   for (const b of bits) {
     const strip = document.createElement("i");

@@ -110,10 +110,46 @@ export const SOUND_SPECS = Object.freeze({
     Object.freeze({ at: 0.36, freq: 1046.5, dur: 0.55, gain: 0.2, type: "triangle" }),
     Object.freeze({ at: 0.36, freq: 523.25, dur: 0.55, gain: 0.1, type: "sine" }),
   ]),
+  // The champion fanfare: a Crown Night win goes bigger than an ordinary
+  // game-over — a ringing C5-C6-E6 triad, a C7 shimmer riding the ring, and
+  // a low C5 bass landing after (longer and higher than `fanfare`).
+  championFanfare: Object.freeze([
+    Object.freeze({ at: 0, freq: 523.25, dur: 0.14, gain: 0.16, type: "triangle" }),
+    Object.freeze({ at: 0.12, freq: 1046.5, dur: 0.14, gain: 0.16, type: "triangle" }),
+    Object.freeze({ at: 0.24, freq: 1318.51, dur: 0.5, gain: 0.2, type: "triangle" }),
+    Object.freeze({ at: 0.24, freq: 2093, dur: 0.4, gain: 0.08, type: "sine" }),
+    Object.freeze({ at: 0.7, freq: 523.25, dur: 0.5, gain: 0.12, type: "sine" }),
+  ]),
 });
 
 export function soundSpec(name) {
   return SOUND_SPECS[name] || null;
+}
+
+/* ================================================================
+ * "Your Color Takes the Room" win celebration — the headline copy. Five
+ * plural-verb lines (a team name reads as a plural subject: "Team Awesome
+ * take the room") plus one that already names the room. A seeded pick
+ * keeps a given game's headline stable across re-renders without needing
+ * Math.random. Champion nights get their own fixed "🏆 You won!" headline
+ * instead (celebrationSpec below) — winLine is only ever the ordinary-win
+ * copy.
+ * ================================================================ */
+
+export const WIN_LINES = Object.freeze([
+  "take the room",
+  "run the table",
+  "The room belongs to",
+  "own the map",
+  "that's the game",
+]);
+
+export function winLine(seed, subject) {
+  const idx = hashSeed(String(seed == null ? "" : seed)) % WIN_LINES.length;
+  const line = WIN_LINES[idx];
+  if (idx === 2) return `${line} ${subject}`;      // "The room belongs to X"
+  if (idx === 4) return `${subject} — ${line}`;    // "X — that's the game"
+  return `${subject} ${line}`;                     // "X take the room" etc.
 }
 
 /* ================================================================
@@ -158,28 +194,45 @@ export const CONFETTI_GOLD = Object.freeze(
 export const CONFETTI_TV_COUNT = 90;   // the sparse-but-full TV loop default
 export const CONFETTI_MAX = 160;       // hard cap (champion, still cheap)
 
+// "Your Color Takes the Room": an ordinary win weights ~40% of the strips to
+// the winner's own team color instead of the fixed palette. Champion bursts
+// ignore this — gold is the whole point of a Crown Night.
+export const ACCENT_WEIGHT = 0.4;
+
 function confettiSeedInt(seed) {
   if (typeof seed === "number" && Number.isFinite(seed)) return seed >>> 0;
   return hashSeed(String(seed == null ? "confetti" : seed));
 }
 
-// { count, seed, tier, reducedMotion } → an array of strip specs. Same inputs
-// always yield the same array (deterministic for tests and for a stable loop
-// per game). Each strip:
+// { count, seed, tier, reducedMotion, accentColor, spread } → an array of
+// strip specs. Same inputs always yield the same array (deterministic for
+// tests and for a stable loop per game). Each strip:
 //   left      0..100  (% of width)
-//   color     one of the tier's palette
+//   color     one of the tier's palette, or the accent color (see below)
 //   durationS positive fall duration (s)
 //   delayS    >= 0 start delay (s)
 //   driftVw   horizontal sway at the bottom (vw, signed)
 //   spinDeg   total rotation over the fall (deg, >= 360)
 //   sizeScale > 0 strip-size multiplier
-export function confettiSpec({ count, seed, tier, reducedMotion } = {}) {
+//
+// accentColor: a CSS color string (the winner's team color). Reuses the
+// existing rColor draw below ACCENT_WEIGHT instead of the palette pick — no
+// new rand() call, so a caller that omits it gets a byte-identical baseline
+// burst. Ignored for a champion tier (gold only).
+// spread: "burst" compresses the duration/delay arithmetic only (a phone-
+// sized confetti burst reads better tighter and faster than the TV's lazy
+// "rain"); every other axis (drift/spin/size) is untouched.
+export function confettiSpec({
+  count, seed, tier, reducedMotion, accentColor, spread,
+} = {}) {
   if (reducedMotion === true) return [];   // reduced motion → no confetti
   const champion = tier === "champion";
   const base = Number.isFinite(count) && count > 0
     ? Math.floor(count) : CONFETTI_TV_COUNT;
   const n = Math.min(CONFETTI_MAX, champion ? Math.round(base * 1.4) : base);
   const palette = champion ? CONFETTI_GOLD : CONFETTI_COLORS;
+  const useAccent = !champion && typeof accentColor === "string" && !!accentColor;
+  const burst = spread === "burst";
   const rand = mulberry32(confettiSeedInt(seed));
   const round1 = (x) => Math.round(x * 10) / 10;
   const round2 = (x) => Math.round(x * 100) / 100;
@@ -195,15 +248,48 @@ export function confettiSpec({ count, seed, tier, reducedMotion } = {}) {
     // Champion biases toward the gold end of the palette (squared → front-loaded).
     const pick = champion ? rColor * rColor : rColor;
     const idx = Math.min(palette.length - 1, Math.floor(pick * palette.length));
+    const color = useAccent && rColor < ACCENT_WEIGHT ? accentColor : palette[idx];
     bits.push({
       left: round1(rLeft * 100),
-      color: palette[idx],
-      durationS: round2(2.6 + rDur * (champion ? 2.6 : 3.4)),
-      delayS: round2(rDelay * (champion ? 2.5 : 3.8)),
+      color,
+      durationS: round2((2.6 + rDur * (champion ? 2.6 : 3.4)) * (burst ? 0.55 : 1)),
+      delayS: round2(rDelay * (champion ? 2.5 : 3.8) * (burst ? 0.4 : 1)),
       driftVw: round1((rDrift * 2 - 1) * (champion ? 10 : 7)),
       spinDeg: 360 + Math.floor(rSpin * 720),
       sizeScale: round2(champion ? 1.1 + rSize * 0.7 : 0.85 + rSize * 0.6),
     });
   }
   return bits;
+}
+
+/* ================================================================
+ * celebrationSpec: the single decision point for "did this surface just
+ * win, and what should that look like" — host-ui/player-ui/daily-ui all
+ * render from the same shape instead of re-deriving it. null when there is
+ * nothing to celebrate (a loss renders the plain game-over screen).
+ * ================================================================ */
+
+// { won, champion, teamColor, seed, surface } → null, or:
+//   tier        "champion" | "win" — confettiSpec's palette selector
+//   winVar      the --win custom property value (gold beats any team color)
+//   accentColor confettiSpec's accent — null for a champion (gold only) or
+//               a plain win with no team color to lean on
+//   sound       the fx.js SOUND_SPECS name to play, once
+//   seed        passed straight through (confetti + winLine share it)
+//   spread      "rain" on the TV (the existing lazy loop), "burst" everywhere
+//               else (phone-sized surfaces read better tight and fast)
+//   count       70 off the TV; undefined on the TV (confettiSpec's own
+//               sparse default)
+export function celebrationSpec({ won, champion, teamColor, seed, surface } = {}) {
+  if (!won) return null;
+  const tv = surface === "tv";
+  return {
+    tier: champion ? "champion" : "win",
+    winVar: champion ? "gold" : (teamColor || "var(--accent)"),
+    accentColor: champion ? null : (teamColor || null),
+    sound: champion ? "championFanfare" : "fanfare",
+    seed,
+    spread: tv ? "rain" : "burst",
+    count: tv ? undefined : 70,
+  };
 }
