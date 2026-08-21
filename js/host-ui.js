@@ -89,6 +89,9 @@ import { initSound, playSound, buzz, stampFlash, spawnConfetti } from "./fx-ui.j
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
 import { scrubErrorMessage } from "./imagery.js";
 import { drawQr } from "./qr.js";
+import {
+  lastTeam, randomPun, recentTeams, rememberTeam, suggestTeams,
+} from "./team-names.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
@@ -292,18 +295,118 @@ function wireSeg(segId, onChange) {
   });
 }
 
+// Team-roster brief: which team-name input the 🎲/Recent-teams controls
+// (shared across however many inputs are on screen) act on. Tracks focus;
+// defaults to the first input when nothing has been focused yet.
+let activeTeamInput = null;
+
+function suggestionsElFor(input) {
+  return input.parentElement.querySelector(".team-suggestions");
+}
+
+function hideSuggestionsFor(input) {
+  const el = suggestionsElFor(input);
+  if (!el) return;
+  el.innerHTML = "";
+  el.classList.add("hidden");
+}
+
+function renderSuggestionsFor(input) {
+  const el = suggestionsElFor(input);
+  if (!el) return;
+  const matches = suggestTeams(input.value);
+  el.innerHTML = "";
+  if (!matches.length) { el.classList.add("hidden"); return; }
+  const recentLower = new Set(recentTeams().map((n) => n.toLowerCase()));
+  for (const match of matches) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = match;
+    // mousedown (not click) fires before the input's blur, and preventDefault
+    // keeps focus on the input so hideSuggestionsFor below can't race a blur.
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      input.value = match;
+      input.dataset.source = recentLower.has(match.toLowerCase()) ? "recent" : "pun";
+      hideSuggestionsFor(input);
+    });
+    el.appendChild(btn);
+  }
+  el.classList.remove("hidden");
+}
+
+function renderRecentTeamsList() {
+  const list = $("recentTeamsList");
+  const names = recentTeams();
+  list.innerHTML = "";
+  if (!names.length) {
+    const empty = document.createElement("div");
+    empty.className = "recent-teams-empty";
+    empty.textContent = "No recent teams yet.";
+    list.appendChild(empty);
+    return;
+  }
+  for (const name of names) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.textContent = name;
+    chip.addEventListener("click", () => fillActiveTeamInput(name, "recent"));
+    list.appendChild(chip);
+  }
+}
+
+// Fills whichever team-name input last had focus (or the first, if none
+// has yet) — the target for both the 🎲 button and a tapped Recent chip.
+function fillActiveTeamInput(value, source) {
+  const inputs = [...$("teamNames").querySelectorAll("input")];
+  if (!inputs.length) return;
+  const target = (activeTeamInput && inputs.includes(activeTeamInput)) ? activeTeamInput : inputs[0];
+  target.value = value;
+  target.dataset.source = source;
+  hideSuggestionsFor(target);
+  target.focus();
+}
+
 function renderTeamNameInputs(count) {
   const wrap = $("teamNames");
-  const existing = [...wrap.querySelectorAll("input")].map((i) => i.value);
+  const existing = [...wrap.querySelectorAll("input")].map(
+    (i) => ({ value: i.value, source: i.dataset.source }));
   wrap.innerHTML = "";
+  activeTeamInput = null;
+  $("teamNameHelpers").classList.toggle("hidden", count === 1);
   if (count === 1) return; // single team defaults to "Everyone"
   for (let i = 0; i < count; i++) {
+    const row = document.createElement("div");
+    row.className = "team-name-row";
     const input = document.createElement("input");
     input.placeholder = `Team ${i + 1} name`;
     input.maxLength = 24;
-    input.value = existing[i] || "";
-    wrap.appendChild(input);
+    const prior = existing[i];
+    if (prior && prior.value) {
+      input.value = prior.value;
+      if (prior.source) input.dataset.source = prior.source;
+    } else if (i === 0) {
+      // Pre-fill only the first slot with the device's last-used name — every
+      // slot would just duplicate the same name across teams.
+      const last = lastTeam();
+      if (last) { input.value = last; input.dataset.source = "recent"; }
+    }
+    input.addEventListener("focus", () => { activeTeamInput = input; });
+    input.addEventListener("input", () => {
+      input.dataset.source = "typed";
+      renderSuggestionsFor(input);
+    });
+    input.addEventListener("blur", () => {
+      // Suggestion taps use mousedown+preventDefault so they never blur the
+      // input; this timeout only covers a genuine tap elsewhere on screen.
+      setTimeout(() => hideSuggestionsFor(input), 120);
+    });
+    const suggestions = document.createElement("div");
+    suggestions.className = "team-suggestions hidden";
+    row.append(input, suggestions);
+    wrap.appendChild(row);
   }
+  renderRecentTeamsList();
 }
 
 function collectSettings() {
@@ -322,10 +425,15 @@ function collectTeams() {
   const inputs = [...$("teamNames").querySelectorAll("input")];
   const teams = {};
   for (let i = 0; i < count; i++) {
-    teams[`t${i + 1}`] = {
-      name: (inputs[i] && inputs[i].value.trim()) || `Team ${i + 1}`,
-      total: 0,
-    };
+    const input = inputs[i];
+    const typed = (input && input.value.trim()) || "";
+    teams[`t${i + 1}`] = { name: typed || `Team ${i + 1}`, total: 0 };
+    if (typed) {
+      const source = input.dataset.source === "pun" || input.dataset.source === "recent"
+        ? input.dataset.source : "typed";
+      rememberTeam(typed);
+      track("team_name_used", { mode: "couch", source });
+    }
   }
   return teams;
 }
@@ -1630,6 +1738,8 @@ function enterSetup() {
   showScreen("h-setup");
   $("resumeBanner").classList.add("hidden");
   renderLeaderboard();
+  // Refresh so a team named in the just-finished game shows up as "recent".
+  if (!$("teamNameHelpers").classList.contains("hidden")) renderRecentTeamsList();
 }
 
 async function checkResume() {
@@ -1759,6 +1869,7 @@ wireSeg("segMove");
 wireSeg("segDifficulty");
 wireSeg("segTwists");
 wireSeg("segTeams", (v) => renderTeamNameInputs(parseInt(v, 10)));
+$("btnSurprisePun").addEventListener("click", () => fillActiveTeamInput(randomPun(), "pun"));
 
 $("btnNewGame").addEventListener("click", newGame);
 $("btnStartRound").addEventListener("click", startRound);

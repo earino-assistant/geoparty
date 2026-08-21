@@ -42,6 +42,9 @@ into it, so a future scoreboard row cannot slip through unmasked.
   the phone — Blue is up!", `host-ui.js`). The Report inline action still
   works on the live DOM; masking is replay-only
 - `#teamNames` — the setup textarea
+- `#teamNameHelpers` — team-roster brief: the 🎲 Surprise-me control and the
+  Recent-teams disclosure, whose chips render this device's remembered team
+  names (`host-ui.js#renderRecentTeamsList`)
 - `#leaderboardList` — stored team names + dates
 - `#revealPlace` — **the round's answer, as a place name** (now the reveal
   headline rather than a stat card — same element id, same mask)

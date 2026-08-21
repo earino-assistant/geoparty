@@ -577,6 +577,17 @@ test("sanitizeEvent: howto_opened keeps only the source enum (§6)", () => {
   assert.deepEqual(out2.props, { source: "gameover" });
 });
 
+test("sanitizeEvent: team_name_used keeps mode/source, never the team name text", () => {
+  const out = sanitizeEvent("team_name_used", {
+    mode: "couch", source: "pun",
+    name: "The Atlas Cats", team_name: "The Atlas Cats", // never sent
+  });
+  assert.deepEqual(out, {
+    event: "team_name_used",
+    props: { mode: "couch", source: "pun" },
+  });
+});
+
 test("sanitizeEvent: consent events carry no properties", () => {
   const out = sanitizeEvent("consent_given", { room: "KWPFRT", extra: 1 });
   assert.deepEqual(out, { event: "consent_given", props: {} });

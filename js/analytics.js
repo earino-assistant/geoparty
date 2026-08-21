@@ -383,6 +383,12 @@ export const EVENT_SCHEMA = Object.freeze({
   // onboarding-funnel question: does the explainer get found, and from
   // where? howto.html itself has no controller/events beyond this one.
   howto_opened: { source: "string" },
+  // Team-roster brief: which entry path filled a couch team-name input at
+  // game creation — "typed" (hand-entered) | "pun" (🎲 Surprise me) |
+  // "recent" (a Recent teams chip, a type-ahead pick, or the pre-fill from
+  // the device's last-used name). Answers whether the pun bank / recent
+  // roster actually cut typing, never the name itself.
+  team_name_used: { mode: "string", source: "string" },
 
   /* ---- Field observability (docs/field-observability-plan.md §7.1) ----
    * Aggregates only. `pool_entry` is the opaque diag id from
