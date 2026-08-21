@@ -66,7 +66,7 @@ import {
   initSound, playSound, buzz, stampFlash, prefersReducedMotion, spawnConfetti,
 } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
-import { scrubErrorMessage } from "./imagery.js";
+import { scrubErrorMessage, basemapTileLayerConfig } from "./imagery.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
@@ -373,10 +373,8 @@ function ensureGuessMap() {
   if (guessMap) return;
   guessMap = L.map("dailyGuessMap", { worldCopyJump: true, zoomControl: false })
     .setView([25, 10], 2);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(guessMap);
+  const bm = basemapTileLayerConfig();
+  L.tileLayer(bm.url, bm.options).addTo(guessMap);
   guessMap.on("click", (e) => {
     if (guessMarker) {
       guessMarker.setLatLng(e.latlng);
@@ -534,7 +532,7 @@ function renderReveal(guess) {
   }
 
   $("btnDNext").textContent =
-    dailyRunComplete(run) ? "See My Score" : "Next Round";
+    dailyRunComplete(run) ? "See my score" : "Next round";
   renderRevealMap(guess, ghostRes);
 }
 
@@ -555,10 +553,8 @@ function renderRevealMap(guess, ghostRes) {
     zoomControl: false, dragging: false, scrollWheelZoom: false,
     doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false,
   });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(revealMap);
+  const bm = basemapTileLayerConfig();
+  L.tileLayer(bm.url, bm.options).addTo(revealMap);
   const truth = L.latLng(current.lat, current.lng);
   const bounds = [truth];
   if (guess) {
@@ -1015,6 +1011,9 @@ $("btnDLockIn").addEventListener("click", () => lockIn(false));
 $("btnDNext").addEventListener("click", nextOrFinish);
 $("btnDHardStart").addEventListener("click", startHardMode);
 $("btnDHardDone").addEventListener("click", startHardMode);
+// §6: the done-screen "How to play" link.
+$("dHowto").addEventListener("click", () =>
+  track("howto_opened", { source: "gameover" }));
 
 // Report a link that arrived broken (before any run), and seed the PB from an
 // existing same-device result so day-one players don't see "no best" (§3.8).

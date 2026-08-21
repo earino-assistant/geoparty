@@ -8,16 +8,18 @@
   <link rel="icon" href="assets/favicon-48.png" type="image/png" sizes="48x48" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <meta name="theme-color" content="#111111" />
+  <link rel="canonical" href="https://geoparty.social/screen.html" />
+  <link rel="preload" href="assets/SpaceGrotesk-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <meta name="theme-color" content="#0E0E12" />
   <!-- Shared "TV link"s land here — unfurl as a card, not a bare URL. -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="GeoParty" />
   <meta property="og:title" content="GeoParty — put the game on this screen" />
   <meta property="og:description" content="Open on the TV (or cast this tab) and the party appears, big and loud." />
-  <meta property="og:url" content="https://earino-assistant.github.io/geoparty/screen.html" />
-  <meta property="og:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta property="og:url" content="https://geoparty.social/screen.html" />
+  <meta property="og:image" content="https://geoparty.social/assets/og-image.png" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta name="twitter:image" content="https://geoparty.social/assets/og-image.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.css"
         integrity="sha384-IamMZxz60pSNzUk3cW2nl3uYUdpiDoQpLJrBoAAezEE+QaOYCVA9rfi/8Cx0x15T" crossorigin="anonymous" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -42,7 +44,7 @@
   <section id="s-lobby" class="phase-screen hidden">
     <div class="tv-center">
       <h1 class="tv-title"><span class="geo">Geo</span>Party</h1>
-      <p class="tv-sub">Waiting for the operator…</p>
+      <p class="tv-sub">Waiting for the host…</p>
       <div id="lobbyTeams" data-ph-mask class="tv-teams"></div>
       <!-- G3 Crown Night: the muted tally, from game 2 on. -->
       <div id="tvLobbyNight" data-ph-mask class="night-tally hidden"></div>
@@ -89,7 +91,7 @@
   <section id="s-h2h-lobby" class="phase-screen hidden">
     <div class="tv-center">
       <h1 class="tv-title"><span class="geo">Geo</span>Party <span class="h2h-tag">head-to-head</span></h1>
-      <div id="h2hLobbyCode" class="h2h-lobby-code" data-ph-mask>······</div>
+      <div id="h2hLobbyCode" class="h2h-lobby-code skeleton" data-ph-mask>······</div>
       <p id="h2hLobbyUrl" data-ph-mask class="tv-sub"></p>
       <div id="h2hLobbyTeams" data-ph-mask class="tv-teams"></div>
       <p id="h2hLobbyNote" data-ph-mask class="tv-sub"></p>
@@ -137,6 +139,7 @@
            demoted to a text button inside it. -->
       <p class="tv-newgame-line">Start a new game on the host's phone — this
         screen follows.<button id="btnNewEntry" class="tv-newgame" type="button">Enter a code</button></p>
+      <p class="game-over-ownership">© 2026 Eduardo Ariño de la Rubia · A game by Eduardo Ariño de la Rubia</p>
     </div>
   </section>
 

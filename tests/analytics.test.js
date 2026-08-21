@@ -568,6 +568,15 @@ test("sanitizeEvent: sound_toggled keeps surface + strictly-boolean enabled", ()
   }
 });
 
+test("sanitizeEvent: howto_opened keeps only the source enum (§6)", () => {
+  const out = sanitizeEvent("howto_opened", {
+    source: "footer", room: "KWPFRT", team_name: "The Atlas Cats", lat: 1,
+  });
+  assert.deepEqual(out, { event: "howto_opened", props: { source: "footer" } });
+  const out2 = sanitizeEvent("howto_opened", { source: "gameover" });
+  assert.deepEqual(out2.props, { source: "gameover" });
+});
+
 test("sanitizeEvent: consent events carry no properties", () => {
   const out = sanitizeEvent("consent_given", { room: "KWPFRT", extra: 1 });
   assert.deepEqual(out, { event: "consent_given", props: {} });
@@ -1299,6 +1308,15 @@ test("maskNetworkRequest: OSM tiles are dropped — a tile path is a coordinate"
     null,
   );
   assert.ok(!NETWORK_HOST_ALLOWLIST.includes("tile.openstreetmap.org"));
+});
+
+test("maskNetworkRequest: CARTO basemap tiles (P0.1) are dropped too — same reasoning", () => {
+  assert.equal(
+    maskNetworkRequest({ name: "https://a.basemaps.cartocdn.com/dark_all/16/32791/21801.png" }, "x"),
+    null,
+  );
+  assert.ok(!NETWORK_HOST_ALLOWLIST.includes("basemaps.cartocdn.com"));
+  assert.ok(!NETWORK_HOST_ALLOWLIST.includes("a.basemaps.cartocdn.com"));
 });
 
 test("maskNetworkRequest: non-allowlisted hosts are dropped entirely", () => {

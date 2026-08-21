@@ -1,20 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#23232e"/>
-      <stop offset="1" stop-color="#101014"/>
+      <stop offset="0" stop-color="#22222C"/>
+      <stop offset="1" stop-color="#0E0E12"/>
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="96" fill="url(#bg)"/>
   
   <g transform="translate(256 256) scale(1.12) translate(-256 -256)">
-    <circle cx="104" cy="118" r="17" fill="#ff6b6b"/>
-    <circle cx="408" cy="98" r="13" fill="#5ac8fa"/>
-    <circle cx="424" cy="178" r="11" fill="#7ee081"/>
-    <ellipse cx="256" cy="441" rx="64" ry="13" fill="#ffcf3f" opacity="0.28"/>
-    <path fill="#ffcf3f" d="M256,84 a134,134 0 0 1 134,134
+    <circle cx="104" cy="118" r="17" fill="#FF6EC7"/>
+    <circle cx="408" cy="98" r="13" fill="#4DD6FF"/>
+    <circle cx="424" cy="178" r="11" fill="#7DFF8A"/>
+    <ellipse cx="256" cy="441" rx="64" ry="13" fill="#FFCF3F" opacity="0.28"/>
+    <path fill="#FFCF3F" d="M256,84 a134,134 0 0 1 134,134
       c0,100 -134,212 -134,212 s-134,-112 -134,-212
       a134,134 0 0 1 134,-134 z"/>
-    <circle cx="256" cy="218" r="54" fill="#16161c"/>
+    <circle cx="256" cy="218" r="54" fill="#0E0E12"/>
+    <circle cx="256" cy="218" r="34" fill="none" stroke="#FFCF3F" stroke-width="7"/>
+    <g stroke="#FFCF3F" stroke-width="7" stroke-linecap="round">
+      <line x1="256" y1="148" x2="256" y2="172" />
+      <line x1="256" y1="264" x2="256" y2="288" />
+      <line x1="186" y1="218" x2="210" y2="218" />
+      <line x1="302" y1="218" x2="326" y2="218" />
+    </g>
   </g>
 </svg>

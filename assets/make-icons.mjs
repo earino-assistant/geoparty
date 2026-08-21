@@ -18,18 +18,23 @@ import { fileURLToPath } from "node:url";
 
 const OUT = dirname(fileURLToPath(import.meta.url));
 
-// Palette mirrors css/style.css: --bg #111, --accent #ffcf3f.
-const ACCENT = "#ffcf3f";
-const BG_TOP = "#23232e";
-const BG_BOTTOM = "#101014";
-const HOLE = "#16161c";
-const CONFETTI = ["#ff6b6b", "#5ac8fa", "#7ee081"];
+// Palette mirrors css/style.css: --bg #0E0E12, --panel-2 #22222C, --accent
+// #FFCF3F, --team-2/3/4 (brand-launch ink ramp + constellation).
+const ACCENT = "#FFCF3F";
+const BG_TOP = "#22222C";
+const BG_BOTTOM = "#0E0E12";
+const HOLE = "#0E0E12";
+// Sky/Green/red → the constellation's team-2/4/3 (team-1 gold is the pin
+// itself, so the mark carries all four team colors between pin + dots).
+const CONFETTI = ["#FF6EC7", "#4DD6FF", "#7DFF8A"];
 
 // The mark: a map pin (circle r=134 at 256,218 tapering to a tip at 256,430)
-// with a punched hole, a faint ground ellipse, and three confetti dots (the
-// "party"). At pinScale 0.88 the whole mark — confetti included, the widest
-// element at radius ~219 from center — fits inside the maskable 80%
-// safe-zone circle (r≈205): 219·0.88 + dot radius ≈ 204.
+// evolved from a plain punched hole into a target/reticle — a concentric
+// ring + crosshair ticks, gold on the ink hole — plus a faint ground
+// ellipse and three confetti dots (the "party"). At pinScale 0.88 the whole
+// mark — confetti included, the widest element at radius ~219 from center —
+// fits inside the maskable 80% safe-zone circle (r≈205): 219·0.88 + dot
+// radius ≈ 204.
 function mark(pinScale) {
   return `
   <g transform="translate(256 256) scale(${pinScale}) translate(-256 -256)">
@@ -41,6 +46,13 @@ function mark(pinScale) {
       c0,100 -134,212 -134,212 s-134,-112 -134,-212
       a134,134 0 0 1 134,-134 z"/>
     <circle cx="256" cy="218" r="54" fill="${HOLE}"/>
+    <circle cx="256" cy="218" r="34" fill="none" stroke="${ACCENT}" stroke-width="7"/>
+    <g stroke="${ACCENT}" stroke-width="7" stroke-linecap="round">
+      <line x1="256" y1="148" x2="256" y2="172" />
+      <line x1="256" y1="264" x2="256" y2="288" />
+      <line x1="186" y1="218" x2="210" y2="218" />
+      <line x1="302" y1="218" x2="326" y2="218" />
+    </g>
   </g>`;
 }
 

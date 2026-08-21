@@ -10,15 +10,17 @@
   <link rel="icon" href="assets/favicon-48.png" type="image/png" sizes="48x48" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <meta name="theme-color" content="#111111" />
+  <link rel="canonical" href="https://geoparty.social/host.html" />
+  <link rel="preload" href="assets/SpaceGrotesk-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <meta name="theme-color" content="#0E0E12" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="GeoParty" />
   <meta property="og:title" content="GeoParty — one phone + the TV" />
   <meta property="og:description" content="One phone drives, everyone shouts directions. Guess where in the world you are." />
-  <meta property="og:url" content="https://earino-assistant.github.io/geoparty/host.html" />
-  <meta property="og:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta property="og:url" content="https://geoparty.social/host.html" />
+  <meta property="og:image" content="https://geoparty.social/assets/og-image.png" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta name="twitter:image" content="https://geoparty.social/assets/og-image.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.css"
         integrity="sha384-IamMZxz60pSNzUk3cW2nl3uYUdpiDoQpLJrBoAAezEE+QaOYCVA9rfi/8Cx0x15T" crossorigin="anonymous" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -115,7 +117,7 @@
       </details>
     </div>
     <div class="action-bar">
-      <button id="btnNewGame" class="btn-primary">New Game</button>
+      <button id="btnNewGame" class="btn-primary">New game</button>
     </div>
   </section>
 
@@ -127,7 +129,7 @@
   <section id="h-lobby" class="phase-screen hidden">
     <div class="host-wrap">
       <p class="eyebrow">Room code</p>
-      <div id="roomCodeHuge" class="room-code-huge" data-ph-mask>······</div>
+      <div id="roomCodeHuge" class="room-code-huge skeleton" data-ph-mask>······</div>
       <!-- S7: a screen is optional — the note names the mode, never a gate. -->
       <div id="waitingNote" class="waiting-screen-note">No TV? No problem — the reveal shows right here.</div>
       <details id="hTvAdd" class="tv-add">
@@ -135,13 +137,13 @@
         <div class="qr-box qr-small"><canvas id="qrCanvas"></canvas></div>
         <p class="tv-add-hint">Scan with any spare phone or tablet, then cast
           it to the TV.</p>
-        <div class="share-row"><button id="btnTvLink">📤 Send the TV link</button></div>
+        <div class="share-row"><button id="btnTvLink">Send the TV link</button></div>
         <p id="tvType" data-ph-mask class="tv-add-alt"></p>
       </details>
     </div>
     <div class="action-bar">
       <button id="btnAbandon" class="btn-ghost">Abandon</button>
-      <button id="btnStartRound" class="btn-primary">Start Round</button>
+      <button id="btnStartRound" class="btn-primary">Start round</button>
     </div>
   </section>
 
@@ -154,7 +156,7 @@
       <div class="hud-item" id="hudTimer">2:00</div>
     </div>
     <div class="action-bar">
-      <button id="btnMakeGuess" class="btn-primary">Make Guess</button>
+      <button id="btnMakeGuess" class="btn-primary">Make guess</button>
     </div>
   </section>
 
@@ -169,7 +171,7 @@
     <div class="action-bar">
       <button id="btnSuperSure" class="ss-chip hidden" type="button"
               aria-label="SUPER SURE — double or nothing">🔥</button>
-      <button id="btnConfirmGuess" class="btn-primary" disabled>Confirm Guess</button>
+      <button id="btnConfirmGuess" class="btn-primary" disabled>Confirm guess</button>
     </div>
   </section>
 
@@ -189,14 +191,16 @@
     </div>
     <div class="action-bar">
       <button id="btnHoldAdvance" class="btn-ghost hidden">✋ Hold</button>
-      <button id="btnNextRound" class="btn-primary">Next Round</button>
+      <button id="btnNextRound" class="btn-primary">Next round</button>
     </div>
   </section>
 
   <!-- 6. Game over -->
   <section id="h-gameover" class="phase-screen hidden">
+    <div id="hConfetti" class="confetti" aria-hidden="true"></div>
+    <div class="win-bloom" aria-hidden="true"></div>
     <div class="host-wrap">
-      <h1>Final standings</h1>
+      <h1 id="hGameOverTitle">Final standings</h1>
       <!-- S7: the crown, when this phone is the shared screen. -->
       <div id="hostCrown" data-ph-mask class="host-crown hidden"></div>
       <!-- G3 Crown Night: full-screen champion, else the muted tally. -->
@@ -206,11 +210,15 @@
       <!-- §2.9: saving to a localStorage leaderboard is not a decision a
            human should have to make — the game saves itself and says so. -->
       <p id="hSavedNote" class="waiting-screen-note"></p>
+      <p class="game-over-ownership">
+        <a id="hHowto" href="howto.html">How to play</a> ·
+        © 2026 Eduardo Ariño de la Rubia · A game by Eduardo Ariño de la Rubia
+      </p>
     </div>
     <div class="action-bar">
-      <button id="btnShareResult">📤 Share</button>
+      <button id="btnShareResult" class="btn-ghost">Share</button>
       <button id="btnNewGameOver" class="btn-primary">
-        New Game<span id="hNightHook" data-ph-mask class="btn-subline hidden"></span>
+        New game<span id="hNightHook" data-ph-mask class="btn-subline hidden"></span>
       </button>
     </div>
   </section>

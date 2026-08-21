@@ -10,16 +10,18 @@
   <link rel="icon" href="assets/favicon-48.png" type="image/png" sizes="48x48" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <meta name="theme-color" content="#111111" />
+  <link rel="canonical" href="https://geoparty.social/player.html" />
+  <link rel="preload" href="assets/SpaceGrotesk-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <meta name="theme-color" content="#0E0E12" />
   <!-- Invite links land here — make them unfurl as a card, not a bare URL. -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="GeoParty" />
   <meta property="og:title" content="You're invited to a GeoParty" />
   <meta property="og:description" content="Grab a team and drop your pin — same spot, same clock, rival pins in plain sight." />
-  <meta property="og:url" content="https://earino-assistant.github.io/geoparty/player.html" />
-  <meta property="og:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta property="og:url" content="https://geoparty.social/player.html" />
+  <meta property="og:image" content="https://geoparty.social/assets/og-image.png" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta name="twitter:image" content="https://geoparty.social/assets/og-image.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.css"
         integrity="sha384-IamMZxz60pSNzUk3cW2nl3uYUdpiDoQpLJrBoAAezEE+QaOYCVA9rfi/8Cx0x15T" crossorigin="anonymous" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -76,11 +78,11 @@
   <section id="p-lobby" class="phase-screen hidden">
     <div class="host-wrap">
       <h1>Room</h1>
-      <div id="pRoomCodeHuge" class="room-code-huge" data-ph-mask>······</div>
+      <div id="pRoomCodeHuge" class="room-code-huge skeleton" data-ph-mask>······</div>
       <div class="qr-box"><canvas id="pQrCanvas"></canvas></div>
       <p id="pJoinUrl" data-ph-mask class="tv-add-alt"></p>
       <div class="share-row">
-        <button id="btnPShare" class="btn-primary">📤 Send invite link</button>
+        <button id="btnPShare" class="btn-primary">Send invite link</button>
       </div>
 
       <!-- Add a TV: collapsed by default — the TV is a bonus, never homework.
@@ -90,7 +92,7 @@
         <div class="qr-box qr-small"><canvas id="pTvQr"></canvas></div>
         <p class="tv-add-hint">Scan with any phone or tablet, then cast or
           AirPlay it to the TV.</p>
-        <div class="share-row"><button id="btnPTvLink">📤 Send the TV link</button></div>
+        <div class="share-row"><button id="btnPTvLink">Send the TV link</button></div>
         <p id="pTvType" data-ph-mask class="tv-add-alt"></p>
       </details>
       <h2>Teams</h2>
@@ -99,7 +101,7 @@
     </div>
     <div class="action-bar">
       <button id="btnPLeave" class="btn-ghost">Leave</button>
-      <button id="btnPStart" class="btn-primary hidden">Start Game</button>
+      <button id="btnPStart" class="btn-primary hidden">Start game</button>
     </div>
   </section>
 
@@ -114,7 +116,7 @@
     <div class="action-bar">
       <!-- Wait-for-players mode: out of time with no pin? Bow out cleanly. -->
       <button id="btnPGiveUpStreet" class="btn-ghost hidden" type="button">Give up</button>
-      <button id="btnOpenMap" class="btn-primary">Make Guess</button>
+      <button id="btnOpenMap" class="btn-primary">Make guess</button>
     </div>
   </section>
 
@@ -130,14 +132,16 @@
          is unspent) that opens the one sheet explaining it. The floating
          context-pill layer is empty on this screen. -->
     <div class="action-bar">
+      <!-- P1.6: one chip for the guess bar's "once-per-game bet" slot — the
+           SUPER SURE bet and (h2h) the Decoy no longer fit the bar side by
+           side (style.css §6.1 width budget). Whichever is available opens
+           its sheet; when both are, the SUPER SURE sheet gains a secondary
+           action offering the decoy too (player-ui.js#openGuessBarSheet). -->
       <button id="btnSuperSure" class="ss-chip hidden" type="button"
-              aria-label="SUPER SURE — double or nothing">🔥</button>
-      <!-- G7 Decoy: shares the chip dock with 🔥; only while unspent + not blind. -->
-      <button id="btnDecoy" class="ss-chip hidden" type="button"
-              aria-label="Decoy — plant a fake pin for rivals">🎭</button>
+              aria-label="SUPER SURE or Decoy — once-per-game plays">🔥</button>
       <button id="btnPGiveUpMap" class="btn-ghost hidden" type="button">Give up</button>
       <button id="btnBackToStreet" class="btn-ghost">Back to street</button>
-      <button id="btnLockIn" class="btn-primary" disabled>Lock It In</button>
+      <button id="btnLockIn" class="btn-primary" disabled>Lock it in</button>
     </div>
   </section>
 
@@ -151,7 +155,7 @@
       <ul id="pLockedList" data-ph-mask class="totals-list"></ul>
     </div>
     <div class="action-bar">
-      <button id="btnCloseRound" class="btn-ghost hidden">Close Round</button>
+      <button id="btnCloseRound" class="btn-ghost hidden">Close round</button>
     </div>
   </section>
 
@@ -169,7 +173,7 @@
     </div>
     <div class="action-bar">
       <button id="btnPHold" class="btn-ghost hidden">✋ Hold</button>
-      <button id="btnPNext" class="btn-primary hidden">Next Round</button>
+      <button id="btnPNext" class="btn-primary hidden">Next round</button>
     </div>
   </section>
 
@@ -189,10 +193,14 @@
            it becomes a quiet in-content link and the bar keeps one primary
            plus one secondary. -->
       <button id="btnPHome" class="exit-link">Leave the game</button>
+      <p class="game-over-ownership">
+        <a id="pHowto" href="howto.html">How to play</a> ·
+        © 2026 Eduardo Ariño de la Rubia · A game by Eduardo Ariño de la Rubia
+      </p>
     </div>
     <div class="action-bar">
-      <button id="btnPShareResult">📤 Share</button>
-      <button id="btnPNextGame" class="btn-primary hidden">Set Up the Next Game<span id="pNightHook" data-ph-mask class="btn-subline hidden"></span></button>
+      <button id="btnPShareResult" class="btn-ghost">Share</button>
+      <button id="btnPNextGame" class="btn-primary hidden">Set up the next game<span id="pNightHook" data-ph-mask class="btn-subline hidden"></span></button>
     </div>
   </section>
 
@@ -264,7 +272,7 @@
     </div>
     <div class="action-bar">
       <button id="btnSetupBack" class="btn-ghost">← Back</button>
-      <button id="btnOpenRoom" class="btn-primary">Open the Room</button>
+      <button id="btnOpenRoom" class="btn-primary">Open the room</button>
     </div>
   </section>
 

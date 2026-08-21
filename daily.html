@@ -11,18 +11,20 @@
   <link rel="icon" href="assets/favicon-48.png" type="image/png" sizes="48x48" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <meta name="theme-color" content="#111111" />
+  <link rel="canonical" href="https://geoparty.social/daily.html" />
+  <link rel="preload" href="assets/SpaceGrotesk-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <meta name="theme-color" content="#0E0E12" />
   <!-- Link cards: og:url / og:image must be absolute URLs for scrapers. -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="GeoParty" />
   <meta property="og:title" content="GeoParty Daily Challenge" />
   <meta property="og:description" content="Five mystery places, the same for everyone today. One run per day — beat the score that sent you here." />
-  <meta property="og:url" content="https://earino-assistant.github.io/geoparty/daily.html" />
-  <meta property="og:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta property="og:url" content="https://geoparty.social/daily.html" />
+  <meta property="og:image" content="https://geoparty.social/assets/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta name="twitter:image" content="https://geoparty.social/assets/og-image.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.css"
         integrity="sha384-IamMZxz60pSNzUk3cW2nl3uYUdpiDoQpLJrBoAAezEE+QaOYCVA9rfi/8Cx0x15T" crossorigin="anonymous" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -58,13 +60,13 @@
       <!-- G6: hard-mode entry, revealed only after today's normal run. -->
       <div id="dHardIntro" class="hard-entry hidden">
         <span>⚡ Hard mode — no moving, 30 seconds</span>
-        <button id="btnDHardStart" class="btn-ghost">Try Hard Mode</button>
+        <button id="btnDHardStart" class="btn-ghost">Try hard mode</button>
       </div>
       <div id="dIntroErr" class="join-err"></div>
     </div>
     <div class="action-bar">
       <a id="dIntroBack" class="daily-back-link" href="index.html">← GeoParty</a>
-      <button id="btnDailyStart" class="btn-primary">Play Today's Daily</button>
+      <button id="btnDailyStart" class="btn-primary">Play today's Daily</button>
     </div>
   </section>
 
@@ -76,7 +78,7 @@
       <div class="hud-item" id="dHudTimer">1:00</div>
     </div>
     <div class="action-bar">
-      <button id="btnDOpenMap" class="btn-primary">Make Guess</button>
+      <button id="btnDOpenMap" class="btn-primary">Make guess</button>
     </div>
   </section>
 
@@ -88,7 +90,7 @@
     <!-- §6.1: the estimate rides on the primary button's own label. -->
     <div class="action-bar">
       <button id="btnDBackToStreet" class="btn-ghost">Back to street</button>
-      <button id="btnDLockIn" class="btn-primary" disabled>Lock It In</button>
+      <button id="btnDLockIn" class="btn-primary" disabled>Lock it in</button>
     </div>
   </section>
 
@@ -108,7 +110,7 @@
       </div>
     </div>
     <div class="action-bar">
-      <button id="btnDNext" class="btn-primary">Next Round</button>
+      <button id="btnDNext" class="btn-primary">Next round</button>
     </div>
   </section>
 
@@ -133,14 +135,18 @@
       <!-- G6: hard-mode entry after a normal run. -->
       <div id="dHardDone" class="hard-entry hidden">
         <span>⚡ Hard mode — no moving, 30 seconds</span>
-        <button id="btnDHardDone" class="btn-ghost">Try Hard Mode</button>
+        <button id="btnDHardDone" class="btn-ghost">Try hard mode</button>
       </div>
       <div class="share-row">
-        <button id="btnDShare" class="btn-primary">📤 Share your result</button>
+        <button id="btnDShare" class="btn-primary">Share your result</button>
       </div>
       <p id="dDoneNote" class="waiting-screen-note">
         Fresh five tomorrow — or <a href="index.html">start a party</a> with
         friends.
+      </p>
+      <p class="game-over-ownership">
+        <a id="dHowto" href="howto.html">How to play</a> ·
+        © 2026 Eduardo Ariño de la Rubia · A game by Eduardo Ariño de la Rubia
       </p>
     </div>
     <div class="action-bar">

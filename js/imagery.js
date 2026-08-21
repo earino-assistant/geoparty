@@ -777,3 +777,29 @@ export function decideNavHint(ctx) {
   }
   return "wait";
 }
+
+/* ================================================================
+ * P0.1 — the dark basemap (docs/consolidated-polish-brief.md §3)
+ * ================================================================
+ * CARTO's keyless dark_all tiles, centralized so every Leaflet map on the
+ * site (guess maps, reveal maps, the h2h live map/panels) shares one call
+ * site instead of ~12 copies of the same OSM tile URL. CARTO, not the
+ * previous OSM tile.openstreetmap.org, and not Stadia (CARTO is free and
+ * keyless). Privacy is unaffected either way: a tile URL is a coordinate,
+ * so the new host is deliberately absent from NETWORK_HOST_ALLOWLIST
+ * (analytics.js) exactly as the OSM host was — tile requests are dropped
+ * from the replay network waterfall, not recorded with a stripped query
+ * string. */
+export const BASEMAP_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+
+export function basemapTileLayerConfig() {
+  return {
+    url: BASEMAP_URL,
+    options: {
+      maxZoom: 19,
+      subdomains: "abcd",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
+        '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+  };
+}

@@ -9,18 +9,20 @@
   <link rel="icon" href="assets/favicon-48.png" type="image/png" sizes="48x48" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <meta name="theme-color" content="#111111" />
+  <link rel="canonical" href="https://geoparty.social/" />
+  <link rel="preload" href="assets/SpaceGrotesk-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <meta name="theme-color" content="#0E0E12" />
   <!-- Link cards: og:url / og:image must be absolute URLs for scrapers. -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="GeoParty" />
   <meta property="og:title" content="GeoParty — the geoguessing party game" />
   <meta property="og:description" content="Guess where in the world you are. Phones in, pins down. Free in the browser — no app, no accounts." />
-  <meta property="og:url" content="https://earino-assistant.github.io/geoparty/" />
-  <meta property="og:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta property="og:url" content="https://geoparty.social/" />
+  <meta property="og:image" content="https://geoparty.social/assets/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://earino-assistant.github.io/geoparty/assets/og-image.png" />
+  <meta name="twitter:image" content="https://geoparty.social/assets/og-image.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.css"
         integrity="sha384-IamMZxz60pSNzUk3cW2nl3uYUdpiDoQpLJrBoAAezEE+QaOYCVA9rfi/8Cx0x15T" crossorigin="anonymous" />
   <link rel="stylesheet" href="css/style.css" />
@@ -80,28 +82,31 @@
     <!-- Three steps, pictures over paragraphs, ≤6 words each. -->
     <section class="ld-steps" aria-label="How it works">
       <div class="ld-step">
-        <div class="art" aria-hidden="true">📱</div>
+        <img class="art" src="assets/strip-party.jpg" alt="" loading="lazy" />
         <div>One phone starts a party</div>
       </div>
       <div class="ld-step-arrow" aria-hidden="true">→</div>
       <div class="ld-step">
-        <div class="art" aria-hidden="true">🤳</div>
+        <img class="art" src="assets/strip-join.jpg" alt="" loading="lazy" />
         <div>Friends join — QR or link</div>
       </div>
       <div class="ld-step-arrow" aria-hidden="true">→</div>
       <div class="ld-step">
-        <div class="art" aria-hidden="true">📺</div>
+        <img class="art" src="assets/strip-tv.jpg" alt="" loading="lazy" />
         <div>Add a TV. Optional.</div>
       </div>
     </section>
 
     <footer class="ld-footer">
+      <a id="ldHowto" href="howto.html">How to play</a>
+      <span aria-hidden="true">·</span>
       <a href="screen.html">Add a TV</a>
       <span aria-hidden="true">·</span>
       <a href="https://github.com/earino-assistant/geoparty/blob/main/PRIVACY.md">Privacy</a>
       <span aria-hidden="true">·</span>
       <a href="https://github.com/earino-assistant/geoparty">GitHub</a>
     </footer>
+    <p class="ld-ownership">© 2026 Eduardo Ariño de la Rubia · A game by Eduardo Ariño de la Rubia</p>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.js"

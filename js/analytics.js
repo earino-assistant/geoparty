@@ -97,8 +97,9 @@ export const POSTHOG_INIT_OPTIONS = {
 
 // Hosts whose request TIMING may appear in a replay waterfall. Anything
 // else is dropped entirely rather than recorded with a stripped name.
-// Deliberately NOT here: tile.openstreetmap.org. A tile URL is
-// `/{z}/{x}/{y}.png` — literally a coordinate — so map tile requests are
+// Deliberately NOT here: basemaps.cartocdn.com (P0.1's dark basemap host —
+// tile.openstreetmap.org before it, same reasoning). A tile URL is
+// `/{z}/{x}/{y}{r}.png` — literally a coordinate — so map tile requests are
 // dropped from the waterfall entirely rather than recorded with a stripped
 // query string.
 export const NETWORK_HOST_ALLOWLIST = Object.freeze([
@@ -378,6 +379,11 @@ export const EVENT_SCHEMA = Object.freeze({
   consent_given: {},
   consent_denied: {},
   next_game: { mode: "string" },
+  // §6 how-to-play page. source is where the link was tapped from —
+  // "footer" (landing footer) | "gameover" (a game-over/done screen) — the
+  // onboarding-funnel question: does the explainer get found, and from
+  // where? howto.html itself has no controller/events beyond this one.
+  howto_opened: { source: "string" },
 
   /* ---- Field observability (docs/field-observability-plan.md §7.1) ----
    * Aggregates only. `pool_entry` is the opaque diag id from

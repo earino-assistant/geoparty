@@ -393,4 +393,11 @@ test("celebrationSpec: tv gets 'rain'/no fixed count; every other surface gets '
   });
   assert.equal(daily.spread, "burst");
   assert.equal(daily.count, 70);
+  // P1.5: the couch host phone celebrates too (host-ui.js#finishGame) —
+  // same non-tv treatment as phone/daily.
+  const host = celebrationSpec({
+    won: true, champion: false, teamColor: "#fff", seed: "s", surface: "host",
+  });
+  assert.equal(host.spread, "burst");
+  assert.equal(host.count, 70);
 });

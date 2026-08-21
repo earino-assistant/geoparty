@@ -59,6 +59,8 @@ import {
   NAV_HINT_POLL_MS,
   decideNavHint,
   navHintBaselineCleared,
+  BASEMAP_URL,
+  basemapTileLayerConfig,
 } from "../js/imagery.js";
 
 /* ================================================================
@@ -1104,4 +1106,24 @@ test("nav hint constants: finite, and the poll interval is smaller than the time
 
 test("EDGE_RECOVERY_GRACE_MS: raised to 15000 (2026-08-21 field correction)", () => {
   assert.equal(EDGE_RECOVERY_GRACE_MS, 15000);
+});
+
+/* ---------------- P0.1: the dark basemap (docs/consolidated-polish-brief.md §3) --- */
+
+test("basemapTileLayerConfig: CARTO dark host, coordinate-shaped, attribution present", () => {
+  const bm = basemapTileLayerConfig();
+  assert.equal(bm.url, BASEMAP_URL);
+  assert.match(bm.url, /^https:\/\/\{s\}\.basemaps\.cartocdn\.com\/dark_all\//);
+  assert.match(bm.url, /\/\{z\}\/\{x\}\/\{y\}\{r\}\.png$/);
+  assert.equal(bm.options.maxZoom, 19);
+  assert.equal(bm.options.subdomains, "abcd");
+  assert.match(bm.options.attribution, /OpenStreetMap/);
+  assert.match(bm.options.attribution, /CARTO/);
+});
+
+test("basemapTileLayerConfig: returns a fresh object each call (no shared-mutation hazard)", () => {
+  const a = basemapTileLayerConfig();
+  const b = basemapTileLayerConfig();
+  assert.notEqual(a, b);
+  assert.notEqual(a.options, b.options);
 });

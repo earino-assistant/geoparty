@@ -113,7 +113,7 @@ import {
   loadRecords, saveRecords, applyPartyGuess, medalForDistance,
 } from "./records.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
-import { scrubErrorMessage } from "./imagery.js";
+import { scrubErrorMessage, basemapTileLayerConfig } from "./imagery.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
@@ -671,6 +671,7 @@ function renderLobby() {
   if (shownScreen !== "p-lobby") {
     showScreen("p-lobby");
     $("pRoomCodeHuge").textContent = roomCode;
+    $("pRoomCodeHuge").classList.remove("skeleton"); // P1.7: real value has landed
     const joinUrl = new URL(`player.html?room=${roomCode}`, location.href).href;
     $("pJoinUrl").textContent = phoneJoinLine(location.href, roomCode);
     drawQr($("pQrCanvas"), joinUrl);
@@ -894,7 +895,6 @@ function renderRoundActive() {
     if (guessMap) guessMap.setView([25, 10], 2);
     $("btnLockIn").disabled = true;
     renderSuperSureChip();
-    renderDecoyChip();
     updateLockButton();
     updateGuessBanner();
     startTick();
@@ -1056,10 +1056,8 @@ function ensureGuessMap() {
   if (guessMap) return;
   guessMap = L.map("playerGuessMap", { worldCopyJump: true, zoomControl: false })
     .setView([25, 10], 2);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(guessMap);
+  const bm = basemapTileLayerConfig();
+  L.tileLayer(bm.url, bm.options).addTo(guessMap);
   guessMap.on("moveend zoomend", scheduleLiveWrite);
   guessMap.on("click", (e) => {
     // G7: while a decoy is armed-but-not-yet-planted, the FIRST tap plants the
@@ -1068,7 +1066,7 @@ function ensureGuessMap() {
     decoyState = fold.state;
     if (fold.place === "decoy") {
       placeDecoyMarker(e.latlng);
-      renderDecoyChip();
+      renderSuperSureChip();
       // C5 (spec §3.7): the spend is recorded at PLANT time, not lock-in, so a
       // decoy stays spent across a refresh (decoyState is local and lost on
       // reload) AND across a host forfeit-sweep of this phone — no refund. The
@@ -1173,7 +1171,6 @@ function openGuessMapScreen() {
   $("btnLockIn").disabled = !guessMarker;
   updateGuessBanner();
   renderSuperSureChip();
-  renderDecoyChip();
   // First guess map ever: the scoring one-liner and the rival-pins warning,
   // at the moment they matter (M5). The SUPER SURE line has left this card
   // — the bet is explained in exactly one place now, its own sheet (§6.1).
@@ -1200,18 +1197,38 @@ function openGuessMapScreen() {
  *     explaining a thing you can no longer do is pure noise — §2.6);
  *   - the arm/disarm toasts are gone: mechanic rules never live in a 2.5 s
  *     toast (§5). The rule lives in the sheet; the armed state lives on
- *     the primary button's own label. */
+ *     the primary button's own label.
+ *
+ * P1.6: a second once-per-game chip (G7 Decoy) used to dock in the same bar
+ * — two 48px chips no longer fit the guess bar's 360px width budget
+ * (style.css §6.1) alongside the ghost + primary. The bar keeps exactly one
+ * chip slot; when both plays are available, its sheet gains a secondary
+ * action offering the other one instead of a second bar control. */
+function decoyChipAvailable() {
+  const twistId = room && room.round && room.round.twist ? room.round.twist.id : null;
+  return !!room && decoyAvailable(room.teams, myTeam, twistId) && !decoyState.planted;
+}
+
 function openSuperSureSheet() {
-  if (!room || myResult() || !superSureAvailable(room.teams, myTeam)) return;
+  if (!room || myResult()) return;
+  const ssAvailable = superSureAvailable(room.teams, myTeam);
+  const decoyAvail = decoyChipAvailable();
+  if (!ssAvailable && !decoyAvail) return;
+  if (!ssAvailable) { openDecoySheet(); return; } // only the decoy is left to offer
   track("super_sure_sheet_opened", { mode: "h2h" });
   showHintCard({
     title: SUPER_SURE_SHEET.title,
     lines: SUPER_SURE_SHEET.lines,
-    actions: superSureArmed
-      ? [{ label: "Disarm", primary: false, onClick: () => setSuperSure(false) },
-         { label: "Keep it armed", onClick: () => setSuperSure(true) }]
-      : [{ label: SUPER_SURE_SHEET.cancelLabel, primary: false },
-         { label: SUPER_SURE_SHEET.armLabel, onClick: () => setSuperSure(true) }],
+    actions: [
+      ...(superSureArmed
+        ? [{ label: "Disarm", primary: false, onClick: () => setSuperSure(false) },
+           { label: "Keep it armed", onClick: () => setSuperSure(true) }]
+        : [{ label: SUPER_SURE_SHEET.cancelLabel, primary: false },
+           { label: SUPER_SURE_SHEET.armLabel, onClick: () => setSuperSure(true) }]),
+      ...(decoyAvail
+        ? [{ label: "🎭 Plant a decoy instead", primary: false, onClick: openDecoySheet }]
+        : []),
+    ],
   });
 }
 
@@ -1224,15 +1241,19 @@ function setSuperSure(armed) {
 
 function renderSuperSureChip() {
   const btn = $("btnSuperSure");
-  const available = !!room && superSureAvailable(room.teams, myTeam);
+  const ssAvailable = !!room && superSureAvailable(room.teams, myTeam);
+  const decoyAvail = decoyChipAvailable();
+  const available = ssAvailable || decoyAvail;
+  const armed = (ssAvailable && superSureArmed) || (decoyAvail && decoyState.armed);
   btn.classList.toggle("hidden", !available); // spent = gone, not disabled
-  btn.classList.toggle("armed", available && superSureArmed);
-  btn.setAttribute("aria-pressed", String(available && superSureArmed));
+  btn.classList.toggle("armed", armed);
+  btn.setAttribute("aria-pressed", String(armed));
   // #7: a one-shot nudge toward the 🔥 chip, only on the guess map, from round
-  // 2 on while the bet is unspent — points at the chip, never re-explains it.
+  // 2 on while the SUPER SURE bet specifically is unspent — points at the
+  // chip, never re-explains it.
   if (shownScreen === "p-guess" && room && room.round &&
       shouldHintSuperSure({
-        mode: "h2h", roundNumber: room.round.number, available,
+        mode: "h2h", roundNumber: room.round.number, available: ssAvailable,
       })) {
     oneShotHint(SUPER_SURE_HINT_ID, SUPER_SURE_HINT);
   }
@@ -1240,25 +1261,8 @@ function renderSuperSureChip() {
 
 /* ---------------- G7 Decoy: plant a fake pin for rivals ---------------- */
 
-// The chip shows only while the decoy is unspent AND meaningful this round
-// (hidden during a Blind Duel, where rival pins don't render). Once armed it
-// stays visible until the decoy is planted, then goes away — same "spent = gone"
-// rule as the 🔥 chip. Nothing here reveals the decoy to rivals (hidden in play).
-function renderDecoyChip() {
-  const btn = $("btnDecoy");
-  if (!btn) return;
-  const twistId = room && room.round && room.round.twist ? room.round.twist.id : null;
-  const available = !!room && decoyAvailable(room.teams, myTeam, twistId) &&
-    !decoyState.planted;
-  btn.classList.toggle("hidden", !available);
-  btn.classList.toggle("armed", available && decoyState.armed);
-  btn.setAttribute("aria-pressed", String(available && decoyState.armed));
-}
-
 function openDecoySheet() {
-  const twistId = room && room.round && room.round.twist ? room.round.twist.id : null;
-  if (!room || myResult() || !decoyAvailable(room.teams, myTeam, twistId) ||
-      decoyState.planted) return;
+  if (!room || myResult() || !decoyChipAvailable()) return;
   showHintCard({
     title: "🎭 Decoy",
     lines: [
@@ -1269,7 +1273,7 @@ function openDecoySheet() {
       { label: "Not now", primary: false },
       { label: "Plant the decoy", onClick: () => {
         decoyState = decoyDeployFold(decoyState, "arm").state;
-        renderDecoyChip();
+        renderSuperSureChip();
         toast("Your next tap plants the decoy — then tap again for your real pin.");
       } },
     ],
@@ -1777,7 +1781,7 @@ function renderReveal() {
 
   const host = isHost();
   $("btnPNext").classList.toggle("hidden", !host);
-  $("btnPNext").textContent = last ? "Finish Game" : "Next Round";
+  $("btnPNext").textContent = last ? "Finish game" : "Next round";
   startAdvanceTicker();
 }
 
@@ -1861,10 +1865,8 @@ function renderRevealMap(round) {
     zoomControl: false, dragging: false, scrollWheelZoom: false,
     doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false,
   });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(revealMap);
+  const bm = basemapTileLayerConfig();
+  L.tileLayer(bm.url, bm.options).addTo(revealMap);
   const truth = L.latLng(round.truth.lat, round.truth.lng);
   const pins = revealPins(round);
   revealMap.fitBounds(
@@ -2019,7 +2021,13 @@ function renderGameOver() {
   // never two filled peers and never a lone unstyled button. Leave is the
   // third action and has moved to a ghost link in the content above.
   $("btnPNextGame").classList.toggle("hidden", !iWon);
+  // P1.4: Share's static class is btn-ghost (the established secondary); on
+  // a loss it becomes the bar's one primary instead (Next Game is hidden),
+  // so the two classes are toggled as a mutually-exclusive pair, never both
+  // at once (style.css resolves .btn-ghost after .btn-primary in the
+  // cascade, so leaving btn-ghost on would silently win over btn-primary).
   $("btnPShareResult").classList.toggle("btn-primary", !iWon);
+  $("btnPShareResult").classList.toggle("btn-ghost", iWon);
   $("pHandoffNote").textContent = iWon
     ? "Winner runs the table: your phone is the host now. Set up the next game and everyone follows automatically."
     : `${winnerName} won — their phone is the host now. Stay here; you'll follow into their next game automatically.`;
@@ -2198,7 +2206,6 @@ $("btnPStart").addEventListener("click", startRound);
 $("btnOpenMap").addEventListener("click", openGuessMapScreen);
 $("btnBackToStreet").addEventListener("click", backToStreet);
 $("btnSuperSure").addEventListener("click", openSuperSureSheet);
-$("btnDecoy").addEventListener("click", openDecoySheet);
 $("btnLockIn").addEventListener("click", () => lockIn(false));
 $("btnPGiveUpStreet").addEventListener("click", giveUp);
 $("btnPGiveUpMap").addEventListener("click", giveUp);
@@ -2208,6 +2215,9 @@ $("btnPHold").addEventListener("click", holdAdvance);
 $("btnPHome").addEventListener("click", () => leaveToHome());
 $("btnPShareResult").addEventListener("click", shareMyResult);
 $("btnPNextGame").addEventListener("click", openNextGameSetup);
+// §6: the game-over "How to play" link.
+$("pHowto").addEventListener("click", () =>
+  track("howto_opened", { source: "gameover" }));
 
 $("joinCode").addEventListener("input", () => {
   $("joinCode").value = $("joinCode").value.toUpperCase()

@@ -165,10 +165,16 @@ export function lockNowEstimate(distanceKm, elapsedMs, roundSeconds) {
  * stakes (×2 or nothing), which is what makes it legible at the moment of
  * decision (§1.4). Each surface passes its own verbs. */
 export const LOCK_LABELS = Object.freeze({
-  h2h: Object.freeze({ idle: "Lock It In", armed: "Lock In" }),
-  couch: Object.freeze({ idle: "Confirm Guess", armed: "Confirm" }),
-  daily: Object.freeze({ idle: "Lock It In", armed: "Lock In" }),
+  h2h: Object.freeze({ idle: "Lock it in", armed: "Lock in" }),
+  couch: Object.freeze({ idle: "Confirm guess", armed: "Confirm" }),
+  daily: Object.freeze({ idle: "Lock it in", armed: "Lock in" }),
 });
+
+// P0.2: the primary CTA used to show its verb ("Lock it in") even while
+// disabled with no pin down, which reads as broken rather than "not yet
+// available". Disabled and armed-but-unpinned states are unaffected by this —
+// an armed SUPER SURE bet still shows its real stakes either way (below).
+export const TAP_MAP_GATE_TEXT = "Tap the map to drop your pin";
 
 /* Returns the button's parts, not a flat string: at 360 px the guess bar
  * carries a 🔥 chip, a ghost secondary AND this primary, and §6.1 calls the
@@ -181,7 +187,7 @@ export function lockButtonLabel(labels, est, superSureArmed) {
     const main = `🔥 ${l.armed} ×2`;
     return { main, sub: "or 0", text: `${main} — or 0` };
   }
-  if (!est) return { main: l.idle, sub: "", text: l.idle };
+  if (!est) return { main: TAP_MAP_GATE_TEXT, sub: "", text: TAP_MAP_GATE_TEXT };
   const sub = `≈ +${est.points.toLocaleString()}`;
   return { main: l.idle, sub, text: `${l.idle} · ${sub}` };
 }

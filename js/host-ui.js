@@ -84,10 +84,10 @@ import {
   countdownText,
   holdAdvancePatch,
 } from "./autoadvance.js";
-import { countdownTick } from "./fx.js";
-import { initSound, playSound, buzz, stampFlash } from "./fx-ui.js";
+import { countdownTick, celebrationSpec } from "./fx.js";
+import { initSound, playSound, buzz, stampFlash, spawnConfetti } from "./fx-ui.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
-import { scrubErrorMessage } from "./imagery.js";
+import { scrubErrorMessage, basemapTileLayerConfig } from "./imagery.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
@@ -397,6 +397,7 @@ async function newGame() {
 function enterLobby() {
   showScreen("h-lobby");
   $("roomCodeHuge").textContent = roomCode;
+  $("roomCodeHuge").classList.remove("skeleton"); // P1.7: real value has landed
   // §6.3: the TV seminar (QR + caption + send button + typing line, all at
   // once, under a note saying you don't need one) is now ONE collapsed
   // module. Collapsed is the honest default — a TV is optional.
@@ -802,10 +803,8 @@ function ensureGuessMap() {
   if (guessMap) return;
   guessMap = L.map("guessMap", { worldCopyJump: true, zoomControl: false })
     .setView([25, 10], 2);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(guessMap);
+  const bm = basemapTileLayerConfig();
+  L.tileLayer(bm.url, bm.options).addTo(guessMap);
   // moveend fires after pans, zooms, and setView alike — one event covers
   // every way the framing can change. zoomend is belt-and-braces for
   // pinch-zooms that settle without a pan.
@@ -1283,10 +1282,8 @@ function renderHostRevealMap() {
     zoomControl: false, dragging: false, scrollWheelZoom: false,
     doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false,
   });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(hostRevealMap);
+  const bm = basemapTileLayerConfig();
+  L.tileLayer(bm.url, bm.options).addTo(hostRevealMap);
   const truth = L.latLng(round.truth.lat, round.truth.lng);
   const pins = couchRevealPins(round, room.activeTeam);
   hostRevealMap.fitBounds(
@@ -1433,7 +1430,7 @@ function enterReveal() {
   }
 
   $("btnNextRound").textContent =
-    number >= room.settings.roundCount ? "Finish" : "Next Round";
+    number >= room.settings.roundCount ? "Finish" : "Next round";
   startAdvanceTicker();
 }
 
@@ -1506,7 +1503,28 @@ function finishGame(advance) {
   destroyViewer();
   destroyHostRevealMap();
   showScreen("h-gameover");
-  playSound("fanfare"); // S4
+  // "Your Color Takes the Room" (P1.5): the couch host phone runs the party
+  // rather than competing, so it has no "did I win" — it celebrates on
+  // behalf of whichever team the standings crown, mirroring the player/daily
+  // call sites (fx.js#celebrationSpec) one surface later than they shipped.
+  const isChampion = !!champion(bumped);
+  const plan = celebrationSpec({
+    won: true,
+    champion: isChampion,
+    teamColor: teamHex(room.teams, winner.id),
+    seed: `${roomCode}:${bumped.games}`,
+    surface: "host",
+  });
+  const gameOverEl = $("h-gameover");
+  gameOverEl.style.setProperty("--win", plan.winVar);
+  gameOverEl.classList.add("is-win");
+  gameOverEl.classList.toggle("is-champion", isChampion);
+  $("hGameOverTitle").classList.add("win-headline");
+  playSound(plan.sound); // S4
+  spawnConfetti($("hConfetti"), {
+    seed: plan.seed, tier: plan.tier, accentColor: plan.accentColor,
+    spread: plan.spread, count: plan.count,
+  });
   updateCrown(); // S7: no TV podium — this phone crowns the winner
   renderTotals($("finalTotals"));
   renderNightTally(bumped);
@@ -1752,6 +1770,9 @@ $("btnNextRound").addEventListener("click", nextOrFinish);
 $("btnHoldAdvance").addEventListener("click", holdAdvance);
 $("btnShareResult").addEventListener("click", shareGameResult);
 $("btnNewGameOver").addEventListener("click", newGameFromOver);
+// §6: the game-over "How to play" link.
+$("hHowto").addEventListener("click", () =>
+  track("howto_opened", { source: "gameover" }));
 
 onConnectionChange((isConnected) => {
   connected = isConnected;

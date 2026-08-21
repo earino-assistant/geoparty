@@ -148,6 +148,10 @@ $("choicePhones").addEventListener("click", () =>
 $("choiceTv").addEventListener("click", () =>
   track("party_choice", { choice: "tv" }));
 
+// §6: the footer's "How to play" link — the top of the onboarding funnel.
+$("ldHowto").addEventListener("click", () =>
+  track("howto_opened", { source: "footer" }));
+
 $("btnLdJoin").addEventListener("click", submitCode);
 $("ldCode").addEventListener("keydown", (e) => {
   if (e.key === "Enter") submitCode();
