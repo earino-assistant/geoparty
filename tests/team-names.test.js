@@ -53,9 +53,19 @@ test("randomPun: deterministic under an injected rng function", () => {
 });
 
 test("randomPun: different seeds can produce different puns", () => {
-  const seen = new Set();
-  for (let seed = 0; seed < 10; seed++) seen.add(randomPun(seed));
-  assert.ok(seen.size > 1);
+  // Seeds pick different indices across the bank. Robust to any pun-list
+  // contents/length: assert we see more than one distinct index distribution
+  // region rather than a specific pun. With 100 entries, a handful of seeds
+  // spread across the range must land somewhere non-uniform.
+  const indices = new Set();
+  for (let seed = 0; seed < 20; seed++) {
+    // recover the chosen index by scanning for the returned pun
+    const p = randomPun(seed);
+    indices.add(GEO_PUNS.indexOf(p));
+  }
+  // A real PRNG over 20 seeds across a 100-length bank can't all hit the same
+  // index; allow a couple collisions but require spread.
+  assert.ok(indices.size >= 3, `expected spread across seeds, got ${indices.size}`);
 });
 
 /* ---------------- rememberTeam / recentTeams / lastTeam ---------------- */
@@ -115,10 +125,10 @@ test("suggestTeams: empty input → no suggestions", () => {
 });
 
 test("suggestTeams: matches recent teams before puns, case-insensitive substring", () => {
-  rememberTeam("The Bali Believers");
-  const out = suggestTeams("bali");
-  assert.equal(out[0], "The Bali Believers");
-  assert.ok(out.includes("Bali Believe It")); // pun bank match too
+  rememberTeam("The Kenya Believers"); // a recent team
+  const out = suggestTeams("kenya");
+  assert.equal(out[0], "The Kenya Believers"); // recent team ranks first
+  assert.ok(out.some((n) => n.toLowerCase().includes("kenya believe it"))); // pun bank match too
 });
 
 test("suggestTeams: dedupes case-insensitive matches between recent + puns", () => {
