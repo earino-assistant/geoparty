@@ -586,7 +586,15 @@ function instrument({ surface, container, viewer }) {
     dot.className = "pano-nav-hint-dot";
     navHintEl.appendChild(dot);
     navHintEl.appendChild(document.createTextNode("Finding your way…"));
-    if (el.appendChild) el.appendChild(navHintEl);
+    // Mount on <body>, NOT the Mapillary viewer container: the SDK's own CSS
+    // (`.mapillary-viewer div { box-sizing:content-box }` and the container's
+    // flex/grid layout) stretches children, which made the pill render full
+    // height/width when it was appended to `el`. Fixed-position on body is
+    // immune to the SDK's container styling.
+    const host = (typeof document !== "undefined" && document.body)
+      ? document.body
+      : el;
+    if (host && host.appendChild) host.appendChild(navHintEl);
     return navHintEl;
   }
 

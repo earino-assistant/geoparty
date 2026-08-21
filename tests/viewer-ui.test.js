@@ -880,7 +880,9 @@ test("#4: the round-anchor skip loop keeps the cover up across dead entries",
  * "Finding your way…" nav hint (issue #3 follow-up) — arm/fade/cancel glue
  * ================================================================ */
 
-const navHintOf = (cid) => document.getElementById(cid).querySelector(".pano-nav-hint");
+// The pill is mounted on <body> (see ensureNavHint), so query body, not the
+// viewer container. Arrows (addArrowGlyph) still go in the container.
+const navHintOf = () => document.body.querySelector(".pano-nav-hint");
 function addArrowGlyph(cid, cls) {
   const arrow = document.createElement("div");
   arrow.className = cls || "mapillary-direction-arrow-step";
