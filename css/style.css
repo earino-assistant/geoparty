@@ -1375,32 +1375,35 @@ body:has(.action-bar) .consent-banner {
   padding: 14px 16px;
 }
 
-/* Quiet corner control to reopen the banner once a choice has been made.
-   Demoted from a floating circular button to a quiet text link (P0.3) —
-   revoking consent stays exactly one tap away, it just no longer reads as
-   permanent chrome floating over the panorama. */
+/* Quiet control to reopen the banner once a choice has been made. Demoted
+   from a floating circular cookie button to a plain footer-style text link
+   (P0.3) — revoking consent stays exactly one tap away, it just no longer
+   floats over the panorama or the guess map. It lives in the page's real
+   footer (landing) or a static `.consent-settings-bar` at the end of the
+   body on pages with no footer of their own — never `position: fixed`. */
 .consent-settings {
-  position: fixed;
-  left: 10px;
-  bottom: calc(10px + env(safe-area-inset-bottom));
-  z-index: 2900;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 34px;
-  min-height: 34px;
-  padding: 0;
-  border-radius: 6px;
+  position: static;
+  display: inline;
   background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
   color: var(--muted);
-  font-size: 15px;
-  line-height: 1;
-  opacity: 0.75;
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: none;
+  cursor: pointer;
 }
-.consent-settings:hover, .consent-settings:focus-visible { opacity: 1; color: var(--fg); }
-/* Keep the control clear of the bottom action bar on the phone pages. */
-body:has(.action-bar) .consent-settings {
-  bottom: calc(84px + env(safe-area-inset-bottom));
+.consent-settings:hover, .consent-settings:focus-visible {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+/* Standalone footer bar for pages (host/player/screen/daily/howto) that
+   have no `.ld-footer` of their own to fold this link into. */
+.consent-settings-bar {
+  text-align: center;
+  padding: 16px 12px calc(16px + env(safe-area-inset-bottom));
 }
 
 /* ---------- Daily Challenge (S2) ---------- */
@@ -1730,17 +1733,19 @@ body:has(.action-bar) .sound-toggle {
 
 /* ---------- §4.1 utility corners: calm states only ----------
 
-   The 🍪 and 🔊 controls are 34 px of visual weight that used to sit over
-   the panorama and the guess map through entire rounds. chrome-ui.js stamps
-   body[data-play="1"] while a play screen is up (chrome.js owns the
-   predicate, under test); here they simply leave. Nothing about the consent
-   GATE changes — the control still reopens the banner in every calm state,
-   and revoking is never more than one tap away from a moment that matters.
+   The privacy settings link and the 🔊 control disappear during a round.
+   chrome-ui.js stamps body[data-play="1"] while a play screen is up
+   (chrome.js owns the predicate, under test); here they simply leave.
+   Nothing about the consent GATE changes — the control still reopens the
+   banner in every calm state, and revoking is never more than one tap away
+   from a moment that matters.
 
    Review §4.3 also wants a 44×44 minimum target without visually enlarging
-   the button: a transparent pseudo-element does exactly that (34 + 2×5 =
-   44), so the touch box grows and the ink does not. */
+   the sound toggle: a transparent pseudo-element does exactly that
+   (34 + 2×5 = 44), so the touch box grows and the ink does not. The privacy
+   link is plain text and needs no such trick. */
 body[data-play="1"] .consent-settings,
+body[data-play="1"] .consent-settings-bar,
 body[data-play="1"] .sound-toggle { display: none !important; }
 
 /* Overnight bundle #6 safety net: the undecided consent banner is retracted by
@@ -1751,14 +1756,13 @@ body[data-play="1"] .sound-toggle { display: none !important; }
 body[data-play="1"] .consent-banner { display: none !important; }
 
 /* The joiner's home panel (§6.2) is the one phone screen with no action
-   bar, so the corners sit low rather than dodging a bar that isn't there. */
-body[data-screen="p-home"] .consent-settings,
+   bar, so the corner sits low rather than dodging a bar that isn't there. */
 body[data-screen="p-home"] .sound-toggle {
   bottom: calc(10px + env(safe-area-inset-bottom));
 }
 
-.consent-settings, .sound-toggle { position: fixed; }
-.consent-settings::before, .sound-toggle::before {
+.sound-toggle { position: fixed; }
+.sound-toggle::before {
   content: "";
   position: absolute;
   inset: -5px;

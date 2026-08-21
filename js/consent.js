@@ -3,7 +3,7 @@
 // tested); this module is only the browser glue:
 //   - renders the consent banner for first-time visitors,
 //   - injects the PostHog script ONLY after an explicit accept,
-//   - shows a small 🍪 control to change the choice later,
+//   - shows a quiet "Privacy settings" link to change the choice later,
 //   - exports track() for the UI modules to instrument features with.
 // Docs: docs/analytics.md (events/KPIs) and PRIVACY.md (what & why).
 
@@ -268,19 +268,35 @@ function retractBanner() {
   if (banner) banner.classList.add("hidden");
 }
 
-// The revoke/change control: a quiet cookie button in the corner once a
-// choice has been made. Reopens the banner.
+// The revoke/change control: a quiet "Privacy settings" text link once a
+// choice has been made. Reopens the banner. Lands in the page's existing
+// footer (landing) or, on pages with no footer, a small static footer-style
+// bar at the end of the body — never `position: fixed`, so it can no longer
+// float over the panorama or the guess map (P0.3).
 function ensureGear() {
   if (gear) return gear;
   gear = document.createElement("button");
   gear.id = "consentSettings";
   gear.className = "consent-settings";
   gear.type = "button";
-  gear.textContent = "\u{1F36A}";
+  gear.textContent = "Privacy settings";
   gear.setAttribute("aria-label", "Analytics and cookie settings");
   gear.title = "Analytics settings";
   gear.addEventListener("click", openBanner);
-  document.body.appendChild(gear);
+
+  const footer = document.body.querySelector("footer.ld-footer");
+  if (footer) {
+    const sep = document.createElement("span");
+    sep.setAttribute("aria-hidden", "true");
+    sep.textContent = "·";
+    footer.appendChild(sep);
+    footer.appendChild(gear);
+  } else {
+    const bar = document.createElement("footer");
+    bar.className = "consent-settings-bar";
+    bar.appendChild(gear);
+    document.body.appendChild(bar);
+  }
   return gear;
 }
 
