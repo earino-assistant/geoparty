@@ -1693,7 +1693,7 @@ body:has(.action-bar) .consent-banner {
    background/border treatment; it reads as a mark, not a control. */
 .sound-toggle {
   position: fixed;
-  right: 10px;
+  left: 10px;
   bottom: calc(10px + env(safe-area-inset-bottom));
   z-index: 2900;
   display: none;
