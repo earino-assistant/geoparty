@@ -300,7 +300,24 @@ function instrument({ surface, container, viewer }) {
   let desiredMove = false;
   let moveApplied = true;
   let moveRetryTimer = null;
+
+  // Autoplay ("play" mode) lives on the Navigator's PlayService, NOT the
+  // sequence component — component.stop() -> configure({playing:false}) only
+  // reaches the PlayService while the component is still ACTIVE. Deactivating
+  // the sequence component (Frozen/Hard, below) tears down the config
+  // subscription but never stops a running PlayService, so it keeps advancing
+  // the camera forever. Must be called BEFORE the deactivate loop, while the
+  // component is still active. Idempotent and SDK-build-tolerant.
+  function stopPlay() {
+    try {
+      const seq = typeof viewer.getComponent === "function"
+        ? viewer.getComponent("sequence") : null;
+      if (seq && typeof seq.stop === "function") seq.stop();
+    } catch { /* SDK build without a sequence component, or not laid out yet */ }
+  }
+
   function applyMove() {
+    stopPlay();
     let ok = true;
     for (const name of ["direction", "sequence", "keyboard"]) {
       try {
@@ -769,6 +786,7 @@ function instrument({ surface, container, viewer }) {
     errorClass: null,
 
     attempt,
+    stopPlay,
 
     // Instrumented moveTo. Emits exactly one imagery_load, then rethrows the
     // ORIGINAL rejection so every existing catch behaves identically.
@@ -790,6 +808,10 @@ function instrument({ surface, container, viewer }) {
     // pano_session lifecycle (§7.1): one fold per (surface, round).
     beginRound(roundNumber) {
       iv.endRound();
+      // Universal per-round safety net: a round boundary always stops any
+      // running autoplay, regardless of the outgoing/incoming move lever.
+      // On player (no sequence component laid out) this is a harmless no-op.
+      stopPlay();
       pano = createPanoSession({ surface, roundNumber, startedAt: now() });
       // Issue #2: seed the anchor's edge availability from any image/edge state
       // latched before this round opened — the initial image before round 1, or

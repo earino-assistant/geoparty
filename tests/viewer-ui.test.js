@@ -148,7 +148,22 @@ function installFakeMapillary() {
       this.opts = opts;
       this.handlers = {};
       this.removed = false;
+      // Shared monotonic order counter (regression test for the round-
+      // boundary autoplay bug): proves seq.stop() ran BEFORE the
+      // sequence component was deactivated, not after.
+      this.order = 0;
+      const self = this;
+      this.seq = {
+        playing: false,
+        stops: 0,
+        play() { this.playing = true; },
+        stop() { this.stops++; this.playing = false; this.stoppedAtOrder = self.order++; },
+      };
       state.viewers.push(this);
+    }
+    getComponent(name) {
+      (this.getComponentCalls = this.getComponentCalls || []).push(name);
+      return name === "sequence" ? this.seq : null;
     }
     on(name, fn) { (this.handlers[name] = this.handlers[name] || []).push(fn); }
     emit(name, ev) { for (const fn of this.handlers[name] || []) fn(ev); }
@@ -158,8 +173,14 @@ function installFakeMapillary() {
     setFilter() { (this.calls = this.calls || []).push("setFilter"); return Promise.resolve(); }
     remove() { this.removed = true; }
     resize() {}
-    activateComponent(name) { (this.activated = this.activated || []).push(name); }
-    deactivateComponent(name) { (this.deactivated = this.deactivated || []).push(name); }
+    activateComponent(name) {
+      (this.activated = this.activated || []).push(name);
+      (this.activatedAtOrder = this.activatedAtOrder || []).push(this.order++);
+    }
+    deactivateComponent(name) {
+      (this.deactivated = this.deactivated || []).push(name);
+      (this.deactivatedAtOrder = this.deactivatedAtOrder || []).push(this.order++);
+    }
   }
   globalThis.mapillary = {
     Viewer: FakeViewer,
@@ -224,6 +245,77 @@ test("setMoveAllowed: toggles moveEnabled and (de)activates nav components (G2/G
   iv.setMoveAllowed(true);
   assert.equal(iv.moveEnabled, true);
   assert.deepEqual(raw.activated, ["direction", "sequence", "keyboard"]);
+  iv.destroy();
+});
+
+/* ================================================================
+ * Autoplay round-boundary regression (Mapillary PlayService, not the
+ * sequence component, owns the "play" loop — see js/viewer-ui.js stopPlay).
+ * ================================================================ */
+
+test("autoplay: round boundary stops play", () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  raw.seq.play();
+  assert.equal(raw.seq.playing, true);
+  iv.beginRound(2);
+  assert.ok(raw.seq.stops >= 1);
+  assert.equal(raw.seq.playing, false);
+  iv.destroy();
+});
+
+test("autoplay: Frozen round stops play BEFORE deactivating the sequence component", () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  raw.seq.play();
+  assert.equal(raw.seq.playing, true);
+  iv.setMoveAllowed(false);   // G2 Frozen
+  assert.ok(raw.seq.stops >= 1);
+  assert.equal(raw.seq.playing, false);
+  assert.ok(raw.deactivated.includes("sequence"));
+  const deactivateSeqOrder = raw.deactivatedAtOrder[raw.deactivated.indexOf("sequence")];
+  assert.ok(raw.seq.stoppedAtOrder < deactivateSeqOrder,
+    "seq.stop() must run before the sequence component is deactivated");
+  iv.destroy();
+});
+
+test("autoplay: a move-allowed round starts controlled (stopped, then reactivated)", () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  raw.seq.play();
+  assert.equal(raw.seq.playing, true);
+  iv.setMoveAllowed(true);
+  assert.ok(raw.seq.stops >= 1);
+  assert.ok(raw.activated.includes("sequence"));
+  iv.destroy();
+});
+
+test("autoplay: no-op when not playing", () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  assert.equal(raw.seq.playing, false);
+  assert.doesNotThrow(() => iv.beginRound(1));
+  assert.equal(raw.seq.playing, false);
+  iv.destroy();
+});
+
+test("autoplay: new-anchor path leaves play stopped", async () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  raw.seq.play();
+  assert.equal(raw.seq.playing, true);
+  iv.beginRound(2);
+  await iv.moveTo("1263588815098567", "anchor");
+  assert.equal(raw.seq.playing, false);
+  iv.destroy();
+});
+
+test("autoplay: safe on a viewer with no getComponent", () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  delete raw.getComponent;
+  assert.doesNotThrow(() => iv.beginRound(1));
+  assert.doesNotThrow(() => iv.setMoveAllowed(false));
   iv.destroy();
 });
 
