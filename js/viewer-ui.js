@@ -37,6 +37,7 @@ import {
   decideEdgeRecovery,
   edgeRecoveryStopped,
   classifyEdgeRecoveryOutcome,
+  directionComponentConfig,
   EDGE_RECOVERY_MAX_ATTEMPTS,
   EDGE_RECOVERY_GRACE_MS,
   EDGE_RECOVERY_RECHECK_MS,
@@ -226,10 +227,14 @@ export function createViewer({ surface, container, component, moveAllowed }) {
   let raw;
   try {
     if (c && c.failInit === true) throw new Error("chaos: forced viewer_init failure");
+    const resolvedComponent = {
+      ...component,
+      direction: directionComponentConfig(component.direction),
+    };
     raw = new mapillary.Viewer({
       accessToken: MAPILLARY_TOKEN,
       container,
-      component,
+      component: resolvedComponent,
     });
   } catch (e) {
     const cls = classifyImageryError(e, { phase: "init", online: isOnline() });

@@ -696,3 +696,14 @@ export function chaosAllowed(hostname) {
   return hostname === "localhost" || hostname === "127.0.0.1" ||
     hostname === "::1" || hostname === "[::1]" || hostname === "";
 }
+
+/* ================================================================
+ * §16 Direction (arrow) component sizing — issue #3 arrow reposition
+ * ================================================================ */
+
+// Widens the tappable arrow-cluster hit target on top of the caller's
+// moveAllowed boolean/config; false stays false (no-move mode keeps the
+// component off, per spec §6).
+export function directionComponentConfig(moveAllowed) {
+  return moveAllowed ? { minWidth: 320, maxWidth: 560 } : false;
+}

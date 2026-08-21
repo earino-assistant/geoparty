@@ -52,6 +52,7 @@ import {
   buildReportBundle,
   filterQuarantined,
   chaosAllowed,
+  directionComponentConfig,
 } from "../js/imagery.js";
 
 /* ================================================================
@@ -936,4 +937,23 @@ test("isDeadEntryClass: ONLY image_dead is a deterministic pool skip", () => {
   ]) {
     assert.equal(isDeadEntryClass(cls), false, `${cls} must not skip a live entry`);
   }
+});
+
+/* ================================================================
+ * §16 directionComponentConfig — issue #3 arrow reposition
+ * ================================================================ */
+
+test("directionComponentConfig: false/undefined/0 stay off (no-move mode)", () => {
+  for (const v of [false, undefined, 0, null, ""]) {
+    assert.equal(directionComponentConfig(v), false, `${v} must not turn the component on`);
+  }
+});
+
+test("directionComponentConfig: truthy moveAllowed widens the hit target", () => {
+  assert.deepEqual(directionComponentConfig(true), { minWidth: 320, maxWidth: 560 });
+});
+
+test("directionComponentConfig: minWidth is always smaller than maxWidth", () => {
+  const cfg = directionComponentConfig(true);
+  assert.ok(cfg.minWidth < cfg.maxWidth);
 });

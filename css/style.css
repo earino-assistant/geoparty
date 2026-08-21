@@ -14,6 +14,11 @@
   --team-2: #4dd6ff;
   --team-3: #ff6ec7;
   --team-4: #7dff8a;
+
+  /* Height reserved for the bottom action bar (guess button / controls),
+     so the Mapillary arrow cluster and its sibling controls can be lifted
+     clear of it instead of sitting underneath (issue #3). */
+  --action-bar-h: 80px;
 }
 
 * { box-sizing: border-box; }
@@ -999,6 +1004,27 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 /* Mapillary viewer fills its container */
 .mapillary-viewer, .viewer-full > div { width: 100%; height: 100%; }
+
+/* ================================================================
+   Issue #3 — arrow cluster reposition. Lifts the direction (arrow)
+   component clear of the bottom action bar and enlarges it; nudges the
+   zoom/bearing/sequence controls to stay clear of it in turn. Verified
+   against the loaded MapillaryJS 4.1.2 build's actual class names
+   (mapillary-bearing's outer element is "-indicator-container", not
+   "-container" — the other three matched the inferred names). Standalone
+   translate/scale only, no !important, no viewer/canvas transform.
+   ================================================================ */
+.viewer-full .mapillary-direction-perspective {
+  translate: 0 calc(-1 * (var(--action-bar-h) + env(safe-area-inset-bottom) + 8px));
+  scale: 1.25;
+}
+.viewer-full .mapillary-sequence-container { top: 64px; }
+.viewer-full .mapillary-bearing-indicator-container {
+  bottom: calc(var(--action-bar-h) + env(safe-area-inset-bottom) + 16px);
+}
+.viewer-full .mapillary-zoom-container {
+  bottom: calc(var(--action-bar-h) + env(safe-area-inset-bottom) + 72px);
+}
 
 /* ================================================================
    Head-to-head mode
