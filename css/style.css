@@ -544,6 +544,10 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
   padding: 6px 12px;
   font-size: 1.05rem;
 }
+/* The h2h "N/total in" slot is empty until a rival locks in. An empty
+   .hud-item would still render its dark box as a stray block between the
+   round label and the timer — hide it until it actually has content. */
+.hud .hud-item:empty { display: none; }
 
 .map-full {
   position: absolute;
