@@ -588,6 +588,17 @@ test("sanitizeEvent: team_name_used keeps mode/source, never the team name text"
   });
 });
 
+test("sanitizeEvent: team_name_used also covers the h2h joiner, never the team name text", () => {
+  const out = sanitizeEvent("team_name_used", {
+    mode: "h2h", source: "recent",
+    name: "The Atlas Cats", team_name: "The Atlas Cats", // never sent
+  });
+  assert.deepEqual(out, {
+    event: "team_name_used",
+    props: { mode: "h2h", source: "recent" },
+  });
+});
+
 test("sanitizeEvent: consent events carry no properties", () => {
   const out = sanitizeEvent("consent_given", { room: "KWPFRT", extra: 1 });
   assert.deepEqual(out, { event: "consent_given", props: {} });

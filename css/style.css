@@ -359,9 +359,11 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
   font: inherit;
 }
 
-/* Team-roster brief: pun bank + recent-team memory. Collapsible +
- * suggestion-on-typing only — no permanent chip row (owner feedback: "pills
- * take too much space"). */
+/* Team-roster brief: pun bank + recent-team memory. Pre-fill + 🎲 pun +
+ * suggestion-on-typing only — no permanent/collapsible roster UI (owner:
+ * "kill the recent teams drop-down, it's not worth the screen real
+ * estate"). Shared by host.html (couch, one row per team) and player.html
+ * (h2h joiner, single row). */
 .team-name-row { position: relative; margin-bottom: 8px; }
 .team-name-row input { margin-bottom: 0; }
 .team-suggestions {
@@ -379,30 +381,6 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
 }
 .team-name-actions { margin: 4px 0 8px; }
 .team-name-actions button { font-size: 0.9rem; padding: 8px 12px; }
-.recent-teams {
-  border: 1px solid var(--panel-2);
-  background: var(--panel);
-  border-radius: 14px;
-  padding: 0 14px;
-}
-.recent-teams summary {
-  cursor: pointer;
-  padding: 10px 2px;
-  color: var(--muted);
-  font-weight: 600;
-}
-.recent-teams[open] summary { color: var(--fg); }
-.recent-teams-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding-bottom: 12px;
-}
-.recent-teams-list button {
-  font-size: 0.85rem;
-  padding: 6px 10px;
-}
-.recent-teams-empty { color: var(--muted); font-size: 0.9rem; padding-bottom: 12px; }
 
 /* Primary action pinned bottom-center for thumb reach (spec §6). */
 .action-bar {
@@ -1920,8 +1898,7 @@ body[data-screen="p-home"] .sound-toggle {
 /* Minimum touch target, applied to the controls that were under 44 px. */
 .seg button { min-height: 44px; }
 .daily-back-link { min-height: 44px; display: flex; align-items: center; }
-.tv-add summary, .more-options summary, .past-games summary,
-.recent-teams summary { min-height: 44px; }
+.tv-add summary, .more-options summary, .past-games summary { min-height: 44px; }
 .toast-action { min-height: 44px; }
 
 /* ---------- §4.3 progressive disclosure: "More options" ---------- */

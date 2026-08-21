@@ -75,17 +75,15 @@
           <button data-v="4">4</button>
         </div>
         <div class="team-names" id="teamNames" data-ph-mask style="margin-top: 10px"></div>
-        <!-- Team-roster brief: zero-typing pun picks + this device's recent
-             teams. Collapsible + suggestion-on-typing only, per the owner's
-             "pills take too much space" feedback — no permanent chip row. -->
+        <!-- Team-roster brief: zero-typing pun picks + this device's last-used
+             name pre-filled into the first slot. Owner: "Kill the recent
+             teams drop-down too. It's not worth the screen real estate" —
+             no permanent/collapsible roster, just the pun button and the
+             inline type-ahead suggestions rendered per-input in JS. -->
         <div id="teamNameHelpers" class="team-name-helpers hidden" data-ph-mask>
           <div class="team-name-actions">
             <button type="button" id="btnSurprisePun" class="btn-ghost">🎲 Surprise me</button>
           </div>
-          <details id="recentTeamsDetails" class="recent-teams">
-            <summary>Recent teams ▾</summary>
-            <div id="recentTeamsList" class="recent-teams-list"></div>
-          </details>
         </div>
       </div>
 

@@ -113,6 +113,9 @@ import {
   loadRecords, saveRecords, applyPartyGuess, medalForDistance,
 } from "./records.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
+import {
+  lastTeam, randomPun, recentTeams, rememberTeam, suggestTeams,
+} from "./team-names.js";
 import { scrubErrorMessage } from "./imagery.js";
 import { drawQr } from "./qr.js";
 import { track } from "./consent.js";
@@ -375,6 +378,50 @@ function openSetup(mode) {
   showScreen("p-setup");
 }
 
+// Team-roster brief, extended to the h2h joiner (owner: pre-fill + 🎲 pun +
+// inline type-ahead only — no permanent/collapsible roster UI). One input,
+// unlike the couch's per-team rows, so no active-input tracking is needed.
+function hideTeamSuggestions() {
+  const el = $("pTeamSuggestions");
+  el.innerHTML = "";
+  el.classList.add("hidden");
+}
+
+function renderTeamSuggestions() {
+  const input = $("myTeamName");
+  const el = $("pTeamSuggestions");
+  const matches = suggestTeams(input.value);
+  el.innerHTML = "";
+  if (!matches.length) { el.classList.add("hidden"); return; }
+  const recentLower = new Set(recentTeams().map((n) => n.toLowerCase()));
+  for (const match of matches) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = match;
+    // mousedown (not click) fires before the input's blur, and preventDefault
+    // keeps focus on the input so hideTeamSuggestions below can't race a blur.
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      input.value = match;
+      input.dataset.source = recentLower.has(match.toLowerCase()) ? "recent" : "pun";
+      hideTeamSuggestions();
+    });
+    el.appendChild(btn);
+  }
+  el.classList.remove("hidden");
+}
+
+// Persists the name for next time (pre-fill + suggestions) and reports
+// whether the pun bank / suggestions cut typing — mirrors host-ui.js's
+// collectTeams(), called once the name is actually committed to a room.
+function commitTeamName(name) {
+  const input = $("myTeamName");
+  const source = input.dataset.source === "pun" || input.dataset.source === "recent"
+    ? input.dataset.source : "typed";
+  rememberTeam(name);
+  track("team_name_used", { mode: "h2h", source });
+}
+
 // The ghost "Start a new game →": a deliberate action, and the one place
 // that gates on a team name before the settings are worth filling in.
 function startNewGame() {
@@ -425,6 +472,7 @@ async function createRoom() {
       difficulty: state.settings.difficulty,
       auto_submit: normalizeAutoSubmit(state.settings.autoSubmitOnTimeout),
     });
+    commitTeamName(name);
     track("team_joined", { mode: "h2h", team_count: 1 });
     enterRoom(code, "t1");
   } catch (e) {
@@ -473,6 +521,7 @@ async function joinRoom() {
       }
     }
     if (!claimed) { err.textContent = "Room is full (4 teams max)."; return; }
+    commitTeamName(name);
     track("team_joined", { mode: "h2h", team_count: teamCount });
     enterRoom(code, claimed);
   } catch (e) {
@@ -2228,6 +2277,31 @@ $("joinCode").addEventListener("input", () => {
     .replace(/[^A-HJ-NP-Z]/g, "");
   $("joinErr").textContent = "";
 });
+
+// Team-roster brief, extended to the h2h joiner: 🎲 pun + inline type-ahead
+// suggestions on this device's single team-name input.
+$("pBtnSurprisePun").addEventListener("click", () => {
+  $("myTeamName").value = randomPun();
+  $("myTeamName").dataset.source = "pun";
+  hideTeamSuggestions();
+  $("myTeamName").focus();
+});
+$("myTeamName").addEventListener("input", () => {
+  $("myTeamName").dataset.source = "typed";
+  renderTeamSuggestions();
+});
+$("myTeamName").addEventListener("blur", () => {
+  // Suggestion taps use mousedown+preventDefault so they never blur the
+  // input; this timeout only covers a genuine tap elsewhere on screen.
+  setTimeout(hideTeamSuggestions, 120);
+});
+// Pre-fill with this device's last-used name (no permanent roster UI —
+// owner: "not worth the screen real estate" — just persistence + pun +
+// suggestions, per js/team-names.js).
+if (!$("myTeamName").value) {
+  const last = lastTeam();
+  if (last) { $("myTeamName").value = last; $("myTeamName").dataset.source = "recent"; }
+}
 
 onConnectionChange((isConnected) => {
   $("connPill").classList.toggle("hidden", isConnected);

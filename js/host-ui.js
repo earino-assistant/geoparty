@@ -295,9 +295,9 @@ function wireSeg(segId, onChange) {
   });
 }
 
-// Team-roster brief: which team-name input the 🎲/Recent-teams controls
-// (shared across however many inputs are on screen) act on. Tracks focus;
-// defaults to the first input when nothing has been focused yet.
+// Team-roster brief: which team-name input the 🎲 pun button (shared across
+// however many inputs are on screen) acts on. Tracks focus; defaults to the
+// first input when nothing has been focused yet.
 let activeTeamInput = null;
 
 function suggestionsElFor(input) {
@@ -333,26 +333,6 @@ function renderSuggestionsFor(input) {
     el.appendChild(btn);
   }
   el.classList.remove("hidden");
-}
-
-function renderRecentTeamsList() {
-  const list = $("recentTeamsList");
-  const names = recentTeams();
-  list.innerHTML = "";
-  if (!names.length) {
-    const empty = document.createElement("div");
-    empty.className = "recent-teams-empty";
-    empty.textContent = "No recent teams yet.";
-    list.appendChild(empty);
-    return;
-  }
-  for (const name of names) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.textContent = name;
-    chip.addEventListener("click", () => fillActiveTeamInput(name, "recent"));
-    list.appendChild(chip);
-  }
 }
 
 // Fills whichever team-name input last had focus (or the first, if none
@@ -406,7 +386,6 @@ function renderTeamNameInputs(count) {
     row.append(input, suggestions);
     wrap.appendChild(row);
   }
-  renderRecentTeamsList();
 }
 
 function collectSettings() {
@@ -1738,8 +1717,6 @@ function enterSetup() {
   showScreen("h-setup");
   $("resumeBanner").classList.add("hidden");
   renderLeaderboard();
-  // Refresh so a team named in the just-finished game shows up as "recent".
-  if (!$("teamNameHelpers").classList.contains("hidden")) renderRecentTeamsList();
 }
 
 async function checkResume() {

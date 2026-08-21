@@ -1,9 +1,9 @@
 // team-names.js — geography-pun name bank + this device's recent-team-name
-// memory (owner brief: team-name persistence, easy couch entry, zero-typing
-// pun picks). Pure, no DOM, no network — the js/game.js discipline; host-ui.js
-// is the only caller. localStorage is optional and defensive throughout:
-// private mode / file:// / SSR degrades to "nothing remembered", never a
-// throw.
+// memory (owner brief: team-name persistence, easy entry, zero-typing pun
+// picks). Pure, no DOM, no network — the js/game.js discipline; host-ui.js
+// (couch) and player-ui.js (h2h joiner) are the callers. localStorage is
+// optional and defensive throughout: private mode / file:// / SSR degrades
+// to "nothing remembered", never a throw.
 
 // The owner's curated list of geography puns — used verbatim by "🎲 Surprise
 // me". List-agnostic logic (randomPun/suggestTeams) means this can grow freely.

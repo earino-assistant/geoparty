@@ -56,8 +56,19 @@
            between the two panels rather than duplicating the field. -->
       <div class="settings-group" id="pTeamNameGroup">
         <div class="label">Your team name</div>
+        <!-- Team-roster brief, extended to the h2h joiner: this device's
+             last-used name pre-fills the input, the 🎲 button drops in a
+             geography pun, and suggestions appear inline while typing. No
+             permanent roster UI here (owner: not worth the screen real
+             estate) — see js/team-names.js. -->
         <div class="team-names">
-          <input id="myTeamName" data-ph-mask maxlength="24" placeholder="The Atlas Cats" autocomplete="off" />
+          <div class="team-name-row">
+            <input id="myTeamName" data-ph-mask maxlength="24" placeholder="The Atlas Cats" autocomplete="off" />
+            <div id="pTeamSuggestions" class="team-suggestions hidden" data-ph-mask></div>
+          </div>
+        </div>
+        <div class="team-name-actions">
+          <button type="button" id="pBtnSurprisePun" class="btn-ghost">🎲 Surprise me</button>
         </div>
       </div>
 

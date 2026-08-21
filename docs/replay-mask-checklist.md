@@ -41,10 +41,13 @@ into it, so a future scoreboard row cannot slip through unmasked.
 - `#toast` — masked wholesale: team-name toasts flow through it (e.g. "Pass
   the phone — Blue is up!", `host-ui.js`). The Report inline action still
   works on the live DOM; masking is replay-only
-- `#teamNames` — the setup textarea
-- `#teamNameHelpers` — team-roster brief: the 🎲 Surprise-me control and the
-  Recent-teams disclosure, whose chips render this device's remembered team
-  names (`host-ui.js#renderRecentTeamsList`)
+- `#teamNames` — the setup textarea; also masks the per-input type-ahead
+  suggestion buttons rendered into it (`host-ui.js#renderSuggestionsFor`),
+  which surface this device's remembered team names
+- `#teamNameHelpers` — the 🎲 Surprise-me control. The Recent-teams
+  disclosure that used to live here was removed (owner: "not worth the
+  screen real estate") — `#teamNames` above is now the only place a
+  remembered name renders
 - `#leaderboardList` — stored team names + dates
 - `#revealPlace` — **the round's answer, as a place name** (now the reveal
   headline rather than a stat card — same element id, same mask)
@@ -65,6 +68,12 @@ one.
 - `#pResumeCode`, `#pRoomCodeHuge` — room codes
 - `#pJoinUrl`, `#pTvType` — invite/TV links carrying the room code
 - `#myTeamName` — the team-name input
+- `#pTeamSuggestions` — team-roster brief, extended to the h2h joiner:
+  inline type-ahead suggestion buttons (`player-ui.js#renderTeamSuggestions`)
+  that surface this device's remembered team name plus pun-bank matches
+  while typing. No permanent roster UI on this page (owner: "not worth the
+  screen real estate") — pre-fill, 🎲 pun and this transient dropdown are
+  the whole feature
 - `#pLobbyTeams`, `#pLockedList`, `#pRevealBoard`, `#pFinalTotals`,
   `#pLockedRank`, `#pHandoffNote` — team names. `#pRevealBoard` is the
   merged board that replaced `#pRoundResults` + `#pRevealTotals`
