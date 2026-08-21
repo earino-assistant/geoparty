@@ -106,6 +106,9 @@ jobs:
   # run's id and sha; fail the run if it never does. It depends on deploy, so
   # it is skipped when deploy fails, and reads nothing but a public URL, so it
   # holds no elevated permission.
+  # NOTE (custom domain): since geoparty.social became the Pages custom domain,
+  # the canonical github.io URL 301-redirects to it. -L follows that redirect
+  # (the served stamp is still this run's id+sha, so green-means-live holds).
   verify:
     needs: deploy
     runs-on: ubuntu-latest
@@ -128,7 +131,7 @@ jobs:
             # attempt lets each poll observe fresh origin state; reusing one
             # query could pin a stale/404 answer in the edge for up to 10 min.
             # This is the core false-red defense (audit §2.1).
-            body=$(curl -fsS "$url?verify=$GITHUB_RUN_ID-$attempt" || true)
+            body=$(curl -fsSL "$url?verify=$GITHUB_RUN_ID-$attempt" || true)
             # Fixed-string match on the single-line JSON stamp: BOTH the run
             # and the commit must be this run's (order-independent).
             if printf '%s' "$body" | grep -qF "\"run\":\"$GITHUB_RUN_ID\"" \
