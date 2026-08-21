@@ -16,7 +16,7 @@ import {
   HERO_PANOS,
   heroSequence,
 } from "./frontdoor.js";
-import { track } from "./consent.js";
+import { track, openBanner } from "./consent.js";
 import { createViewer } from "./viewer-ui.js";
 import { isStandaloneDisplay } from "./pwa.js";
 
@@ -151,6 +151,15 @@ $("choiceTv").addEventListener("click", () =>
 // §6: the footer's "How to play" link — the top of the onboarding funnel.
 $("ldHowto").addEventListener("click", () =>
   track("howto_opened", { source: "footer" }));
+
+// The footer's "Privacy" link is the site's one privacy entry point: it
+// opens the consent modal (which itself links out to the full PRIVACY.md
+// on GitHub) instead of navigating away. The href stays as a no-JS
+// fallback.
+$("ldPrivacy").addEventListener("click", (e) => {
+  e.preventDefault();
+  openBanner();
+});
 
 $("btnLdJoin").addEventListener("click", submitCode);
 $("ldCode").addEventListener("keydown", (e) => {

@@ -1369,27 +1369,19 @@ body:has(.action-bar) .consent-banner {
   padding: 14px 16px;
 }
 
-/* Quiet control to reopen the banner once a choice has been made. Only
-   exists in the landing page's real `.ld-footer` — host/player/daily/screen
-   get no gear at all, no standalone bar. The owner's call: the control was
-   showing up too prominently mid-game. */
-.consent-settings {
-  position: static;
-  display: inline;
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
+/* The modal's link out to the full policy on GitHub — same quiet treatment
+   as the report link below it. */
+.consent-github {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 4px 0;
   color: var(--muted);
-  font: inherit;
-  font-size: 0.85rem;
-  text-decoration: none;
-  cursor: pointer;
-}
-.consent-settings:hover, .consent-settings:focus-visible {
-  color: var(--fg);
+  font-size: 0.8rem;
+  text-align: center;
   text-decoration: underline;
 }
+.consent-github:hover, .consent-github:focus-visible { color: var(--fg); }
 
 /* ---------- Daily Challenge (S2) ---------- */
 
@@ -1724,10 +1716,11 @@ body:has(.action-bar) .sound-toggle {
 
    chrome-ui.js stamps body[data-play="1"] while a play screen is up
    (chrome.js owns the predicate, under test). The 🔊 control only shows up
-   there; the privacy link no longer exists on these app-shell pages at all
-   (js/consent.js#ensureGear — landing-only footer link). Nothing about the
-   consent GATE changes — the banner itself still reopens wherever consent
-   is actually being asked. */
+   there; the privacy link never exists on these app-shell pages at all —
+   it's the landing page's static footer "Privacy" link (index.html /
+   js/landing-ui.js), nowhere else. Nothing about the consent GATE changes —
+   the banner itself still reopens wherever consent is actually being
+   asked. */
 body[data-play="1"] .sound-toggle { display: block; }
 
 /* Overnight bundle #6 safety net: the undecided consent banner is retracted by

@@ -3,7 +3,8 @@
 // tested); this module is only the browser glue:
 //   - renders the consent banner for first-time visitors,
 //   - injects the PostHog script ONLY after an explicit accept,
-//   - shows a quiet "Privacy settings" link to change the choice later,
+//   - exports openBanner() so the landing footer's "Privacy" link (the
+//     site's one privacy entry point) can reopen it later,
 //   - exports track() for the UI modules to instrument features with.
 // Docs: docs/analytics.md (events/KPIs) and PRIVACY.md (what & why).
 
@@ -154,7 +155,6 @@ function applyReplayKillSwitch(ph) {
  * ================================================================ */
 
 let banner = null;
-let gear = null;
 
 function ensureBanner() {
   if (banner) return banner;
@@ -200,7 +200,7 @@ function ensureBanner() {
   // review): no permanent chrome on the pano, but a findable link on the
   // diagnostics settings surface. Hidden on the first-run banner — a
   // first-time visitor has nothing to report yet — and shown only when the
-  // banner is REOPENED from the 🍪 control.
+  // banner is REOPENED from the landing footer's "Privacy" link.
   const report = document.createElement("button");
   report.id = "consentReport";
   report.type = "button";
@@ -213,7 +213,17 @@ function ensureBanner() {
       .catch(() => { /* module blocked/offline: nothing to do */ });
   });
 
-  banner.append(text, actions, report);
+  // The full policy lives in the repo, not in this summary — a real link,
+  // not a JS-only control, so it works even if the module fails to load.
+  const github = document.createElement("a");
+  github.id = "consentGithub";
+  github.className = "consent-github";
+  github.href = "https://github.com/earino-assistant/geoparty/blob/main/PRIVACY.md";
+  github.target = "_blank";
+  github.rel = "noopener noreferrer";
+  github.textContent = "Read the full privacy policy on GitHub ↗";
+
+  banner.append(text, actions, report, github);
 
   accept.addEventListener("click", () => {
     // accept() sets the stored consent to ACCEPTED synchronously, then loads
@@ -242,7 +252,10 @@ function surfaceName() {
   return "landing";
 }
 
-function openBanner() {
+// Exported so the landing footer's "Privacy" link (js/landing-ui.js) can
+// reopen the same modal used for the first-visit ask — one control, one
+// implementation.
+export function openBanner() {
   const el = ensureBanner();
   const status = el.querySelector(".consent-status");
   const consent = getConsent(window.localStorage);
@@ -252,50 +265,17 @@ function openBanner() {
   el.querySelector(".consent-report")
     .classList.toggle("hidden", consent === null);
   el.classList.remove("hidden");
-  if (gear) gear.classList.add("hidden");
 }
 
 function closeBanner() {
   if (banner) banner.classList.add("hidden");
-  ensureGear().classList.remove("hidden");
 }
 
 // #6: retract the still-undecided banner when play begins. Unlike closeBanner
-// this records NO choice and does NOT reveal the 🍪 gear (that is the
-// post-decision revoke control) — the banner simply reoffers at the next calm
+// this records NO choice — the banner simply reoffers at the next calm
 // promptable screen. The consent gate is untouched: nothing loads or fires.
 function retractBanner() {
   if (banner) banner.classList.add("hidden");
-}
-
-// The revoke/change control: a quiet "Privacy settings" text link once a
-// choice has been made. Reopens the banner. It only exists where there is a
-// genuine page footer to fold it into (the landing page's `.ld-footer`).
-// Pages with no real footer of their own (host/player/daily/screen) get no
-// gear at all — no standalone floating/bar footer, per the owner's call
-// that the control was showing up far too prominently mid-game. Revoking
-// consent from those pages is no longer one tap away; the banner itself
-// still appears wherever consent is actually being asked.
-function ensureGear() {
-  if (gear) return gear;
-  gear = document.createElement("button");
-  gear.id = "consentSettings";
-  gear.className = "consent-settings";
-  gear.type = "button";
-  gear.textContent = "Privacy settings";
-  gear.setAttribute("aria-label", "Analytics and cookie settings");
-  gear.title = "Analytics settings";
-  gear.addEventListener("click", openBanner);
-
-  const footer = document.body.querySelector("footer.ld-footer");
-  if (footer) {
-    const sep = document.createElement("span");
-    sep.setAttribute("aria-hidden", "true");
-    sep.textContent = "·";
-    footer.appendChild(sep);
-    footer.appendChild(gear);
-  }
-  return gear;
 }
 
 /* Boot.
@@ -336,7 +316,7 @@ if (getConsent(window.localStorage) === null) {
 } else {
   // Returning visitor with a stored choice. init() only loads PostHog if they
   // had accepted; stampRelease registers the deploy super properties once the
-  // resumed script has landed.
+  // resumed script has landed. The revoke control is the landing footer's
+  // static "Privacy" link (js/landing-ui.js) — nothing to inject here.
   analytics.init().then(stampRelease);
-  ensureGear();
 }
