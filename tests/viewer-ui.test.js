@@ -16,6 +16,7 @@
 //   G handled skip         → one imagery_load{skips:n}, one deduped issue
 import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { NAV_HINT_MAX_MS } from "../js/imagery.js";
 
 /* ================================================================
  * A very small fake browser
@@ -889,6 +890,17 @@ function addArrowGlyph(cid, cls) {
   document.getElementById(cid).appendChild(arrow);
   return arrow;
 }
+const NAV_ARROW_TEST_SELECTOR = [
+  "mapillary-direction-arrow-step", "mapillary-direction-arrow-spherical",
+  "mapillary-direction-turn-left", "mapillary-direction-turn-right",
+  "mapillary-direction-turn-around",
+].join(",");
+function navHintArrowNode(cid) {
+  return document.getElementById(cid).querySelector(NAV_ARROW_TEST_SELECTOR);
+}
+function navigationArrowsPresent(cid) {
+  return Boolean(navHintArrowNode(cid));
+}
 
 test("nav hint: appears on a move-enabled anchor load when no arrows are on screen yet",
   async () => {
@@ -913,15 +925,108 @@ test("nav hint: fades the instant a real arrow glyph is detected on a poll tick"
     iv.destroy();
   });
 
-test("nav hint: never flashes when arrows are already rendered at anchor-success time",
+// The viewer + DirectionComponent are reused across rounds, so arrows already
+// in the container at arm time may be the PREVIOUS round's stale glyphs, not
+// this round's — those must never be read as "found arrows" (that was the
+// round-2+ bug: the pill never armed past round 1). The pill must SHOW, and
+// stay shown, until the arrow DOM is observed to actually clear at least once.
+test("nav hint: stale arrows already in the DOM at arm time still show the pill (no instant-hide)",
   async () => {
-    const cid = "navhint-no-flash";
-    addArrowGlyph(cid, "mapillary-direction-turn-left");
+    const cid = "navhint-stale-at-arm";
+    const stale = addArrowGlyph(cid, "mapillary-direction-turn-left");
     const iv = makeCoverViewer(cid);
     await iv.moveTo("123456789012345", "anchor");
-    const hint = navHintOf(cid);
-    assert.ok(!hint || !hint.classList.contains("show"),
-      "arrows already present at arm time means the pill is never shown at all");
+    assert.ok(navHintOf(cid).classList.contains("show"),
+      "arrows present at arm time do not suppress the pill — they might be stale");
+    iv.__navHintTickForTests();
+    assert.ok(navHintOf(cid).classList.contains("show"),
+      "a poll tick while the stale arrows persist keeps waiting — baseline not clear yet");
+    stale.remove();
+    iv.__navHintTickForTests();
+    assert.ok(navHintOf(cid).classList.contains("show"),
+      "removing the stale arrows clears the baseline, but that tick itself only observes clear");
+    addArrowGlyph(cid, "mapillary-direction-arrow-step");
+    iv.__navHintTickForTests();
+    assert.ok(!navHintOf(cid).classList.contains("show"),
+      "a genuinely fresh arrow glyph, seen after the baseline cleared, fades the pill");
+    iv.destroy();
+  });
+
+// Headline regression for the round-2+ bug: round 1 leaves its arrow glyph in
+// the DOM (nothing tears it down between rounds), and round 2's arm must
+// still show the pill instead of reading round 1's glyph as "already found".
+test("nav hint: round 2 (and round 3) still arm and fade correctly with a stale arrow left over from the prior round",
+  async () => {
+    const cid = "navhint-round2-regression";
+    const iv = makeCoverViewer(cid);
+
+    // Round 1: normal appear → fresh arrow → fade.
+    iv.beginRound(1);
+    await iv.moveTo("123456789012345", "anchor");
+    assert.ok(navHintOf(cid).classList.contains("show"), "round 1 shows the pill");
+    const r1Arrow = addArrowGlyph(cid, "mapillary-direction-arrow-step");
+    iv.__navHintTickForTests();
+    assert.ok(!navHintOf(cid).classList.contains("show"), "round 1 fades on its own fresh arrow");
+
+    // Round 1's arrow glyph is deliberately LEFT in the container DOM — the
+    // viewer + DirectionComponent are reused, nothing clears it between
+    // rounds. This is exactly the state that made round 2 never arm before
+    // the fix.
+    assert.ok(navigationArrowsPresent(cid), "the stale round-1 glyph is still in the DOM");
+
+    iv.beginRound(2);
+    await iv.moveTo("223456789012345", "anchor");
+    assert.ok(navHintOf(cid).classList.contains("show"),
+      "round 2 must still show the pill even though a stale arrow is already present " +
+      "(this is the bug: it used to never arm here)");
+    r1Arrow.remove();
+    iv.__navHintTickForTests(); // observes clear — still waits this tick
+    assert.ok(navHintOf(cid).classList.contains("show"));
+    addArrowGlyph(cid, "mapillary-direction-arrow-step");
+    iv.__navHintTickForTests();
+    assert.ok(!navHintOf(cid).classList.contains("show"), "round 2 fades once a fresh arrow is seen");
+
+    // Round 3: repeat once more to prove this isn't a one-off round-2 special case.
+    const r2Arrow = navHintArrowNode(cid);
+    iv.beginRound(3);
+    await iv.moveTo("323456789012345", "anchor");
+    assert.ok(navHintOf(cid).classList.contains("show"), "round 3 also shows the pill despite a stale arrow");
+    if (r2Arrow) r2Arrow.remove();
+    iv.__navHintTickForTests();
+    addArrowGlyph(cid, "mapillary-direction-arrow-step");
+    iv.__navHintTickForTests();
+    assert.ok(!navHintOf(cid).classList.contains("show"), "round 3 fades once a fresh arrow is seen");
+
+    iv.destroy();
+  });
+
+// Even when arrows are present the whole time (baseline never clears — a
+// permanently stuck DirectionComponent), the bounded timeout is still a hard
+// backstop: the pill must not hang forever. Drives the poll loop with a
+// stubbed clock since the timeout is real elapsed time (NAV_HINT_MAX_MS),
+// not tick count.
+test("nav hint: times out and fades even when the arrow baseline never clears",
+  async () => {
+    const cid = "navhint-timeout-stale-baseline";
+    addArrowGlyph(cid, "mapillary-direction-arrow-step"); // present at arm, and stays present
+    const iv = makeCoverViewer(cid);
+    const realNow = performance.now;
+    let t = 0;
+    performance.now = () => t;
+    try {
+      await iv.moveTo("123456789012345", "anchor");
+      assert.ok(navHintOf(cid).classList.contains("show"),
+        "shown despite the arrow present at arm time");
+      iv.__navHintTickForTests();
+      assert.ok(navHintOf(cid).classList.contains("show"),
+        "still waiting well before the timeout, baseline never cleared");
+      t += NAV_HINT_MAX_MS;
+      iv.__navHintTickForTests();
+      assert.ok(!navHintOf(cid).classList.contains("show"),
+        "the bounded timeout fires regardless of the baseline latch");
+    } finally {
+      performance.now = realNow;
+    }
     iv.destroy();
   });
 

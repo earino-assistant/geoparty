@@ -44,6 +44,7 @@ import {
   EDGE_RECOVERY_BACKOFF_MS,
   navigationArrowsVisible,
   decideNavHint,
+  navHintBaselineCleared,
   NAV_HINT_MAX_MS,
   NAV_HINT_POLL_MS,
 } from "./imagery.js";
@@ -574,6 +575,10 @@ function instrument({ surface, container, viewer }) {
   let navHintTimer = null;
   let pendingNavHintTick = null;
   let navHintArmedAt = null;
+  // Latches true once arrowsVisible has been observed false at least once
+  // during THIS arm — guards against reading the previous round's stale
+  // arrow glyphs as "found arrows" (imagery.js §17 / navHintBaselineCleared).
+  let navHintBaseline = false;
 
   function ensureNavHint() {
     if (navHintEl) return navHintEl;
@@ -629,20 +634,30 @@ function instrument({ surface, container, viewer }) {
 
   function navHintPoll() {
     const arrowsVisible = navigationArrowsVisible(el);
+    navHintBaseline = navHintBaselineCleared(navHintBaseline, arrowsVisible);
     const elapsedMs = navHintArmedAt === null ? 0 : now() - navHintArmedAt;
-    const decision = decideNavHint({ arrowsVisible, elapsedMs, maxMs: NAV_HINT_MAX_MS });
+    const decision = decideNavHint({
+      arrowsVisible,
+      baselineClear: navHintBaseline,
+      elapsedMs,
+      maxMs: NAV_HINT_MAX_MS,
+    });
     if (decision === "wait") { scheduleNavHintPoll(); return; }
     hideNavHint(); // both hide_arrows and hide_timeout fade silently
   }
 
   // Arm on round-anchor success, right alongside armEdgeRecovery. Only when
-  // movement is actually offered (Frozen/TV never show it) and only when
-  // arrows are not already on screen (no flash-then-instant-fade).
+  // movement is actually offered (Frozen/TV never show it). Deliberately
+  // does NOT early-return when arrows are already on screen: the viewer +
+  // DirectionComponent are reused across rounds, so arrows present at arm
+  // time may be the PREVIOUS round's stale glyphs, not this round's. The
+  // baseline latch (seeded here, cleared by the first poll that observes
+  // arrowsVisible===false) is what prevents a flash-then-instant-fade.
   function armNavHint() {
     cancelNavHint();
     if (iv.moveEnabled !== true) return;
-    if (navigationArrowsVisible(el)) return;
     navHintArmedAt = now();
+    navHintBaseline = navigationArrowsVisible(el) === false;
     showNavHint();
     scheduleNavHintPoll();
   }

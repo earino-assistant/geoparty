@@ -58,6 +58,7 @@ import {
   NAV_HINT_MAX_MS,
   NAV_HINT_POLL_MS,
   decideNavHint,
+  navHintBaselineCleared,
 } from "../js/imagery.js";
 
 /* ================================================================
@@ -1016,9 +1017,12 @@ test("navigationArrowsVisible: defensive against null/undefined/empty/throwing r
   );
 });
 
-test("decideNavHint: arrows visible beats timeout", () => {
+test("decideNavHint: arrows visible with a cleared baseline beats timeout", () => {
   assert.equal(
-    decideNavHint({ arrowsVisible: true, elapsedMs: 999999, maxMs: NAV_HINT_MAX_MS }),
+    decideNavHint({
+      arrowsVisible: true, baselineClear: true,
+      elapsedMs: 999999, maxMs: NAV_HINT_MAX_MS,
+    }),
     "hide_arrows",
   );
 });
@@ -1050,6 +1054,46 @@ test("decideNavHint: junk input waits rather than hiding", () => {
     decideNavHint({ arrowsVisible: false, elapsedMs: 5000, maxMs: undefined }),
     "wait",
   );
+});
+
+// Stale-arrow guard (round-2+ regression, issue: pill never armed past round 1
+// because the viewer + DirectionComponent are reused and round 2's arm sees
+// round 1's still-present glyphs). arrowsVisible alone must never hide the
+// hint until the baseline has been observed clear at least once.
+test("decideNavHint: arrows visible but baseline not yet cleared still waits (stale-arrow guard)", () => {
+  assert.equal(
+    decideNavHint({ arrowsVisible: true, baselineClear: false, elapsedMs: 100, maxMs: NAV_HINT_MAX_MS }),
+    "wait",
+  );
+  assert.equal(
+    decideNavHint({ arrowsVisible: true, elapsedMs: 100, maxMs: NAV_HINT_MAX_MS }),
+    "wait",
+    "baselineClear absent must not be treated as cleared",
+  );
+});
+
+test("decideNavHint: hides once baseline is clear and arrows are visible", () => {
+  assert.equal(
+    decideNavHint({ arrowsVisible: true, baselineClear: true, elapsedMs: 100, maxMs: NAV_HINT_MAX_MS }),
+    "hide_arrows",
+  );
+});
+
+test("decideNavHint: timeout still fires even when the baseline never cleared", () => {
+  assert.equal(
+    decideNavHint({
+      arrowsVisible: true, baselineClear: false,
+      elapsedMs: NAV_HINT_MAX_MS, maxMs: NAV_HINT_MAX_MS,
+    }),
+    "hide_timeout",
+  );
+});
+
+test("navHintBaselineCleared: truth table", () => {
+  assert.equal(navHintBaselineCleared(false, true), false);
+  assert.equal(navHintBaselineCleared(false, false), true);
+  assert.equal(navHintBaselineCleared(true, true), true);
+  assert.equal(navHintBaselineCleared(true, false), true);
 });
 
 test("nav hint constants: finite, and the poll interval is smaller than the timeout", () => {

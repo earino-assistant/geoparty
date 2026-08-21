@@ -755,12 +755,22 @@ export function navigationArrowsVisible(rootEl) {
 export const NAV_HINT_MAX_MS = 15000;
 export const NAV_HINT_POLL_MS = 400;
 
+// The viewer + DirectionComponent are reused across rounds, so a round-2+
+// arm can find the PREVIOUS round's stale arrow glyphs still in the DOM
+// (the new anchor's edges haven't recomputed yet). Those stale glyphs must
+// never be read as "found arrows" — the baseline has to observably clear
+// (arrows absent at least once) before an arrowsVisible reading is trusted.
+// Pure latch: once cleared, stays cleared for the rest of that arm.
+export function navHintBaselineCleared(prevCleared, arrowsVisible) {
+  return prevCleared === true || arrowsVisible === false;
+}
+
 // The decision. Pure, total, never throws.
-//   ctx: { arrowsVisible: bool, elapsedMs: number, maxMs: number }
+//   ctx: { arrowsVisible: bool, baselineClear: bool, elapsedMs: number, maxMs: number }
 // → "hide_arrows" | "hide_timeout" | "wait"
 export function decideNavHint(ctx) {
   const c = ctx || {};
-  if (c.arrowsVisible === true) return "hide_arrows";
+  if (c.baselineClear === true && c.arrowsVisible === true) return "hide_arrows";
   if (Number.isFinite(c.elapsedMs) && Number.isFinite(c.maxMs) &&
       c.elapsedMs >= c.maxMs) {
     return "hide_timeout";
