@@ -1425,13 +1425,15 @@ body:has(.action-bar) .consent-settings {
   position: relative;
   z-index: 1;
 }
+/* Confetti is a celebratory burst that should fall OVER the screen content
+   (leaderboard, score, buttons), not behind it. z-index 2 > host-wrap's 1. */
 #p-gameover .confetti, #d-done .confetti {
-  z-index: 0;
+  z-index: 2;
 }
 .win-bloom {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: 0;   /* the color glow stays BEHIND the content */
   pointer-events: none;
   opacity: 0;
   background: radial-gradient(
