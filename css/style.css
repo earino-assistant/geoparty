@@ -1400,10 +1400,35 @@ body:has(.action-bar) .consent-banner {
 }
 
 /* Standalone footer bar for pages (host/player/screen/daily/howto) that
-   have no `.ld-footer` of their own to fold this link into. */
+   have no `.ld-footer` of their own to fold this link into. Static/in-flow
+   by default — correct for howto.html, a normal scrolling document where
+   "after the content" already means "at the bottom". */
 .consent-settings-bar {
   text-align: center;
   padding: 16px 12px calc(16px + env(safe-area-inset-bottom));
+}
+
+/* host/player/daily/screen wrap their whole UI in `.phase-screen` sections
+   (`position: fixed; inset: 0` — css/style.css:89). Every visible screen is
+   pulled out of body's normal flow, so body itself collapses to zero
+   height and the static in-flow bar above renders at the very top of the
+   page instead of the bottom (P0.4). Pin it to the viewport bottom instead
+   so it reads as a real bottom footer on these app-shell pages, and clear
+   a bottom action bar's CTA the same way `.consent-banner` already does
+   (every one of these pages has an `.action-bar` somewhere in the DOM,
+   even on the current phase-screen it's `.hidden` rather than removed, so
+   the offset is always safe to reserve). */
+body:has(.phase-screen) .consent-settings-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 400;
+  background: var(--bg);
+  border-top: 1px solid var(--panel-2);
+}
+body:has(.phase-screen):has(.action-bar) .consent-settings-bar {
+  bottom: calc(var(--action-bar-h) + env(safe-area-inset-bottom));
 }
 
 /* ---------- Daily Challenge (S2) ---------- */
