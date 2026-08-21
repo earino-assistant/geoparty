@@ -342,7 +342,13 @@ export function extractEdgeCounts(input) {
 
 // Small ints — the bounds ARE the design (§ mutation-guard tests below).
 export const EDGE_RECOVERY_MAX_ATTEMPTS = 2;
-export const EDGE_RECOVERY_GRACE_MS = 5000;   // anchor ok → first check
+// GRACE was raised from 5000ms to 15000ms (2026-08-21 field correction): a
+// slow-but-healthy spatial fetch completes anywhere from ~1s to ~15s in the
+// field, and firing the first check at 5s was resetting an in-progress fetch
+// and delaying arrows further, not helping. 15s puts the first check past
+// the normal healthy window, so a healthy round now emits ZERO recovery
+// events — see docs/issue-2-phase2-fix.md §3/§4 for the worst-case math.
+export const EDGE_RECOVERY_GRACE_MS = 15000;  // anchor ok → first check
 export const EDGE_RECOVERY_RECHECK_MS = 2500; // setFilter settled → re-read
 export const EDGE_RECOVERY_BACKOFF_MS = 8000; // attempt 1 → attempt 2
 
@@ -706,4 +712,58 @@ export function chaosAllowed(hostname) {
 // component off, per spec §6).
 export function directionComponentConfig(moveAllowed) {
   return moveAllowed ? { minWidth: 320, maxWidth: 560 } : false;
+}
+
+/* ================================================================
+ * §17 "Finding your way…" nav hint (issue #3 follow-up)
+ * ================================================================
+ * A move-enabled round can render an interactive street before Mapillary's
+ * DirectionComponent has any arrow glyphs to draw (the spatial-edge cache
+ * pass — see Issue #2 Phase 2 above — is asynchronous and sometimes slow-but-
+ * healthy). Without a cue, that reads as "am I stuck?" A non-blocking pill
+ * ("Finding your way…") bridges the gap: shown the instant a round-anchor
+ * lands, faded the instant a real arrow glyph appears in the DOM, or after a
+ * bounded timeout regardless. Pure decision + DOM probe live here (tested in
+ * tests/imagery.test.js); the polling timer and DOM node live in
+ * js/viewer-ui.js.
+ */
+
+// Every class MapillaryJS's DirectionComponent renders for a navigable
+// glyph (step arrows, spherical/turn variants). Presence of ANY of these
+// means arrows are actually on screen — the one signal worth waiting for.
+export const NAV_ARROW_SELECTOR = [
+  ".mapillary-direction-arrow-step",
+  ".mapillary-direction-arrow-spherical",
+  ".mapillary-direction-turn-left",
+  ".mapillary-direction-turn-right",
+  ".mapillary-direction-turn-around",
+].join(",");
+
+// Defensive DOM probe: a null/undefined/malformed root, or a querySelector
+// call that itself throws (SDK DOM mid-teardown), reads as "no arrows yet"
+// rather than crashing the poll loop. Takes a passed-in element — no ambient
+// document/window/network — so it's unit-testable with a stub.
+export function navigationArrowsVisible(rootEl) {
+  if (!rootEl || typeof rootEl.querySelector !== "function") return false;
+  try {
+    return Boolean(rootEl.querySelector(NAV_ARROW_SELECTOR));
+  } catch {
+    return false;
+  }
+}
+
+export const NAV_HINT_MAX_MS = 15000;
+export const NAV_HINT_POLL_MS = 400;
+
+// The decision. Pure, total, never throws.
+//   ctx: { arrowsVisible: bool, elapsedMs: number, maxMs: number }
+// → "hide_arrows" | "hide_timeout" | "wait"
+export function decideNavHint(ctx) {
+  const c = ctx || {};
+  if (c.arrowsVisible === true) return "hide_arrows";
+  if (Number.isFinite(c.elapsedMs) && Number.isFinite(c.maxMs) &&
+      c.elapsedMs >= c.maxMs) {
+    return "hide_timeout";
+  }
+  return "wait";
 }

@@ -41,8 +41,8 @@ function makeElement(tag) {
       contains: (c) => classes.has(c),
     },
     setAttribute() {},
-    append(...kids) { this.children.push(...kids); },
-    appendChild(kid) { this.children.push(kid); return kid; },
+    append(...kids) { kids.forEach((k) => { if (k) k._parent = el; }); this.children.push(...kids); },
+    appendChild(kid) { if (kid) kid._parent = el; this.children.push(kid); return kid; },
     addEventListener(name, fn) {
       (this.listeners[name] = this.listeners[name] || []).push(fn);
     },
@@ -56,12 +56,22 @@ function makeElement(tag) {
     },
     querySelector(sel) {
       if (sel === "canvas") return this._canvas || null;
+      // Minimal comma-selector support: matches an element carrying ANY of
+      // the requested classes (real querySelector's ".a,.b" semantics),
+      // enough for both the single-class `.pano-cover` lookups and the
+      // multi-class NAV_ARROW_SELECTOR probe.
+      const wants = String(sel).split(",").map((s) => s.trim().replace(/^\./, ""));
       return this.children.find((c) => c && c.className &&
-        String(c.className).includes(sel.replace(".", ""))) || null;
+        String(c.className).split(/\s+/).some((cn) => wants.includes(cn))) || null;
     },
     cloneNode() { return makeElement(tag); },
     replaceWith() {},
-    remove() {},
+    remove() {
+      if (this._parent && Array.isArray(this._parent.children)) {
+        const i = this._parent.children.indexOf(this);
+        if (i >= 0) this._parent.children.splice(i, 1);
+      }
+    },
   };
   return el;
 }
@@ -74,6 +84,7 @@ function installFakeBrowser() {
     head: makeElement("head"),
     body: makeElement("body"),
     createElement: (tag) => makeElement(tag),
+    createTextNode: (text) => ({ nodeType: 3, textContent: String(text) }),
     getElementById: (id) => {
       if (!byId.has(id)) byId.set(id, makeElement("div"));
       return byId.get(id);
@@ -864,6 +875,113 @@ test("#4: the round-anchor skip loop keeps the cover up across dead entries",
       "the cover lifts on the entry that loaded, not the skipped dead one");
     iv.destroy();
   });
+
+/* ================================================================
+ * "Finding your way…" nav hint (issue #3 follow-up) — arm/fade/cancel glue
+ * ================================================================ */
+
+const navHintOf = (cid) => document.getElementById(cid).querySelector(".pano-nav-hint");
+function addArrowGlyph(cid, cls) {
+  const arrow = document.createElement("div");
+  arrow.className = cls || "mapillary-direction-arrow-step";
+  document.getElementById(cid).appendChild(arrow);
+  return arrow;
+}
+
+test("nav hint: appears on a move-enabled anchor load when no arrows are on screen yet",
+  async () => {
+    const cid = "navhint-appears";
+    const iv = makeCoverViewer(cid);
+    await iv.moveTo("123456789012345", "anchor");
+    const hint = navHintOf(cid);
+    assert.ok(hint && hint.classList.contains("show"), "the pill shows while arrows are missing");
+    iv.destroy();
+  });
+
+test("nav hint: fades the instant a real arrow glyph is detected on a poll tick",
+  async () => {
+    const cid = "navhint-fades-arrows";
+    const iv = makeCoverViewer(cid);
+    await iv.moveTo("123456789012345", "anchor");
+    assert.ok(navHintOf(cid).classList.contains("show"));
+    addArrowGlyph(cid, "mapillary-direction-arrow-step");
+    iv.__navHintTickForTests();
+    assert.ok(!navHintOf(cid).classList.contains("show"),
+      "the pill fades as soon as an arrow glyph is found — hide_arrows beats the timeout");
+    iv.destroy();
+  });
+
+test("nav hint: never flashes when arrows are already rendered at anchor-success time",
+  async () => {
+    const cid = "navhint-no-flash";
+    addArrowGlyph(cid, "mapillary-direction-turn-left");
+    const iv = makeCoverViewer(cid);
+    await iv.moveTo("123456789012345", "anchor");
+    const hint = navHintOf(cid);
+    assert.ok(!hint || !hint.classList.contains("show"),
+      "arrows already present at arm time means the pill is never shown at all");
+    iv.destroy();
+  });
+
+test("nav hint: endRound cancels it immediately; a tick after endRound is a no-op",
+  async () => {
+    const cid = "navhint-endround";
+    const iv = makeCoverViewer(cid);
+    iv.beginRound(1);
+    await iv.moveTo("123456789012345", "anchor");
+    assert.ok(navHintOf(cid).classList.contains("show"));
+    iv.endRound();
+    assert.ok(!navHintOf(cid).classList.contains("show"), "endRound hides the pill immediately");
+    addArrowGlyph(cid, "mapillary-direction-arrow-step");
+    iv.__navHintTickForTests(); // no pending tick left — must be a silent no-op
+    assert.ok(!navHintOf(cid).classList.contains("show"));
+    iv.destroy();
+  });
+
+test("nav hint: destroy cancels it and removes the element, mirroring coverEl teardown",
+  async () => {
+    const cid = "navhint-destroy";
+    const iv = makeCoverViewer(cid);
+    await iv.moveTo("123456789012345", "anchor");
+    assert.ok(navHintOf(cid).classList.contains("show"));
+    iv.destroy();
+    assert.equal(navHintOf(cid), null, "the pill element is removed on destroy");
+    iv.__navHintTickForTests(); // must not throw after destroy
+  });
+
+test("nav hint: a superseded new attempt() cancels the previous hint at entry",
+  async () => {
+    const cid = "navhint-superseded";
+    const iv = makeCoverViewer(cid);
+    await iv.moveTo("first-anchor", "anchor");
+    assert.ok(navHintOf(cid).classList.contains("show"));
+    const p = iv.moveTo("second-anchor", "anchor");
+    assert.ok(!navHintOf(cid).classList.contains("show"),
+      "the new attempt() cancels the previous round's hint before it arms its own");
+    await p;
+    iv.destroy();
+  });
+
+test("nav hint: never shown on a move-disabled surface (TV/landing)", async () => {
+  const cid = "navhint-tv";
+  const iv = viewerUi.createViewer({
+    surface: "tv", container: cid, moveAllowed: false, component: { cover: true },
+  });
+  await iv.moveTo("123456789012345", "anchor");
+  const hint = navHintOf(cid);
+  assert.ok(!hint || !hint.classList.contains("show"), "no movement offered means no nav hint, ever");
+  iv.destroy();
+});
+
+test("nav hint: never shown while Frozen (setMoveAllowed(false))", async () => {
+  const cid = "navhint-frozen";
+  const iv = makeCoverViewer(cid);
+  iv.setMoveAllowed(false);
+  await iv.moveTo("123456789012345", "anchor");
+  const hint = navHintOf(cid);
+  assert.ok(!hint || !hint.classList.contains("show"), "Frozen never arms the nav hint");
+  iv.destroy();
+});
 
 /* ================================================================
  * #5 — movement-lever hardening: a transient activation failure must

@@ -107,6 +107,9 @@ one.
 
 ### Cross-page
 - `.leaflet-tooltip` — Leaflet pin labels carry team names on reveal maps
+- `.pano-nav-hint` — the "Finding your way…" nav-arrows-loading pill (issue
+  #3 follow-up): static, hardcoded copy only, no name/place/coordinate ever
+  renders into it. No mask needed.
 
 ## 3. Blocked outright (`blockSelector`)
 

@@ -53,6 +53,11 @@ import {
   filterQuarantined,
   chaosAllowed,
   directionComponentConfig,
+  NAV_ARROW_SELECTOR,
+  navigationArrowsVisible,
+  NAV_HINT_MAX_MS,
+  NAV_HINT_POLL_MS,
+  decideNavHint,
 } from "../js/imagery.js";
 
 /* ================================================================
@@ -956,4 +961,103 @@ test("directionComponentConfig: truthy moveAllowed widens the hit target", () =>
 test("directionComponentConfig: minWidth is always smaller than maxWidth", () => {
   const cfg = directionComponentConfig(true);
   assert.ok(cfg.minWidth < cfg.maxWidth);
+});
+
+/* ================================================================
+ * §17 "Finding your way…" nav hint — arrow detection + pure decision
+ * ================================================================ */
+
+const NAV_ARROW_CLASSES = [
+  "mapillary-direction-arrow-step",
+  "mapillary-direction-arrow-spherical",
+  "mapillary-direction-turn-left",
+  "mapillary-direction-turn-right",
+  "mapillary-direction-turn-around",
+];
+
+test("NAV_ARROW_SELECTOR: non-empty and contains all five arrow glyph classes", () => {
+  assert.ok(NAV_ARROW_SELECTOR.length > 0);
+  for (const cls of NAV_ARROW_CLASSES) {
+    assert.ok(NAV_ARROW_SELECTOR.includes(`.${cls}`), `selector must include .${cls}`);
+  }
+});
+
+// A minimal stub that implements just enough of Element.querySelector's
+// comma-selector semantics to unit-test navigationArrowsVisible without a
+// real DOM — it is the "root element" the pure function is handed.
+function stubRoot(classNames) {
+  const names = classNames || [];
+  return {
+    querySelector(sel) {
+      const wants = String(sel).split(",").map((s) => s.trim().replace(/^\./, ""));
+      return names.some((c) => wants.includes(c)) ? {} : null;
+    },
+  };
+}
+
+test("navigationArrowsVisible: true when any one of the five arrow glyph classes is present", () => {
+  for (const cls of NAV_ARROW_CLASSES) {
+    assert.equal(navigationArrowsVisible(stubRoot([cls])), true, cls);
+  }
+});
+
+test("navigationArrowsVisible: false when only the container (no arrow glyph) is present", () => {
+  assert.equal(navigationArrowsVisible(stubRoot(["mapillary-viewer", "some-other-node"])), false);
+  assert.equal(navigationArrowsVisible(stubRoot([])), false);
+});
+
+test("navigationArrowsVisible: defensive against null/undefined/empty/throwing roots", () => {
+  assert.equal(navigationArrowsVisible(null), false);
+  assert.equal(navigationArrowsVisible(undefined), false);
+  assert.equal(navigationArrowsVisible({}), false);
+  assert.equal(
+    navigationArrowsVisible({ querySelector() { throw new Error("dom mid-teardown"); } }),
+    false,
+  );
+});
+
+test("decideNavHint: arrows visible beats timeout", () => {
+  assert.equal(
+    decideNavHint({ arrowsVisible: true, elapsedMs: 999999, maxMs: NAV_HINT_MAX_MS }),
+    "hide_arrows",
+  );
+});
+
+test("decideNavHint: boundary — elapsedMs >= maxMs hides on timeout", () => {
+  assert.equal(
+    decideNavHint({ arrowsVisible: false, elapsedMs: NAV_HINT_MAX_MS, maxMs: NAV_HINT_MAX_MS }),
+    "hide_timeout",
+  );
+});
+
+test("decideNavHint: one ms under the boundary still waits", () => {
+  assert.equal(
+    decideNavHint({ arrowsVisible: false, elapsedMs: NAV_HINT_MAX_MS - 1, maxMs: NAV_HINT_MAX_MS }),
+    "wait",
+  );
+  assert.equal(NAV_HINT_MAX_MS, 15000, "the constant this test's boundary depends on");
+});
+
+test("decideNavHint: junk input waits rather than hiding", () => {
+  assert.equal(decideNavHint({}), "wait");
+  assert.equal(decideNavHint(null), "wait");
+  assert.equal(decideNavHint(undefined), "wait");
+  assert.equal(
+    decideNavHint({ arrowsVisible: false, elapsedMs: NaN, maxMs: NAV_HINT_MAX_MS }),
+    "wait",
+  );
+  assert.equal(
+    decideNavHint({ arrowsVisible: false, elapsedMs: 5000, maxMs: undefined }),
+    "wait",
+  );
+});
+
+test("nav hint constants: finite, and the poll interval is smaller than the timeout", () => {
+  assert.ok(Number.isFinite(NAV_HINT_MAX_MS) && NAV_HINT_MAX_MS > 0);
+  assert.ok(Number.isFinite(NAV_HINT_POLL_MS) && NAV_HINT_POLL_MS > 0);
+  assert.ok(NAV_HINT_POLL_MS < NAV_HINT_MAX_MS);
+});
+
+test("EDGE_RECOVERY_GRACE_MS: raised to 15000 (2026-08-21 field correction)", () => {
+  assert.equal(EDGE_RECOVERY_GRACE_MS, 15000);
 });

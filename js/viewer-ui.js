@@ -42,6 +42,10 @@ import {
   EDGE_RECOVERY_GRACE_MS,
   EDGE_RECOVERY_RECHECK_MS,
   EDGE_RECOVERY_BACKOFF_MS,
+  navigationArrowsVisible,
+  decideNavHint,
+  NAV_HINT_MAX_MS,
+  NAV_HINT_POLL_MS,
 } from "./imagery.js";
 
 // Keep in sync with the pinned <script> tag in *.html (unpkg mapillary-js).
@@ -560,6 +564,81 @@ function instrument({ surface, container, viewer }) {
   // mirroring), seed/hero (decorative) must never blank the pano.
   const coversRound = (purpose) => purpose === "anchor" || purpose === "resume";
 
+  /* "Finding your way…" nav hint (issue #3 follow-up, docs §17 in
+   * imagery.js). A move-enabled round anchor can land before Mapillary's
+   * DirectionComponent has any arrow glyphs to draw — this is a
+   * non-blocking (pointer-events:none) pill that bridges the gap. It is
+   * entirely independent of the §4 cover / edge-recovery machinery above:
+   * no shared state, no interaction with setFilter(). */
+  let navHintEl = null;
+  let navHintTimer = null;
+  let pendingNavHintTick = null;
+  let navHintArmedAt = null;
+
+  function ensureNavHint() {
+    if (navHintEl) return navHintEl;
+    if (!el || typeof document === "undefined" || !document.createElement) {
+      return null;
+    }
+    navHintEl = document.createElement("div");
+    navHintEl.className = "pano-nav-hint";
+    const dot = document.createElement("span");
+    dot.className = "pano-nav-hint-dot";
+    navHintEl.appendChild(dot);
+    navHintEl.appendChild(document.createTextNode("Finding your way…"));
+    if (el.appendChild) el.appendChild(navHintEl);
+    return navHintEl;
+  }
+
+  function showNavHint() {
+    const n = ensureNavHint();
+    if (n && n.classList) n.classList.add("show");
+  }
+
+  // Stops any pending poll and fades the pill. Used both for the "we're
+  // done" decisions (arrows found / timed out) and for supersession.
+  function hideNavHint() {
+    if (navHintTimer !== null) { clearTimeout(navHintTimer); navHintTimer = null; }
+    pendingNavHintTick = null;
+    if (navHintEl && navHintEl.classList) navHintEl.classList.remove("show");
+  }
+
+  // A superseded/ended round invalidates whatever the hint was waiting on.
+  function cancelNavHint() {
+    hideNavHint();
+  }
+
+  function scheduleNavHintPoll() {
+    pendingNavHintTick = navHintPoll;
+    if (typeof setTimeout === "undefined") return;
+    navHintTimer = setTimeout(() => {
+      navHintTimer = null;
+      const f = pendingNavHintTick;
+      pendingNavHintTick = null;
+      if (f) f();
+    }, NAV_HINT_POLL_MS);
+  }
+
+  function navHintPoll() {
+    const arrowsVisible = navigationArrowsVisible(el);
+    const elapsedMs = navHintArmedAt === null ? 0 : now() - navHintArmedAt;
+    const decision = decideNavHint({ arrowsVisible, elapsedMs, maxMs: NAV_HINT_MAX_MS });
+    if (decision === "wait") { scheduleNavHintPoll(); return; }
+    hideNavHint(); // both hide_arrows and hide_timeout fade silently
+  }
+
+  // Arm on round-anchor success, right alongside armEdgeRecovery. Only when
+  // movement is actually offered (Frozen/TV never show it) and only when
+  // arrows are not already on screen (no flash-then-instant-fade).
+  function armNavHint() {
+    cancelNavHint();
+    if (iv.moveEnabled !== true) return;
+    if (navigationArrowsVisible(el)) return;
+    navHintArmedAt = now();
+    showNavHint();
+    scheduleNavHintPoll();
+  }
+
   // One attempt: timed, timeout-raced, classified, exception-captured.
   // NEVER rejects — it resolves a result record, so the skip loop and the
   // single-shot path can both decide what to emit.
@@ -570,6 +649,8 @@ function instrument({ surface, container, viewer }) {
     // Issue #2 Phase 2: a new load (any purpose) supersedes any pending
     // recovery tick — the viewer state it was checking is about to change.
     cancelEdgeRecoveryTimer();
+    // A new load supersedes whatever the nav hint was waiting on too.
+    cancelNavHint();
     inFlightCount += 1;
     // §15: the injection harness may shorten the budget on a dev host so a
     // timeout scenario doesn't take 20 real seconds. Inert in production.
@@ -630,6 +711,7 @@ function instrument({ surface, container, viewer }) {
             // success (on time or late) — idempotent per anchor.
             armEdgeRecovery(imageId,
               pano && Number.isFinite(pano.round_number) ? pano.round_number : 0);
+            armNavHint();
           }
           if (settled) {
             // The SDK finished late: correct the record rather than leave a
@@ -704,6 +786,7 @@ function instrument({ surface, container, viewer }) {
       cancelEdgeRecoveryTimer();
       edgeRecovery = null;
       lastImage = null;
+      cancelNavHint();
       if (!pano) return;
       const props = panoSessionProps(pano);
       pushFact(facts.panos, {
@@ -761,6 +844,15 @@ function instrument({ surface, container, viewer }) {
       if (f) f();
     },
 
+    // Test-only seam: synchronously runs one due nav-hint poll, same
+    // convention as __edgeRecoveryTickForTests. Never called in production.
+    __navHintTickForTests() {
+      if (navHintTimer !== null) { clearTimeout(navHintTimer); navHintTimer = null; }
+      const f = pendingNavHintTick;
+      pendingNavHintTick = null;
+      if (f) f();
+    },
+
     destroy() {
       if (destroyed) return;
       destroyed = true;
@@ -773,6 +865,9 @@ function instrument({ surface, container, viewer }) {
       }
       if (coverEl && coverEl.remove) { try { coverEl.remove(); } catch { /* gone */ } }
       coverEl = null;
+      cancelNavHint();
+      if (navHintEl && navHintEl.remove) { try { navHintEl.remove(); } catch { /* gone */ } }
+      navHintEl = null;
       try { viewer.remove(); } catch { /* already gone */ }
       if (typeof window !== "undefined" && Array.isArray(window.__gpViewers)) {
         const i = window.__gpViewers.indexOf(iv);

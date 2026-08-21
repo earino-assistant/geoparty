@@ -120,12 +120,15 @@ viewer wrapper only supplies inputs and timers.
 ```js
 // Constants (exported; small ints — the bounds ARE the design)
 export const EDGE_RECOVERY_MAX_ATTEMPTS = 2;
-export const EDGE_RECOVERY_GRACE_MS     = 5000;  // anchor ok → first check
+export const EDGE_RECOVERY_GRACE_MS     = 15000; // anchor ok → first check
 export const EDGE_RECOVERY_RECHECK_MS   = 2500;  // setFilter settled → re-read
 export const EDGE_RECOVERY_BACKOFF_MS   = 8000;  // attempt 1 → attempt 2
-// GRACE was raised from the original 3500ms to 5000ms so a slow-but-healthy
-// spatial fetch is never mistaken for stuck and torn into an unnecessary
-// first attempt. EDGE_RECOVERY_MAX_ATTEMPTS is not a generic safety margin —
+// GRACE was raised from 5000ms to 15000ms (2026-08-21 field correction): a
+// slow-but-healthy spatial fetch completes anywhere from ~1s to ~15s in the
+// field, and firing the first check at 5s was resetting an in-progress fetch
+// and delaying arrows further rather than helping. 15s puts the first check
+// past the normal healthy window, so a healthy round now emits ZERO recovery
+// events (§4). EDGE_RECOVERY_MAX_ATTEMPTS is not a generic safety margin —
 // it is FUNCTIONALLY REQUIRED at 2: attempt 1 only ever clears the stuck
 // uncached status to cached-zero (§2 point 3); attempt 2 is the one that
 // re-issues the real fetch. A cap of 1 would stop before the actual fix ever
@@ -223,14 +226,18 @@ methods on the `iv` surface except a test seam.
   `destroy()`, and at the start of every new `attempt()` (any purpose — a
   new load supersedes recovery). Worst-case added wall clock inside a
   round: grace + setFilter + recheck + backoff + setFilter + recheck ≈
-  5000+2500+8000+2500 = **18 s** of *idle waiting* and **at most two**
+  15000+2500+8000+2500 = **28 s** of *idle waiting* and **at most two**
   `setFilter()` calls — no per-render work at all (nothing hooks the
-  render/`pov` path). Field-observed full recovery (attempt 2 actually
-  restoring arrows) lands around **~14–15 s** after the anchor — attempt 1
-  (trigger `"uncached"`) predominantly resolves `"no_change"` (the
-  cached-zero conversion, §2 point 3, §C correction 1) and it is attempt 2
-  (trigger `"zero"`) that recovers; **`attempt:1 no_change, attempt:2
-  recovered` is the healthy field signature, not a sign attempt 1 failed.**
+  render/`pov` path). GRACE was raised from 5000ms to 15000ms (2026-08-21
+  field correction, §3) so a healthy round's spatial fetch — which the field
+  shows completing anywhere from ~1s to ~15s — is never mistaken for stuck;
+  a healthy round now emits **zero** `edge_recovery` events. A genuine
+  transient failure still self-heals with no user action, now typically
+  **~24–28 s** after the anchor (attempt 1 fires at the 15s grace and
+  predominantly resolves `"no_change"` — the cached-zero conversion, §2
+  point 3, §C correction 1 — and it is attempt 2, ~8s later, that recovers);
+  **`attempt:1 no_change, attempt:2 recovered` is the healthy-recovery field
+  signature, not a sign attempt 1 failed.**
 - **Test seam.** Timers route through one `scheduleTick(fn, ms)` helper;
   a test-only `iv.__edgeRecoveryTickForTests()` runs one due tick
   synchronously (same convention as `__resetSessionForTests`), so unit
@@ -350,12 +357,12 @@ Ship gate as always: `npm test` green, `npm run check` clean.
 2. New round with blocking enabled *during* the anchor load (this
    reproduces the field 500: pano may load from cache/CDN, spatial batch
    fails — console shows "Failed to cache spatial images"). Arrows absent.
-3. Wait ≈5 s: console shows the SDK re-fetch attempt (still blocked →
+3. Wait ≈15 s: console shows the SDK re-fetch attempt (still blocked →
    attempt 1 `result:"no_change"` — this is the healthy signature, not a
    failure: attempt 1 only ever clears the stuck status to cached-zero
    without a real fetch, §C correction 1). **Unblock** within the ~8 s
    backoff window before attempt 2 fires.
-4. Attempt 2 fires (~14–15 s after the anchor) → arrows appear **in
+4. Attempt 2 fires (~24–28 s after the anchor) → arrows appear **in
    place**: no pano blank, no camera snap, no cover flash, player's pov
    untouched.
 5. Verify events (PostHog debug/localStorage queue): exactly 2
@@ -387,7 +394,7 @@ Ship gate as always: `npm test` green, `npm run check` clean.
 
 1. A round whose spatial-edge caching failed transiently (graph-API blip)
    gets its arrows back **without any user action**, typically via the
-   *second* attempt (~14–15 s after the anchor, once the API has
+   *second* attempt (~24–28 s after the anchor, once the API has
    recovered) — the first attempt routinely reports `"no_change"` as it
    only clears the stuck status to cached-zero, which is expected, not a
    failure (§C correction 1) — with no visible movement, blanking, or
