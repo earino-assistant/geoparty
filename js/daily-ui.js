@@ -570,17 +570,21 @@ function renderRevealMap(guess, ghostRes) {
       radius: 8, color: "#fff", weight: 2, fillColor: "#4dd6ff", fillOpacity: 1,
     }).addTo(revealMap);
   }
-  // G5/C4: the ghost marker — distinct (dashed, muted, 👻), no polyline, with a
-  // distance chip. It MATERIALIZES ~400 ms after your pin with a fade, so the
-  // two pins read as two beats, not one (spec §3.5.3). Reduced-motion: it just
-  // appears. The pin is included in `bounds` synchronously so fitBounds frames
-  // it even though the marker is added on a delay. Maps stay replay-blocked.
+  // G5/C4: the ghost marker — distinct (dashed, muted, 👻) with a dashed line
+  // to the truth so its miss reads at a glance (mirrors the player's
+  // guess→truth line). It MATERIALIZES ~400 ms after your pin with a fade, so
+  // the two pins read as two beats, not one (spec §3.5.3). Reduced-motion: it
+  // just appears. The pin is included in `bounds` synchronously so fitBounds
+  // frames it even though the marker is added on a delay. Maps stay
+  // replay-blocked.
   if (ghostRes && ghostRes.pin) {
     const gpin = L.latLng(ghostRes.pin.lat, ghostRes.pin.lng);
     bounds.push(gpin);
     const reduced = prefersReducedMotion();
     const addGhost = () => {
       if (!revealMap) return;
+      L.polyline([gpin, truth], { color: "#c9a2ff", weight: 2, dashArray: "3 5" })
+        .addTo(revealMap);
       const circle = L.circleMarker(gpin, {
         radius: 8, color: "#c9a2ff", weight: 2, dashArray: "3 3",
         fillColor: "#2a2140", fillOpacity: 0.85,
