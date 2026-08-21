@@ -842,14 +842,32 @@ test("sanitizeEvent: pano_session keeps the interaction fold, nothing else", () 
   const out = sanitizeEvent("pano_session", {
     surface: "player", round_number: 3, looks: 12, zoom_changes: 2,
     nav_moves: 4, nav_failures: 1, nav_available: true, reanchors: 0,
+    anchor_spatial_edges: 4, anchor_sequence_edges: 2,
     first_move_ms: 1840, pointer_downs: 7,
     team_name: "The Wanderers", image_id: "1263588815098567",
   });
   assert.deepEqual(out.props, {
     surface: "player", round_number: 3, looks: 12, zoom_changes: 2,
     nav_moves: 4, nav_failures: 1, nav_available: true, reanchors: 0,
+    anchor_spatial_edges: 4, anchor_sequence_edges: 2,
     first_move_ms: 1840, pointer_downs: 7,
   });
+});
+
+test("sanitizeEvent: pano_session edge counts are ints; a known 0 survives (#2)", () => {
+  // A genuine cached-zero edge count is signal ("this anchor had no arrows"),
+  // so it must NOT be stripped; the caller omits only the UNKNOWN case.
+  const zero = sanitizeEvent("pano_session", {
+    surface: "player", round_number: 1, anchor_spatial_edges: 0,
+    anchor_sequence_edges: 0,
+  });
+  assert.equal(zero.props.anchor_spatial_edges, 0);
+  assert.equal(zero.props.anchor_sequence_edges, 0);
+  // A non-numeric edge count never survives to become a fake aggregate.
+  const junk = sanitizeEvent("pano_session", {
+    surface: "player", round_number: 1, anchor_spatial_edges: "lots",
+  });
+  assert.ok(!("anchor_spatial_edges" in junk.props));
 });
 
 test("sanitizeEvent: imagery_report carries the ref code and the consent path", () => {

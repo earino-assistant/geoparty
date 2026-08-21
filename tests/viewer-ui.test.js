@@ -625,6 +625,112 @@ test("pano_session: beginRound flushes the previous round's fold", () => {
 });
 
 /* ================================================================
+ * Issue #2 — edge diagnostics + the nav_available health correction
+ * ================================================================ */
+
+test("#2: a viewer that never emits `navigable` still reads a healthy session",
+  async () => {
+    // The root bug: `navigable` never fires usefully, so nav_available was
+    // false for all 80 field sessions and every move-enabled session was
+    // mislabelled degraded. A clean move-enabled round must now read healthy.
+    const iv = makeHostViewer();                 // movement enabled
+    iv.beginRound(1);
+    await iv.moveTo("123456789012345", "anchor");
+    iv.endRound();                               // NO navigable event, ever
+    assert.equal(viewerUi.imagerySession().health(), "healthy",
+      "a missing nav_available signal must not, by itself, degrade the session");
+    assert.equal(lastEvent("pano_session").props.nav_available, false,
+      "nav_available stays its (deprecated) broken false — continuity preserved");
+    iv.destroy();
+  });
+
+test("#2: cached spatial/sequence edges fold into pano_session", () => {
+  const iv = makeHostViewer();
+  iv.beginRound(3);
+  iv.viewer.emit("image", {
+    image: {
+      id: "anchor-1",
+      spatialEdges: { cached: true, edges: [{}, {}, {}, {}] },
+      sequenceEdges: { cached: true, edges: [{}, {}] },
+    },
+  });
+  iv.endRound();
+  const pano = lastEvent("pano_session");
+  assert.equal(pano.props.anchor_spatial_edges, 4);
+  assert.equal(pano.props.anchor_sequence_edges, 2);
+  iv.destroy();
+});
+
+test("#2: an UNCACHED edge status is unknown — never a false-zero edge count", () => {
+  const iv = makeHostViewer();
+  iv.beginRound(1);
+  iv.viewer.emit("image", {
+    image: {
+      id: "anchor-x",
+      spatialEdges: { cached: false, edges: [] },   // graph not resolved yet
+      sequenceEdges: { cached: false, edges: [] },
+    },
+  });
+  iv.endRound();
+  const pano = lastEvent("pano_session");
+  assert.ok(!("anchor_spatial_edges" in pano.props),
+    "an uncached status stays absent, never a false 0 (the nav_available trap)");
+  assert.ok(!("anchor_sequence_edges" in pano.props));
+  iv.destroy();
+});
+
+test("#2: an edge observation BEFORE beginRound seeds the round's anchor", () => {
+  const iv = makeHostViewer();
+  // The viewer's initial image event fires before we open the round.
+  iv.viewer.emit("image", {
+    image: {
+      id: "initial",
+      spatialEdges: { cached: true, edges: [{}, {}, {}] },
+      sequenceEdges: { cached: true, edges: [{}] },
+    },
+  });
+  iv.beginRound(1);   // must seed the latched pre-round edges (SDK ordering)
+  iv.endRound();
+  const pano = lastEvent("pano_session");
+  assert.equal(pano.props.anchor_spatial_edges, 3,
+    "the pre-beginRound image/edge state is retained in the round fold");
+  assert.equal(pano.props.anchor_sequence_edges, 1);
+  iv.destroy();
+});
+
+test("#2: one round's anchor edges never leak into the next round", () => {
+  const iv = makeHostViewer();
+  iv.beginRound(1);
+  iv.viewer.emit("image", {
+    image: { id: "a1", spatialEdges: { cached: true, edges: [{}, {}, {}, {}, {}] } },
+  });
+  iv.endRound();
+  assert.equal(lastEvent("pano_session").props.anchor_spatial_edges, 5);
+  // Round 2 sees no edge observation → it must report unknown, not round 1's 5.
+  iv.beginRound(2);
+  iv.endRound();
+  assert.ok(!("anchor_spatial_edges" in lastEvent("pano_session").props),
+    "the latch is cleared at endRound — round 2 starts from unknown");
+  iv.destroy();
+});
+
+test("#2: an image id in an edge observation never reaches analytics", () => {
+  const iv = makeHostViewer();
+  iv.beginRound(1);
+  iv.viewer.emit("image", {
+    image: {
+      id: "1263588815098567",
+      spatialEdges: { cached: true, edges: [{}, {}] },
+    },
+  });
+  iv.endRound();
+  const blob = JSON.stringify(env.posthog.captured);
+  assert.ok(!blob.includes("1263588815098567"), "the raw image id is never captured");
+  assert.equal(lastEvent("pano_session").props.anchor_spatial_edges, 2);
+  iv.destroy();
+});
+
+/* ================================================================
  * Session health, read through the wrapper's own accumulated facts
  * ================================================================ */
 

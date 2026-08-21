@@ -255,6 +255,73 @@ export function createDedup() {
 }
 
 /* ================================================================
+ * Issue #2 — spatial/sequence edge diagnostics
+ * ================================================================
+ * MapillaryJS reports each image's navigation edges as a NavigationEdgeStatus
+ * `{ cached: boolean, edges: NavigationEdge[] }`: `spatialEdges` is the
+ * arrow/step network the "arrows vanished" field reports are about, and
+ * `sequenceEdges` is the along-capture chain. These counts REPLACE the broken
+ * `nav_available` health signal (which depended on the `navigable` event that
+ * never emits usefully in our setup, and so was false for all 80 historical
+ * sessions — issue #2). The critical rule that keeps us from repeating that
+ * false-signal trap: a count is trustworthy ONLY when the SDK marks the status
+ * `cached`. An uncached status is UNKNOWN (null), never a false zero. The
+ * counts are deliberately bounded to a small integer — a diagnostic of "does
+ * this anchor have any arrows at all", not a precise graph measurement — and
+ * they are pure aggregates: no image id, coordinate, or edge payload rides.
+ */
+
+export const EDGE_COUNT_CAP = 12;
+
+// Clamp a raw edge count to a bounded, non-negative integer. Junk (non-finite,
+// negative, non-number) collapses to 0 so a malformed count can never inflate
+// an aggregate.
+export function boundEdgeCount(n) {
+  if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return 0;
+  const i = Math.floor(n);
+  return i > EDGE_COUNT_CAP ? EDGE_COUNT_CAP : i;
+}
+
+// Count one edge status defensively. Returns an int in [0, cap], or null when
+// the input carries NO trustworthy count (absent, uncached, or malformed) —
+// UNKNOWN is deliberately not zero, so a not-yet-cached status never reads as
+// "no arrows here".
+export function edgeStatusCount(status) {
+  if (status == null) return null;
+  if (typeof status === "number") return boundEdgeCount(status);
+  if (Array.isArray(status)) return boundEdgeCount(status.length);
+  if (typeof status === "object") {
+    // NavigationEdgeStatus: an uncached status is unknown, never a real 0.
+    if (status.cached === false) return null;
+    if (Array.isArray(status.edges)) return boundEdgeCount(status.edges.length);
+    if (typeof status.count === "number") return boundEdgeCount(status.count);
+  }
+  return null;
+}
+
+// Pull `{ spatial, sequence }` edge counts out of whatever MapillaryJS hands
+// the `image` listener — a viewer image event `{ image }`, a bare Image, or an
+// already-shaped `{ spatialEdges, sequenceEdges }`. Never throws (the SDK
+// getters can throw before an image is initialized) and never reads an id or a
+// coordinate. Each field is an int in [0, cap], or null (unknown).
+export function extractEdgeCounts(input) {
+  const out = { spatial: null, sequence: null };
+  let img = input;
+  if (input && typeof input === "object" && input.image &&
+      typeof input.image === "object") {
+    img = input.image;
+  }
+  if (!img || typeof img !== "object") return out;
+  let spatial;
+  let sequence;
+  try { spatial = img.spatialEdges; } catch { spatial = null; }
+  try { sequence = img.sequenceEdges; } catch { sequence = null; }
+  out.spatial = edgeStatusCount(spatial);
+  out.sequence = edgeStatusCount(sequence);
+  return out;
+}
+
+/* ================================================================
  * §7.1 pano_session — the interaction fold
  * ================================================================ */
 
@@ -270,7 +337,15 @@ export function createPanoSession(opts) {
     zoom_changes: 0,
     nav_moves: 0,
     nav_failures: 0,
+    // DEPRECATED (issue #2): the last `navigable` state seen. `navigable`
+    // does not emit usefully in our setup, so this stayed false for every
+    // historical session — it is NO LONGER an input to classifySessionHealth.
+    // Retained only for backward continuity; prefer anchor_spatial_edges.
     nav_available: false,
+    // Issue #2: bounded counts of the ROUND ANCHOR image's navigation edges,
+    // null until an edge status is observed AND cached (unknown ≠ zero).
+    anchor_spatial_edges: null,
+    anchor_sequence_edges: null,
     reanchors: 0,
     pointer_downs: 0,
     first_move_ms: null,
@@ -283,6 +358,7 @@ const INTERACTION_TYPES = ["look", "zoom", "pointer_down", "nav_move"];
 // Pure fold: (state, event) -> new state. Event shapes:
 //   {type:"look"|"zoom"|"pointer_down"|"nav_move"|"nav_failure"|"reanchor", at}
 //   {type:"navigable", value:boolean}
+//   {type:"edges", spatial:int|null, sequence:int|null, at}
 export function foldPanoEvent(state, ev) {
   if (!state || !ev || !ev.type) return state;
   const next = { ...state };
@@ -303,6 +379,19 @@ export function foldPanoEvent(state, ev) {
     case "nav_failure": next.nav_failures += 1; break;
     case "reanchor": next.reanchors += 1; break;
     case "navigable": next.nav_available = ev.value === true; break;
+    case "edges":
+      // Latch the ANCHOR image's edge availability once per round: the first
+      // image of a round is the anchor, and a later image is a different place
+      // the player walked to, so a KNOWN count is never overwritten. A null
+      // (unknown) observation fills nothing but may itself be filled later by a
+      // cached count — so a genuine, cached 0 still registers as known.
+      if (next.anchor_spatial_edges === null && Number.isFinite(ev.spatial)) {
+        next.anchor_spatial_edges = boundEdgeCount(ev.spatial);
+      }
+      if (next.anchor_sequence_edges === null && Number.isFinite(ev.sequence)) {
+        next.anchor_sequence_edges = boundEdgeCount(ev.sequence);
+      }
+      break;
     default: return state;
   }
 
@@ -331,6 +420,16 @@ export function panoSessionProps(state) {
   if (state.first_move_ms !== null && state.first_move_ms !== undefined) {
     props.first_move_ms = state.first_move_ms;
   }
+  // Issue #2: only emit an edge count that is actually KNOWN. An unknown
+  // (null) count is absent, never a false 0 — the sanitizer would keep a 0.
+  if (state.anchor_spatial_edges !== null &&
+      state.anchor_spatial_edges !== undefined) {
+    props.anchor_spatial_edges = state.anchor_spatial_edges;
+  }
+  if (state.anchor_sequence_edges !== null &&
+      state.anchor_sequence_edges !== undefined) {
+    props.anchor_sequence_edges = state.anchor_sequence_edges;
+  }
   return props;
 }
 
@@ -352,8 +451,8 @@ export const HEALTH_FAILED = "failed";
 //   viewerInits: [{ ok, error_class }]
 //   loads:       [{ purpose, ok, late, duration_ms, skips, error_class,
 //                   exhausted }]
-//   panos:       [{ nav_available, nav_failures, pointer_downs, looks,
-//                   move_enabled }]
+//   panos:       [{ nav_failures, pointer_downs, looks, move_enabled }]
+//                 (nav_available is DEPRECATED and no longer read here — #2)
 //   exceptions:  [{ error_class }]
 //   reports:     int
 //   roundsIncomplete: bool — a started round never reached its reveal.
@@ -387,9 +486,14 @@ export function classifySessionHealth(facts) {
       (l.ok === true && (l.skips || 0) >= 1) ||
       (l.ok === false && isFailureClass(l.error_class))
     )) ||
-    panos.some((p) => p && p.move_enabled === true && (
-      p.nav_available === false || (p.nav_failures || 0) > 0
-    )) ||
+    // Issue #2: a move-enabled round degrades only on a GENUINE navigation
+    // failure. It no longer degrades merely because `nav_available` is false —
+    // that field depends on the `navigable` event, which never emits usefully
+    // here, so it stayed false for every move-enabled session and mislabelled
+    // them all as degraded. anchor_spatial_edges is the honest replacement, but
+    // its healthy threshold is a Phase 2 decision, so it is diagnostic-only
+    // (not a health input) for now.
+    panos.some((p) => p && p.move_enabled === true && (p.nav_failures || 0) > 0) ||
     panos.some((p) => looksGestureBlocked(p)) ||
     exceptions.some((e) => e && e.error_class === "no_neighbors") ||
     f.roundsIncomplete === true;

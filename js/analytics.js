@@ -423,7 +423,19 @@ export const EVENT_SCHEMA = Object.freeze({
     zoom_changes: "int",
     nav_moves: "int",        // image changes not caused by our own moveTo
     nav_failures: "int",
-    nav_available: "bool",   // last `navigable` state seen
+    // DEPRECATED (issue #2): `navigable` never emits usefully in our setup, so
+    // this has been false for every historical session. Retained for continuity
+    // but NO LONGER an input to classifySessionHealth — prefer the edge counts
+    // below. Do not build new signal on this field.
+    nav_available: "bool",   // last `navigable` state seen (deprecated)
+    // Issue #2: bounded (0..EDGE_COUNT_CAP) counts of the ROUND ANCHOR image's
+    // MapillaryJS navigation edges — spatial (the arrow/step network the
+    // "arrows vanished" reports concern) and sequence (along-capture). A count
+    // is recorded only when the SDK marks the edge status cached, so "unknown"
+    // stays absent rather than a false zero. Aggregates only: no id, no
+    // coordinate, no edge payload. Absent when never observed.
+    anchor_spatial_edges: "int",
+    anchor_sequence_edges: "int",
     reanchors: "int",        // re-anchor writes during active play
     first_move_ms: "int",    // round start → first user interaction
     pointer_downs: "int",    // with looks==0 → gesture_blocked signal

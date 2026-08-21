@@ -28,6 +28,7 @@ import {
   createPanoSession,
   foldPanoEvent,
   panoSessionProps,
+  extractEdgeCounts,
   classifySessionHealth,
   shouldForceRecordingForLoad,
   isFailureClass,
@@ -258,6 +259,11 @@ function instrument({ surface, container, viewer }) {
   let pano = null;             // open pano_session fold, or null
   let expectImage = null;      // image id our own moveTo is steering toward
   let destroyed = false;
+  // Issue #2: edge counts observed before a round opened (the initial image
+  // event can fire before our beginRound call). Held here and seeded into the
+  // round fold at beginRound, then cleared at endRound so the next round never
+  // inherits the previous anchor's edges. Never contains an id or coordinate.
+  let pendingEdges = { spatial: null, sequence: null };
 
   // #5 movement-lever state. activateComponent can throw when the viewer is not
   // laid out yet; historically that was swallowed and the movement controls
@@ -303,7 +309,26 @@ function instrument({ surface, container, viewer }) {
     if (id && id !== expectImage) {
       pano = foldPanoEvent(pano, { type: "nav_move", at: now() });
     }
+    observeEdges(ev);
   });
+
+  // Issue #2: read the image's spatial/sequence edge counts (bounded, opaque
+  // aggregates — never an id, coordinate, or edge payload) and latch them.
+  // Fold into the open round if there is one; otherwise hold them so the first
+  // beginRound seeds the anchor's edges even when the initial image event beat
+  // our beginRound call. An UNKNOWN (uncached) count is ignored, never zeroed.
+  function observeEdges(ev) {
+    const counts = extractEdgeCounts(ev);
+    if (counts.spatial === null && counts.sequence === null) return;
+    if (counts.spatial !== null) pendingEdges.spatial = counts.spatial;
+    if (counts.sequence !== null) pendingEdges.sequence = counts.sequence;
+    if (pano) {
+      pano = foldPanoEvent(pano, {
+        type: "edges", spatial: counts.spatial, sequence: counts.sequence,
+        at: now(),
+      });
+    }
+  }
 
   // Pointer activity with zero pov change is the only gesture_blocked signal
   // we have (§5). Capture phase on the container: an overlay ABOVE the
@@ -489,6 +514,15 @@ function instrument({ surface, container, viewer }) {
     beginRound(roundNumber) {
       iv.endRound();
       pano = createPanoSession({ surface, roundNumber, startedAt: now() });
+      // Issue #2: seed the anchor's edge availability from any image/edge state
+      // latched before this round opened — the initial image before round 1, or
+      // SDK ordering that fired an edge observation ahead of our beginRound.
+      if (pendingEdges.spatial !== null || pendingEdges.sequence !== null) {
+        pano = foldPanoEvent(pano, {
+          type: "edges", spatial: pendingEdges.spatial,
+          sequence: pendingEdges.sequence, at: now(),
+        });
+      }
     },
     endRound() {
       if (!pano) return;
@@ -502,6 +536,10 @@ function instrument({ surface, container, viewer }) {
       });
       track("pano_session", props);
       pano = null;
+      // Clear the latch so the NEXT round never inherits this anchor's edges;
+      // the early return above preserves a pre-round-1 latch (pano is null then)
+      // so the initial image still seeds beginRound(1).
+      pendingEdges = { spatial: null, sequence: null };
     },
     noteReanchor() {
       pano = foldPanoEvent(pano, { type: "reanchor", at: now() });

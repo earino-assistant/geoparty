@@ -28,6 +28,10 @@ import {
   panoSessionProps,
   looksGestureBlocked,
   LOOK_THROTTLE_MS,
+  EDGE_COUNT_CAP,
+  boundEdgeCount,
+  edgeStatusCount,
+  extractEdgeCounts,
   classifySessionHealth,
   HEALTH_HEALTHY,
   HEALTH_DEGRADED,
@@ -363,6 +367,124 @@ test("looksGestureBlocked: pointers land but the view never moves", () => {
 });
 
 /* ================================================================
+ * Issue #2 — spatial/sequence edge diagnostics (the honest replacement
+ * for the broken `nav_available` signal)
+ * ================================================================ */
+
+test("boundEdgeCount: clamps to [0,cap], floors, rejects junk", () => {
+  assert.equal(boundEdgeCount(0), 0);
+  assert.equal(boundEdgeCount(3), 3);
+  assert.equal(boundEdgeCount(3.9), 3, "floored, never rounded up");
+  assert.equal(boundEdgeCount(EDGE_COUNT_CAP + 50), EDGE_COUNT_CAP, "capped");
+  assert.equal(boundEdgeCount(-4), 0, "negative → 0");
+  assert.equal(boundEdgeCount(NaN), 0);
+  assert.equal(boundEdgeCount(Infinity), 0);
+  assert.equal(boundEdgeCount("7"), 0, "non-number → 0");
+});
+
+test("edgeStatusCount: an UNCACHED status is unknown (null), never zero", () => {
+  // The whole point of #2: never repeat the nav_available false-signal trap.
+  // A status the SDK has not cached carries no trustworthy count.
+  assert.equal(edgeStatusCount({ cached: false, edges: [] }), null);
+  assert.equal(edgeStatusCount({ cached: false, edges: [{}, {}] }), null);
+  // A cached status counts its edges (bounded).
+  assert.equal(edgeStatusCount({ cached: true, edges: [] }), 0);
+  assert.equal(edgeStatusCount({ cached: true, edges: [{}, {}, {}] }), 3);
+  // Tolerant of the documented alternatives and hostile inputs.
+  assert.equal(edgeStatusCount([{}, {}]), 2, "a bare edge array");
+  assert.equal(edgeStatusCount(5), 5, "an already-counted number");
+  assert.equal(edgeStatusCount({ count: 4 }), 4, "a {count} shape");
+  assert.equal(edgeStatusCount(null), null);
+  assert.equal(edgeStatusCount(undefined), null);
+  assert.equal(edgeStatusCount({}), null, "malformed object → unknown");
+  assert.equal(edgeStatusCount("nope"), null);
+  assert.equal(edgeStatusCount({ cached: true, edges: 900 }), null,
+    "edges must be an array to be counted");
+});
+
+test("extractEdgeCounts: reads spatial/sequence from an image event, never an id", () => {
+  const ev = {
+    image: {
+      id: "1263588815098567",
+      spatialEdges: { cached: true, edges: [{}, {}, {}, {}] },
+      sequenceEdges: { cached: true, edges: [{}, {}] },
+    },
+  };
+  assert.deepEqual(extractEdgeCounts(ev), { spatial: 4, sequence: 2 });
+  // A bare image object works too.
+  assert.deepEqual(
+    extractEdgeCounts({ spatialEdges: [{}], sequenceEdges: [{}, {}, {}] }),
+    { spatial: 1, sequence: 3 },
+  );
+});
+
+test("extractEdgeCounts: uncached/absent edges read as unknown, not zero", () => {
+  assert.deepEqual(
+    extractEdgeCounts({ image: { spatialEdges: { cached: false, edges: [] } } }),
+    { spatial: null, sequence: null });
+  assert.deepEqual(extractEdgeCounts({ image: {} }), { spatial: null, sequence: null });
+});
+
+test("extractEdgeCounts: never throws on hostile input or a throwing getter", () => {
+  assert.deepEqual(extractEdgeCounts(null), { spatial: null, sequence: null });
+  assert.deepEqual(extractEdgeCounts(undefined), { spatial: null, sequence: null });
+  assert.deepEqual(extractEdgeCounts(42), { spatial: null, sequence: null });
+  assert.deepEqual(extractEdgeCounts("x"), { spatial: null, sequence: null });
+  // A real MapillaryJS Image getter can throw before the image is initialized.
+  const hostile = { image: {} };
+  Object.defineProperty(hostile.image, "spatialEdges", {
+    get() { throw new Error("Image not initialized"); },
+  });
+  Object.defineProperty(hostile.image, "sequenceEdges", {
+    get() { throw new Error("Image not initialized"); },
+  });
+  assert.deepEqual(extractEdgeCounts(hostile), { spatial: null, sequence: null });
+});
+
+test("pano fold: the edges event latches the ANCHOR's counts once per round", () => {
+  let s = session();
+  assert.equal(s.anchor_spatial_edges, null, "unknown until observed");
+  s = foldPanoEvent(s, { type: "edges", spatial: 4, sequence: 2, at: 1100 });
+  assert.equal(s.anchor_spatial_edges, 4);
+  assert.equal(s.anchor_sequence_edges, 2);
+  // A later image (the player walked to a new place) must NOT overwrite the
+  // anchor's recorded edges.
+  s = foldPanoEvent(s, { type: "edges", spatial: 9, sequence: 1, at: 1200 });
+  assert.equal(s.anchor_spatial_edges, 4, "the anchor count is latched, not overwritten");
+  assert.equal(s.anchor_sequence_edges, 2);
+  // An edges event is not an interaction — it must not start first_move_ms.
+  assert.equal(s.first_move_ms, null);
+});
+
+test("pano fold: an unknown (null) edge count can be filled by a later cached one", () => {
+  let s = session();
+  s = foldPanoEvent(s, { type: "edges", spatial: null, sequence: null, at: 1100 });
+  assert.equal(s.anchor_spatial_edges, null, "an unknown observation fills nothing");
+  s = foldPanoEvent(s, { type: "edges", spatial: 0, sequence: null, at: 1200 });
+  assert.equal(s.anchor_spatial_edges, 0, "a real cached zero IS a known count");
+  s = foldPanoEvent(s, { type: "edges", spatial: 5, sequence: 3, at: 1300 });
+  assert.equal(s.anchor_spatial_edges, 0, "once known, never overwritten");
+  assert.equal(s.anchor_sequence_edges, 3, "the still-unknown sequence count fills in");
+});
+
+test("pano fold: edge counts fold bounded (a malformed huge count is capped)", () => {
+  let s = session();
+  s = foldPanoEvent(s, { type: "edges", spatial: 9999, sequence: -3, at: 1100 });
+  assert.equal(s.anchor_spatial_edges, EDGE_COUNT_CAP);
+  assert.equal(s.anchor_sequence_edges, 0);
+});
+
+test("panoSessionProps: edge counts appear only when known, as ints", () => {
+  let s = session();
+  assert.ok(!("anchor_spatial_edges" in panoSessionProps(s)),
+    "an unknown anchor edge count is absent, not a false 0");
+  s = foldPanoEvent(s, { type: "edges", spatial: 3, sequence: 0, at: 1100 });
+  const p = panoSessionProps(s);
+  assert.equal(p.anchor_spatial_edges, 3);
+  assert.equal(p.anchor_sequence_edges, 0, "a KNOWN zero is reported");
+});
+
+/* ================================================================
  * §9.1 Session health — healthy / degraded / failed, failed wins
  * ================================================================ */
 
@@ -389,7 +511,6 @@ test("health: degraded — slow, late, skipped, nav-broken, gesture-blocked", ()
     slow: (f) => { f.loads[0].duration_ms = SLOW_LOAD_MS; },
     late: (f) => { f.loads[0].late = true; },
     skipped: (f) => { f.loads[0].skips = 1; },
-    navUnavailable: (f) => { f.panos[0].nav_available = false; },
     navFailed: (f) => { f.panos[0].nav_failures = 2; },
     noNeighbors: (f) => { f.exceptions.push({ error_class: "no_neighbors" }); },
     gestureBlocked: (f) => { f.panos[0].looks = 0; },
@@ -459,6 +580,24 @@ test("health: nav failures only count where movement was offered", () => {
   const f = healthyFacts();
   f.panos = [{ nav_available: false, nav_failures: 3, pointer_downs: 1, looks: 1, move_enabled: false }];
   assert.equal(classifySessionHealth(f), HEALTH_HEALTHY);
+});
+
+test("health (#2): a move-enabled session without `navigable` is NOT degraded", () => {
+  // The whole bug: `navigable` never emits usefully, so nav_available has been
+  // false for every historical session. A move-enabled round with NO genuine
+  // navigation failure must read healthy — a missing nav_available signal is
+  // no longer, by itself, evidence of a broken game.
+  const f = healthyFacts();
+  f.panos = [{
+    nav_available: false, nav_failures: 0, pointer_downs: 4, looks: 9,
+    move_enabled: true,
+  }];
+  assert.equal(classifySessionHealth(f), HEALTH_HEALTHY,
+    "a false nav_available alone must not mark the session degraded");
+  // A GENUINE nav failure on the same move-enabled round still degrades.
+  f.panos[0].nav_failures = 1;
+  assert.equal(classifySessionHealth(f), HEALTH_DEGRADED,
+    "a real nav_failure is still preserved as a degraded signal");
 });
 
 /* ================================================================

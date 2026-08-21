@@ -377,7 +377,14 @@ pano_session: {
   zoom_changes: "int",
   nav_moves: "int",       // image changes not caused by our moveTo
   nav_failures: "int",
-  nav_available: "bool",  // last `navigable` state seen
+  nav_available: "bool",  // DEPRECATED (issue #2) — `navigable` never emits
+                          // usefully; false for all 80 sessions; no longer a
+                          // health input. Prefer anchor_spatial_edges.
+  anchor_spatial_edges: "int",   // issue #2: bounded [0,12] count of the round
+                                 // anchor's spatial nav edges; recorded ONLY
+                                 // when the SDK marks the status cached, so
+                                 // unknown stays absent (never a false 0)
+  anchor_sequence_edges: "int",  // issue #2: same, for along-capture edges
   reanchors: "int",       // re-anchor writes during active play (§5)
   first_move_ms: "int",   // round start → first user interaction
   pointer_downs: "int",   // with looks==0 → gesture_blocked signal
@@ -490,8 +497,8 @@ client-side (to force recording of non-healthy sessions in Stage 2+,
 
 | Class | Definition |
 |---|---|
-| **Healthy** | All of: viewer(s) constructed (`viewer_init ok:true`); every anchor/resume `imagery_load` ok with `duration_ms < 10 s`, `skips = 0`, not `late`; where movement is enabled, navigation available when attempted (`nav_available` true, `nav_failures = 0`); rounds progress normally (`guess_submitted` → `reveal_shown` for each started round); zero captured exceptions (`cancelled` never captures, §5) and zero `imagery_report`s. |
-| **Degraded** | Playable but impaired — any of: a successful load with `duration_ms ≥ 10 s` or `late:true`; pool skips (`skips ≥ 1`) that still landed a pano; `no_neighbors`, `nav_available:false`, or `nav_failures > 0` where movement is enabled; partial interaction failure (`pointer_downs > 0` with `looks = 0` — the gesture-blocked signal). |
+| **Healthy** | All of: viewer(s) constructed (`viewer_init ok:true`); every anchor/resume `imagery_load` ok with `duration_ms < 10 s`, `skips = 0`, not `late`; where movement is enabled, no genuine navigation failure (`nav_failures = 0`); rounds progress normally (`guess_submitted` → `reveal_shown` for each started round); zero captured exceptions (`cancelled` never captures, §5) and zero `imagery_report`s. **Issue #2: a missing `nav_available` is NOT unhealthy** — that field was false for every session (the `navigable` event never emits usefully), so it is no longer a health input; `anchor_spatial_edges` is the honest edge diagnostic but its healthy threshold is a Phase 2 decision, so it does not yet gate health. |
+| **Degraded** | Playable but impaired — any of: a successful load with `duration_ms ≥ 10 s` or `late:true`; pool skips (`skips ≥ 1`) that still landed a pano; `no_neighbors` or `nav_failures > 0` where movement is enabled; partial interaction failure (`pointer_downs > 0` with `looks = 0` — the gesture-blocked signal). *(Issue #2 removed the `nav_available:false` trigger — it mislabelled every move-enabled session degraded.)* |
 | **Failed** | The user saw a broken game — any of: no playable panorama for a round (anchor skip loop exhausted, or every attempt `ok:false`); `viewer_init ok:false` / `webgl_unavailable` / `webgl_context_lost`; any captured classified exception of a hard class (`http_auth`, `network_timeout` never corrected by a late success, `image_dead` exhausting the loop); or an explicit `imagery_report`. |
 
 A skip that ultimately lands a pano marks the session **degraded**, not
@@ -752,7 +759,7 @@ One PostHog dashboard, **"Field reliability"**:
 | 4 | Failures by environment | failure rate by `$browser`, `$os`, `net_type` |
 | 5 | Worst pool entries | table: `pool_entry` by failure count + distinct sessions (feeds §13) |
 | 6 | Skips per round | avg + distribution of `imagery_load.skips` (purpose=anchor); share with skips>0 |
-| 7 | Navigation health | share of `pano_session` with `nav_failures>0`; `nav_available=false` count; `reanchors>0` count (bounce-regression canary) |
+| 7 | Navigation health | share of `pano_session` with `nav_failures>0`; `anchor_spatial_edges` distribution among rounds that report a cached count — share at `0` is the "no arrows to click" mechanism (issue #2), read **separately** from the *unknown* (absent) rounds; `reanchors>0` count (bounce-regression canary). `nav_available` is deprecated (issue #2) — do not chart it as health |
 | 8 | Exceptions by release | `$exception` count by `release` (+ issue list widget) |
 | 9 | First playable pano rate | share of `imagery_load` (purpose=anchor) with `ok=true`, `skips=0`, `duration_ms<10000` — "round 1 just worked" |
 | 10 | Reports | `imagery_report` table: `ref_code`, `error_class`, `surface` → session/replay links |
