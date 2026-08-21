@@ -1,9 +1,12 @@
 # Issue #2 — Phase 2: bounded spatial-edge cache recovery
 
-> **STATUS: DESIGN — not implemented.** Phase 1 (edge diagnostics +
-> health-classifier fix, commit 63965f5) is shipped and live. This document
-> designs the Phase 2 *recovery* mechanism only; no code changes ship with
-> this commit. MapillaryJS stays pinned at **4.1.2** in this pass (§9).
+> **STATUS: SHIPPED.** Phase 1 (edge diagnostics + health-classifier fix,
+> commit 63965f5) is shipped and live. This document was the Phase 2
+> *recovery* design; it has since been implemented (`js/imagery.js`
+> `decideEdgeRecovery`/`classifyEdgeRecoveryOutcome`, `js/viewer-ui.js`
+> glue, `edge_recovery` analytics event) and corrected against source-verified
+> field research — see the corrections called out inline below. MapillaryJS
+> stays pinned at **4.1.2** in this pass (§9).
 
 ## 1. Confirmed root cause (field evidence, 2026-08-21)
 
@@ -21,16 +24,23 @@ Owner's console during a live round, arrows missing:
   `observableEmpty()`. The chain completes "successfully" with the node's
   `spatialEdges.cached === false`, so the DirectionComponent has nothing to
   render. Nothing in the SDK ever re-attempts it for that image.
-- **Pressing Play recovers the arrows.** `PlayService.play()` (speed <
-  `sequenceSpeed` = 0.54) calls `graphService.setGraphMode(GraphMode.Spatial)`;
-  `CacheService` subscribes to `graphMode$` (`skip(1)`, i.e. on change) and
-  re-runs `cacheImage$` for the current image, which re-attempts the failed
-  spatial-area fetch — this time the API answers, `cacheSpatialEdges` runs,
-  and the arrows appear.
+- **Retracted: "Pressing Play recovers the arrows."** An earlier pass of
+  this design attributed a field-observed recovery to `PlayService.play()`
+  calling `graphService.setGraphMode(GraphMode.Spatial)`, on the theory that
+  `CacheService`'s `graphMode$` subscription (`skip(1)`, i.e. on change)
+  would re-run `cacheImage$` and re-attempt the failed spatial-area fetch.
+  That explanation cannot be right: `setGraphMode` early-returns when the
+  mode is unchanged, and Spatial is the viewer's **default** graph mode — a
+  Play tap never actually toggles it, so the subscription's `skip(1)` gate
+  never fires. There is no verified in-SDK mechanism behind the anecdotal
+  "Play recovers arrows" report. It is dropped from this design; §2's
+  `setFilter()` lever below is independently source-verified against the
+  MapillaryJS 4.1.2 source, and that — not the Play button — is what Phase 2
+  relies on.
 
 So the failure is: **a transient graph-API error during the one-shot
-spatial-edge caching pass is silently permanent for that image**, and the
-only in-game recovery today is an accidental side effect of the Play button.
+spatial-edge caching pass is silently permanent for that image**, and there
+is no reliable in-game recovery today.
 
 Phase 1 made this *visible* (`anchor_spatial_edges` stays **absent** =
 unknown/uncached in `pano_session`). Phase 2 makes it *heal*.
@@ -52,7 +62,10 @@ We verified the following against the MapillaryJS **v4.1.2** source
      drops the ones *before* it). No image transition, no camera change,
      no blanking.
    - `graphService.setFilter$(filter)` → `graph.resetSpatialEdges()` —
-     marks every node's spatial-edge status uncached again.
+     marks every node's spatial-edge status uncached again. `resetSpatialEdges`
+     only iterates `_cachedSpatialEdges` (the set of nodes it has actually
+     cached before), so a never-cached anchor is a harmless no-op here — the
+     re-caching that matters happens in the `cacheImage$` step below.
    - `_cacheIds$(trajectoryIds)` → **`graphService.cacheImage$` for the
      current image** — the full caching pipeline runs again, including the
      spatial-area fetch and, on success,
@@ -62,8 +75,13 @@ We verified the following against the MapillaryJS **v4.1.2** source
    `catchError` deletes the failed batch keys from `spatialArea.all` /
    `spatialArea.cacheNodes` and deletes `_cachingSpatialArea$[key]` when the
    last batch settles — a later `cacheImage$` **re-issues the HTTP
-   request** rather than replaying the failure. (The Play-button field
-   recovery is end-to-end proof of the same property.)
+   request** rather than replaying the failure. Confirmed against the live
+   SDK as **two-step**, not one-shot: the *first* re-attempt after a stuck
+   uncached status converts it to a cached **zero** without actually
+   re-issuing the HTTP request (the client-side reset resolves before the
+   network round-trip would); only the *second* re-attempt re-issues the
+   real fetch and, once the API answers, restores the arrows (§3, §C
+   correction 1).
 
 4. **Late edges render without any image event.** `DirectionComponent`
    subscribes to `image.spatialEdges$`, which re-emits when
@@ -102,9 +120,16 @@ viewer wrapper only supplies inputs and timers.
 ```js
 // Constants (exported; small ints — the bounds ARE the design)
 export const EDGE_RECOVERY_MAX_ATTEMPTS = 2;
-export const EDGE_RECOVERY_GRACE_MS     = 3500;  // anchor ok → first check
+export const EDGE_RECOVERY_GRACE_MS     = 5000;  // anchor ok → first check
 export const EDGE_RECOVERY_RECHECK_MS   = 2500;  // setFilter settled → re-read
 export const EDGE_RECOVERY_BACKOFF_MS   = 8000;  // attempt 1 → attempt 2
+// GRACE was raised from the original 3500ms to 5000ms so a slow-but-healthy
+// spatial fetch is never mistaken for stuck and torn into an unnecessary
+// first attempt. EDGE_RECOVERY_MAX_ATTEMPTS is not a generic safety margin —
+// it is FUNCTIONALLY REQUIRED at 2: attempt 1 only ever clears the stuck
+// uncached status to cached-zero (§2 point 3); attempt 2 is the one that
+// re-issues the real fetch. A cap of 1 would stop before the actual fix ever
+// runs (tests/imagery.test.js has a mutation-guard test asserting this).
 
 // Per-round state (created at anchor-load success, dropped at endRound)
 export function createEdgeRecovery() {
@@ -150,9 +175,18 @@ Outcome classification (pure):
 // afterSpatial: int|null read EDGE_RECOVERY_RECHECK_MS after setFilter settles
 export function classifyEdgeRecoveryOutcome(afterSpatial, setFilterFailed)
 // → "recovered"  (afterSpatial >= 1)
-// → "error"      (setFilterFailed — the promise rejected, e.g. API still 500)
+// → "error"      (setFilterFailed — the setFilter() PROMISE ITSELF rejected;
+//                 a stub/dispose race, confirmed rare)
 // → "no_change"  (still null or 0)
 ```
+
+**Correction (§C.3):** a blocked graph API is `"no_change"`, **not**
+`"error"`. Confirmed against the live SDK: `setFilter()`'s promise
+**resolves** even while the graph API is 500ing — the fetch is detached and
+its failure swallowed the same way the original bug swallows it (§1), so the
+call site never sees a rejection to propagate. `setFilterFailed` stays in
+the classifier for the rare stub/dispose race, but a still-broken API is the
+`"no_change"` path, not `"error"`.
 
 ## 4. Glue in `js/viewer-ui.js` (design)
 
@@ -188,9 +222,15 @@ methods on the `iv` surface except a test seam.
 - **Cancellation.** All recovery timers are cleared in `endRound()`,
   `destroy()`, and at the start of every new `attempt()` (any purpose — a
   new load supersedes recovery). Worst-case added wall clock inside a
-  round: grace + setFilter + recheck + backoff + recheck ≈ 16.5 s of *idle
-  waiting* and **at most two** `setFilter()` calls — no per-render work at
-  all (nothing hooks the render/`pov` path).
+  round: grace + setFilter + recheck + backoff + setFilter + recheck ≈
+  5000+2500+8000+2500 = **18 s** of *idle waiting* and **at most two**
+  `setFilter()` calls — no per-render work at all (nothing hooks the
+  render/`pov` path). Field-observed full recovery (attempt 2 actually
+  restoring arrows) lands around **~14–15 s** after the anchor — attempt 1
+  (trigger `"uncached"`) predominantly resolves `"no_change"` (the
+  cached-zero conversion, §2 point 3, §C correction 1) and it is attempt 2
+  (trigger `"zero"`) that recovers; **`attempt:1 no_change, attempt:2
+  recovered` is the healthy field signature, not a sign attempt 1 failed.**
 - **Test seam.** Timers route through one `scheduleTick(fn, ms)` helper;
   a test-only `iv.__edgeRecoveryTickForTests()` runs one due tick
   synchronously (same convention as `__resetSessionForTests`), so unit
@@ -246,7 +286,7 @@ player actually walk after we healed the arrows?).
 
 | boundary | enforced by | red-capable test |
 |---|---|---|
-| ≤ 2 attempts/round, no infinite/hot loop | `attempts` counter in pure state; ticks only from 3 finite scheduled delays; nothing on render/pov | drive tick repeatedly with edges stuck at `null`: `setFilter` spy called exactly 2×, then `stop:"attempts_exhausted"`; mutation check: removing the cap fails this test |
+| ≤ 2 attempts/round, no infinite/hot loop; the cap must be **exactly 2, not 1** (two-step recovery, §C.1) | `attempts` counter in pure state; ticks only from 3 finite scheduled delays; nothing on render/pov | drive tick repeatedly with edges stuck at `null`: `setFilter` spy called exactly 2×, then `stop:"attempts_exhausted"`; mutation check: removing the cap fails this test; a SEPARATE mutation-guard test proves a cap of 1 would stop right after attempt 1's `"no_change"`, before the real, recovering attempt 2 ever runs |
 | never during Frozen; never re-enables movement | `moveEnabled` in predicate (`skip:"frozen"`); mechanism calls **only** `setFilter` — never `activateComponent` | Frozen round (`setMoveAllowed(false)`) → spy proves `setFilter` *and* `activateComponent` uncalled by recovery; predicate unit matrix |
 | never blanks the pano / no visible move | mechanism is `setFilter()` only — §2 source evidence (`clear()` keeps current image); recovery path has no access to `showCover`/`resetView` | spies on cover helpers stay uncalled through a full recovery cycle; no `moveTo` issued |
 | never during user navigation | `userNavigated` (nav_moves > 0 or current ≠ anchor) → `stop` | fire an unexpected-id `image` event between arming and tick → `setFilter` never called |
@@ -263,21 +303,37 @@ player actually walk after we healed the arrows?).
   beats `frozen`; `frozen` is `skip` not `stop`).
 - unknown ≠ zero: `spatial:null` → trigger `"uncached"`, `spatial:0` →
   `"zero"`, `spatial:1` → stop.
-- `classifyEdgeRecoveryOutcome` truth table incl. `setFilterFailed`.
+- `classifyEdgeRecoveryOutcome` truth table incl. `setFilterFailed`, and the
+  **correction #3 case**: `classifyEdgeRecoveryOutcome(0, false) ===
+  "no_change"` — a resolved-but-still-zero read is never misclassified as
+  `"error"`.
 - constants sanity: `EDGE_RECOVERY_MAX_ATTEMPTS` is a small positive int
   (≤3), all delays finite and ≥1s (guards accidental hot-loop edits).
+- **mutation guard (§C.1):** a state with one attempt already spent, given a
+  cached-zero `spatial:0`, must still decide `"attempt"` (trigger `"zero"`)
+  under the real cap — proving `EDGE_RECOVERY_MAX_ATTEMPTS` must be 2, since
+  that state is exactly "attempt 1 just converted uncached to zero."
 
 **`tests/viewer-ui.test.js` (fake `mapillary` global + `__edgeRecoveryTickForTests`):**
 - happy path: anchor ok → image event with `cached:false` edges → tick →
-  `setFilter` called once → edges now cached 4 → outcome `"recovered"`,
-  `edge_recovery` event props exact, `pano_session.anchor_spatial_edges`
-  filled, `edge_recoveries:1`.
+  `setFilter` called → attempt 1 classifies `"no_change"` (the cached-zero
+  conversion, §C.1) → tick → `setFilter` called again → attempt 2 classifies
+  `"recovered"` → `edge_recovery` event props exact for both attempts,
+  `pano_session.anchor_spatial_edges` filled from the FINAL attempt only
+  (never the interim cached-zero — see the note in §4's fold-feed code),
+  `edge_recoveries:2`.
 - the six boundary tests from §6.
 - `endRound`/`destroy` cancel pending recovery (tick after → no-op).
 - Frozen round then next round un-Frozen: round N emits nothing, round
   N+1 recovers normally (per-round state isolation).
 - TV surface (`moveEnabled:false` always): never attempts — schema's
   `surface` comment stays honest.
+- **(§C.1) mutation guard:** attempt 1 alone (simulating a cap of 1) never
+  recovers — `setFilter` spy called once, outcome `"no_change"`; only the
+  real cap (2) lets attempt 2 fire and actually recover.
+- **(§C.3) the blocked-API signature:** `setFilter` resolves on every call
+  but never actually populates real edges (the API stays down) — BOTH
+  attempts classify `"no_change"`, never `"error"`.
 
 **Mutation/red checks** (each named test fails if the guard is deleted):
 cap removal → loop test; dropping the `moveEnabled` check → Frozen test;
@@ -294,13 +350,19 @@ Ship gate as always: `npm test` green, `npm run check` clean.
 2. New round with blocking enabled *during* the anchor load (this
    reproduces the field 500: pano may load from cache/CDN, spatial batch
    fails — console shows "Failed to cache spatial images"). Arrows absent.
-3. Wait ≈3.5 s: console shows the SDK re-fetch attempt (blocked → attempt
-   1 `result:"error"`). **Unblock** within the ~8 s backoff window.
-4. Attempt 2 fires → arrows appear **in place**: no pano blank, no camera
-   snap, no cover flash, player's pov untouched.
+3. Wait ≈5 s: console shows the SDK re-fetch attempt (still blocked →
+   attempt 1 `result:"no_change"` — this is the healthy signature, not a
+   failure: attempt 1 only ever clears the stuck status to cached-zero
+   without a real fetch, §C correction 1). **Unblock** within the ~8 s
+   backoff window before attempt 2 fires.
+4. Attempt 2 fires (~14–15 s after the anchor) → arrows appear **in
+   place**: no pano blank, no camera snap, no cover flash, player's pov
+   untouched.
 5. Verify events (PostHog debug/localStorage queue): exactly 2
-   `edge_recovery` (error, recovered), `pano_session` carries
-   `edge_recoveries:2` and a now-present `anchor_spatial_edges`.
+   `edge_recovery` (`attempt:1 no_change`, `attempt:2 recovered`) — **never**
+   `result:"error"` for a blocked-then-unblocked API (§C correction 3) —
+   `pano_session` carries `edge_recoveries:2` and a now-present
+   `anchor_spatial_edges`.
 6. Frozen twist round with blocking on: no `edge_recovery` events, arrows
    stay off, movement stays disabled.
 7. Healthy round: zero recovery events (silence is the pass).
@@ -324,13 +386,34 @@ Ship gate as always: `npm test` green, `npm run check` clean.
 ## 10. Acceptance criteria
 
 1. A round whose spatial-edge caching failed transiently (graph-API blip)
-   gets its arrows back **without any user action**, within ~6 s of the
-   anchor when the API has recovered (~14 s via the second attempt),
-   with no visible movement, blanking, or control change.
-2. At most 2 `setFilter()` calls per round, ever; zero on healthy rounds,
-   Frozen rounds, stub viewers, and after user navigation (all
-   test-enforced).
+   gets its arrows back **without any user action**, typically via the
+   *second* attempt (~14–15 s after the anchor, once the API has
+   recovered) — the first attempt routinely reports `"no_change"` as it
+   only clears the stuck status to cached-zero, which is expected, not a
+   failure (§C correction 1) — with no visible movement, blanking, or
+   control change.
+2. At most 2 `setFilter()` calls per round, ever, **and the cap must be 2,
+   not 1** — a mutation-guard test proves a cap of 1 would stop before the
+   recovering second attempt ever runs (§C correction 1). Zero calls on
+   healthy rounds, Frozen rounds, stub viewers, and after user navigation
+   (all test-enforced).
 3. `edge_recovery` reports attempts/outcomes as pure aggregates; the
    Navigation-health KPI can state the field recovery rate; a successful
    recovery also backfills `anchor_spatial_edges`.
 4. All existing tests stay green; every §6 boundary has a red-capable test.
+
+## 11. Caveats (§C correction, honest limits — not follow-up work)
+
+- **Recovery is partial, not exhaustive.** The state machine stops the
+  instant `edges_present` is true (`spatial >= 1`); it never re-checks a
+  round it already considers arrows-present, even if a later navigation
+  somehow re-breaks caching for a *different* image mid-round (nav-purpose
+  loads have their own independent `imagery_load` path — Phase 2 only ever
+  covers the round's anchor).
+- **A rare permanent stick is possible and is bounded, not eliminated.** If
+  the underlying SDK batch never resolves at all in a way `cacheImage$`
+  recognizes (the internals note a `!item.node` guard on some batch-error
+  paths), no number of `setFilter()` calls will help — the `EDGE_RECOVERY_MAX_ATTEMPTS`
+  cap means this reads as two `edge_recovery` events ending in `"no_change"`
+  and a round that stays arrow-less, rather than a retry storm. This is the
+  honest floor of a client-side recovery for a server-side failure mode.

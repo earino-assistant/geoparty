@@ -322,6 +322,86 @@ export function extractEdgeCounts(input) {
 }
 
 /* ================================================================
+ * Issue #2 Phase 2 — bounded spatial-edge cache recovery
+ * ================================================================
+ * docs/issue-2-phase2-fix.md. The confirmed failure: a transient graph-API
+ * error during the one-shot spatial-edge caching pass is silently permanent
+ * for that image — nothing in the SDK ever re-attempts it. The verified
+ * recovery lever is the viewer's public `setFilter()`: it resets spatial
+ * edges and re-runs the caching pipeline for the CURRENT image, without
+ * navigating, blanking, or touching any component.
+ *
+ * Recovery is confirmed TWO-STEP against the live SDK: attempt 1 (trigger
+ * "uncached") converts a stuck uncached status to a cached-ZERO status
+ * WITHOUT issuing a new HTTP request — result "no_change". Attempt 2
+ * (trigger "zero") is the one that re-issues the real fetch and restores
+ * arrows. EDGE_RECOVERY_MAX_ATTEMPTS therefore has to be at least 2 — one
+ * attempt alone can never observe the actual re-fetch (tests/imagery.test.js
+ * has a mutation-guard test proving this).
+ */
+
+// Small ints — the bounds ARE the design (§ mutation-guard tests below).
+export const EDGE_RECOVERY_MAX_ATTEMPTS = 2;
+export const EDGE_RECOVERY_GRACE_MS = 5000;   // anchor ok → first check
+export const EDGE_RECOVERY_RECHECK_MS = 2500; // setFilter settled → re-read
+export const EDGE_RECOVERY_BACKOFF_MS = 8000; // attempt 1 → attempt 2
+
+// Per-round state (created at anchor-load success, dropped at endRound).
+export function createEdgeRecovery() {
+  return { attempts: 0, done: false };
+}
+
+// A pure transition to the terminal state — the glue reassigns its local
+// binding to the result. Never mutates the input.
+export function edgeRecoveryStopped(state) {
+  return { attempts: state ? state.attempts : 0, done: true };
+}
+
+// The decision. Pure, total, never throws, never mutates `state` or `ctx`.
+//   state: a createEdgeRecovery() value ({ attempts, done })
+//   ctx: {
+//     viewerOk:      bool,     // iv.ok === true (not a stub)
+//     canSetFilter:  bool,     // typeof viewer.setFilter === "function"
+//     moveEnabled:   bool,     // iv.moveEnabled — Frozen/TV ⇒ false
+//     inFlight:      bool,     // an attempt()/moveTo not yet settled
+//     userNavigated: bool,     // nav_moves > 0, or current image ≠ anchor
+//     spatial:       int|null, // extractEdgeCounts of the LIVE image ref
+//   }
+// → { act: "attempt"|"skip"|"stop", reason: string, trigger?: string }
+//
+// Evaluation order below is exact — first match wins (docs §3 table).
+export function decideEdgeRecovery(state, ctx) {
+  const s = state || { attempts: 0, done: false };
+  const c = ctx || {};
+
+  if (s.done) return { act: "stop", reason: "done" };
+  if (!c.viewerOk || !c.canSetFilter) return { act: "stop", reason: "viewer_stub" };
+  if (c.userNavigated) return { act: "stop", reason: "user_navigated" };
+  if (c.spatial >= 1) return { act: "stop", reason: "edges_present" };
+  if (s.attempts >= EDGE_RECOVERY_MAX_ATTEMPTS) {
+    return { act: "stop", reason: "attempts_exhausted" };
+  }
+  if (!c.moveEnabled) return { act: "skip", reason: "frozen" };
+  if (c.inFlight) return { act: "skip", reason: "in_flight" };
+  if (c.spatial === null) {
+    return { act: "attempt", reason: "uncached", trigger: "uncached" };
+  }
+  // c.spatial === 0 (the only value left after the edges_present check above)
+  return { act: "attempt", reason: "zero", trigger: "zero" };
+}
+
+// afterSpatial: int|null read EDGE_RECOVERY_RECHECK_MS after setFilter
+// settles. setFilterFailed: the setFilter() promise itself rejected (a
+// stub/dispose race — rare). A blocked graph API is NOT this case: the SDK
+// swallows the 500 and setFilter()'s promise resolves anyway, so a still-
+// blocked API classifies as "no_change", never "error".
+export function classifyEdgeRecoveryOutcome(afterSpatial, setFilterFailed) {
+  if (setFilterFailed) return "error";
+  if (typeof afterSpatial === "number" && afterSpatial >= 1) return "recovered";
+  return "no_change";
+}
+
+/* ================================================================
  * §7.1 pano_session — the interaction fold
  * ================================================================ */
 
@@ -346,6 +426,9 @@ export function createPanoSession(opts) {
     // null until an edge status is observed AND cached (unknown ≠ zero).
     anchor_spatial_edges: null,
     anchor_sequence_edges: null,
+    // Issue #2 Phase 2: count of setFilter() recovery attempts this round
+    // (0..EDGE_RECOVERY_MAX_ATTEMPTS). Reported only when > 0 (§ below).
+    edge_recoveries: 0,
     reanchors: 0,
     pointer_downs: 0,
     first_move_ms: null,
@@ -379,6 +462,8 @@ export function foldPanoEvent(state, ev) {
     case "nav_failure": next.nav_failures += 1; break;
     case "reanchor": next.reanchors += 1; break;
     case "navigable": next.nav_available = ev.value === true; break;
+    // Issue #2 Phase 2: one per setFilter() recovery attempt this round.
+    case "edge_recovery_attempt": next.edge_recoveries += 1; break;
     case "edges":
       // Latch the ANCHOR image's edge availability once per round: the first
       // image of a round is the anchor, and a later image is a different place
@@ -430,6 +515,9 @@ export function panoSessionProps(state) {
       state.anchor_sequence_edges !== undefined) {
     props.anchor_sequence_edges = state.anchor_sequence_edges;
   }
+  // Issue #2 Phase 2: only reported when recovery actually ran this round —
+  // absent (not 0) on the healthy majority, same convention as first_move_ms.
+  if (state.edge_recoveries > 0) props.edge_recoveries = state.edge_recoveries;
   return props;
 }
 

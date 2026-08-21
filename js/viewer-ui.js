@@ -33,6 +33,14 @@ import {
   shouldForceRecordingForLoad,
   isFailureClass,
   chaosAllowed,
+  createEdgeRecovery,
+  decideEdgeRecovery,
+  edgeRecoveryStopped,
+  classifyEdgeRecoveryOutcome,
+  EDGE_RECOVERY_MAX_ATTEMPTS,
+  EDGE_RECOVERY_GRACE_MS,
+  EDGE_RECOVERY_RECHECK_MS,
+  EDGE_RECOVERY_BACKOFF_MS,
 } from "./imagery.js";
 
 // Keep in sync with the pinned <script> tag in *.html (unpkg mapillary-js).
@@ -264,6 +272,16 @@ function instrument({ surface, container, viewer }) {
   // round fold at beginRound, then cleared at endRound so the next round never
   // inherits the previous anchor's edges. Never contains an id or coordinate.
   let pendingEdges = { spatial: null, sequence: null };
+  // Issue #2 Phase 2: the live image ref (never serialized — only
+  // extractEdgeCounts ever reads it) and the bounded setFilter() recovery
+  // state. Cleared/cancelled in endRound()/destroy()/any new attempt().
+  let lastImage = null;
+  let edgeRecovery = null;
+  let edgeRecoveryTimer = null;
+  let pendingEdgeRecoveryTick = null;
+  let anchorImageId = null;
+  let recoveryRoundNumber = 0;
+  let inFlightCount = 0;
 
   // #5 movement-lever state. activateComponent can throw when the viewer is not
   // laid out yet; historically that was swallowed and the movement controls
@@ -309,6 +327,10 @@ function instrument({ surface, container, viewer }) {
     if (id && id !== expectImage) {
       pano = foldPanoEvent(pano, { type: "nav_move", at: now() });
     }
+    // Issue #2 Phase 2: latch the LIVE image ref (never cloned) — a later
+    // setFilter() recovery re-reads spatialEdges/sequenceEdges off this same
+    // object, since a recovered status renders with no further "image" event.
+    if (ev && ev.image && typeof ev.image === "object") lastImage = ev.image;
     observeEdges(ev);
   });
 
@@ -328,6 +350,139 @@ function instrument({ surface, container, viewer }) {
         at: now(),
       });
     }
+  }
+
+  /* Issue #2 Phase 2 (docs/issue-2-phase2-fix.md): bounded spatial-edge
+   * cache recovery. All timers route through one scheduleTick() so a single
+   * test-only seam (__edgeRecoveryTickForTests) can drive the whole state
+   * machine without ever sleeping. §15 chaos may override the three delays
+   * on a dev host; inert in production like every chaos hook. */
+  function edgeRecoveryDelays() {
+    const c = chaos();
+    const over = (c && c.edgeRecoveryMs) || {};
+    return {
+      grace: Number.isFinite(over.grace) ? over.grace : EDGE_RECOVERY_GRACE_MS,
+      recheck: Number.isFinite(over.recheck) ? over.recheck : EDGE_RECOVERY_RECHECK_MS,
+      backoff: Number.isFinite(over.backoff) ? over.backoff : EDGE_RECOVERY_BACKOFF_MS,
+    };
+  }
+
+  function cancelEdgeRecoveryTimer() {
+    if (edgeRecoveryTimer !== null) { clearTimeout(edgeRecoveryTimer); edgeRecoveryTimer = null; }
+    pendingEdgeRecoveryTick = null;
+  }
+
+  function scheduleTick(fn, ms) {
+    cancelEdgeRecoveryTimer();
+    pendingEdgeRecoveryTick = fn;
+    if (typeof setTimeout === "undefined") return;
+    edgeRecoveryTimer = setTimeout(() => {
+      edgeRecoveryTimer = null;
+      const f = pendingEdgeRecoveryTick;
+      pendingEdgeRecoveryTick = null;
+      if (f) f();
+    }, ms);
+  }
+
+  // Arm on anchor/resume success. Replaces any previous state/timer —
+  // idempotent per anchor; a re-anchor restarts cleanly.
+  function armEdgeRecovery(imageId, roundNumber) {
+    cancelEdgeRecoveryTimer();
+    edgeRecovery = createEdgeRecovery();
+    anchorImageId = imageId;
+    recoveryRoundNumber = roundNumber;
+    scheduleTick(edgeRecoveryTick, edgeRecoveryDelays().grace);
+  }
+
+  function edgeRecoveryCtx() {
+    const counts = extractEdgeCounts(lastImage);
+    const currentId = lastImage && typeof lastImage === "object" ? lastImage.id : null;
+    return {
+      viewerOk: iv.ok === true,
+      canSetFilter: typeof viewer.setFilter === "function",
+      moveEnabled: iv.moveEnabled === true,
+      inFlight: inFlightCount > 0,
+      userNavigated: Boolean(pano) && (
+        pano.nav_moves > 0 ||
+        (currentId != null && anchorImageId != null && currentId !== anchorImageId)
+      ),
+      spatial: counts.spatial,
+    };
+  }
+
+  function edgeRecoveryTick() {
+    if (!edgeRecovery) return;
+    const decision = decideEdgeRecovery(edgeRecovery, edgeRecoveryCtx());
+    if (decision.act === "stop") {
+      edgeRecovery = edgeRecoveryStopped(edgeRecovery);
+      return; // no event for edges_present/etc — silence is the healthy path
+    }
+    if (decision.act === "skip") return; // never reschedules beyond the planned ticks
+    runEdgeRecoveryAttempt(decision.trigger);
+  }
+
+  function runEdgeRecoveryAttempt(trigger) {
+    const state = edgeRecovery;
+    if (!state) return;
+    state.attempts += 1;
+    const attemptNumber = state.attempts;
+    const roundNumber = recoveryRoundNumber;
+    const t0 = now();
+    let settleP;
+    try {
+      settleP = Promise.resolve(viewer.setFilter());
+    } catch {
+      settleP = Promise.reject(new Error("setFilter threw"));
+    }
+    settleP.then(() => false, () => true).then((failed) => {
+      // A round transition (or a fresh re-arm) may have replaced `edgeRecovery`
+      // while setFilter() was in flight — never let a stale attempt schedule
+      // a tick for whatever round/state is now live.
+      if (edgeRecovery !== state) return;
+      scheduleTick(
+        () => finishEdgeRecoveryAttempt(state, attemptNumber, trigger, t0, roundNumber, failed),
+        edgeRecoveryDelays().recheck,
+      );
+    });
+  }
+
+  function finishEdgeRecoveryAttempt(state, attemptNumber, trigger, t0, roundNumber, setFilterFailed) {
+    if (edgeRecovery !== state) return;
+    const counts = extractEdgeCounts(lastImage);
+    const outcome = classifyEdgeRecoveryOutcome(counts.spatial, setFilterFailed);
+    const props = {
+      surface, round_number: roundNumber, attempt: attemptNumber, trigger,
+      result: outcome, duration_ms: Math.round(now() - t0),
+      net_type: netType(), online: isOnline(),
+    };
+    if (counts.spatial !== null) props.spatial_after = counts.spatial;
+    if (counts.sequence !== null) props.sequence_after = counts.sequence;
+    track("edge_recovery", props);
+    if (pano) {
+      pano = foldPanoEvent(pano, { type: "edge_recovery_attempt", at: now() });
+      // Only feed the anchor's edges latch (Phase 1's anchor_spatial_edges)
+      // on the LAST attempt that will ever run for this round — recovered,
+      // or attempts just ran out. An interim "no_change" reading (attempt 1
+      // routinely converts uncached to a cached-zero WITHOUT a real fetch,
+      // §C correction 1) must never latch a stale 0 that then blocks
+      // attempt 2's real, recovered count from ever backfilling it (the
+      // edges fold keeps the FIRST known value, never overwrites it).
+      const isFinalAttempt = outcome === "recovered" || attemptNumber >= EDGE_RECOVERY_MAX_ATTEMPTS;
+      if (isFinalAttempt && (counts.spatial !== null || counts.sequence !== null)) {
+        pano = foldPanoEvent(pano, {
+          type: "edges", spatial: counts.spatial, sequence: counts.sequence, at: now(),
+        });
+      }
+    }
+    if (outcome === "recovered") {
+      edgeRecovery = edgeRecoveryStopped(edgeRecovery);
+      return;
+    }
+    // Not recovered and attempts may remain — the NEXT tick's own
+    // decideEdgeRecovery call is what enforces attempts_exhausted; no
+    // duplicate cap check here (the pure state machine is the one place the
+    // bound lives).
+    scheduleTick(edgeRecoveryTick, edgeRecoveryDelays().backoff);
   }
 
   // Pointer activity with zero pov change is the only gesture_blocked signal
@@ -407,6 +562,10 @@ function instrument({ surface, container, viewer }) {
     const t0 = now();
     const poolEntry = poolDiagId(imageId);
     const c = chaos();
+    // Issue #2 Phase 2: a new load (any purpose) supersedes any pending
+    // recovery tick — the viewer state it was checking is about to change.
+    cancelEdgeRecoveryTimer();
+    inFlightCount += 1;
     // §15: the injection harness may shorten the budget on a dev host so a
     // timeout scenario doesn't take 20 real seconds. Inert in production.
     const limit = c && Number.isFinite(c.timeoutMs)
@@ -458,8 +617,15 @@ function instrument({ surface, container, viewer }) {
 
       real.then(
         () => {
+          inFlightCount = Math.max(0, inFlightCount - 1);
           // The image actually arrived: reveal it (whether on time or late).
-          if (coversRound(purpose)) hideCover();
+          if (coversRound(purpose)) {
+            hideCover();
+            // Issue #2 Phase 2: arm bounded recovery on every round-anchor
+            // success (on time or late) — idempotent per anchor.
+            armEdgeRecovery(imageId,
+              pano && Number.isFinite(pano.round_number) ? pano.round_number : 0);
+          }
           if (settled) {
             // The SDK finished late: correct the record rather than leave a
             // timeout standing against a load that actually worked (§6.1).
@@ -474,6 +640,7 @@ function instrument({ surface, container, viewer }) {
           finish(true, null);
         },
         (err) => {
+          inFlightCount = Math.max(0, inFlightCount - 1);
           // A genuine rejection leaves the cover UP — the caller's failure
           // overlay / "guess from the map" fallback takes the surface; a stale
           // pano must never be re-exposed on a failed round-anchor load.
@@ -525,6 +692,13 @@ function instrument({ surface, container, viewer }) {
       }
     },
     endRound() {
+      // Issue #2 Phase 2: a round leaving play cancels any pending recovery
+      // and drops the live image latch, unconditionally — before the pano
+      // early-return below, since destroy()/a pre-round-1 call must cancel
+      // too even when no pano was ever open.
+      cancelEdgeRecoveryTimer();
+      edgeRecovery = null;
+      lastImage = null;
       if (!pano) return;
       const props = panoSessionProps(pano);
       pushFact(facts.panos, {
@@ -570,6 +744,16 @@ function instrument({ surface, container, viewer }) {
 
     resize() {
       try { viewer.resize(); } catch { /* not laid out yet */ }
+    },
+
+    // Test-only seam (Issue #2 Phase 2): synchronously runs one due edge-
+    // recovery tick, same convention as __resetSessionForTests. Never called
+    // in production.
+    __edgeRecoveryTickForTests() {
+      if (edgeRecoveryTimer !== null) { clearTimeout(edgeRecoveryTimer); edgeRecoveryTimer = null; }
+      const f = pendingEdgeRecoveryTick;
+      pendingEdgeRecoveryTick = null;
+      if (f) f();
     },
 
     destroy() {

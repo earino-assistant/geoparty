@@ -143,6 +143,7 @@ function installFakeMapillary() {
     moveTo() { (this.calls = this.calls || []).push("moveTo"); return Promise.resolve(); }
     setCenter(c) { (this.calls = this.calls || []).push("setCenter"); this.center = c; }
     setZoom(z) { (this.calls = this.calls || []).push("setZoom"); this.zoom = z; }
+    setFilter() { (this.calls = this.calls || []).push("setFilter"); return Promise.resolve(); }
     remove() { this.removed = true; }
     resize() {}
     activateComponent(name) { (this.activated = this.activated || []).push(name); }
@@ -926,3 +927,310 @@ test("#5: Frozen stays frozen — deactivate is not undone by a reassert", () =>
   assert.ok(!(raw.activated || []).includes("direction"));
   iv.destroy();
 });
+
+/* ================================================================
+ * Issue #2 Phase 2 — bounded spatial-edge cache recovery
+ * (docs/issue-2-phase2-fix.md). All timers route through the test-only
+ * __edgeRecoveryTickForTests() seam, so nothing here ever sleeps for a real
+ * delay; `flush()` only drains the microtask queue after an async
+ * setFilter() call so the NEXT tick has been scheduled before we fire it.
+ * ================================================================ */
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+// Two-step recovery per docs/issue-2-phase2-fix.md §C: attempt 1 converts an
+// uncached status to cached-ZERO with no real fetch; attempt 2 is the real
+// re-fetch. `img` is the SAME live object `iv` latches as `lastImage`, so
+// mutating it in place (no new "image" event) is the exact SDK behavior
+// §2 point 4 documents.
+function twoStepSetFilter(raw, img) {
+  let calls = 0;
+  raw.setFilter = () => {
+    calls += 1;
+    raw.calls = raw.calls || [];
+    raw.calls.push("setFilter");
+    img.spatialEdges = calls === 1
+      ? { cached: true, edges: [] }
+      : { cached: true, edges: [{}, {}, {}, {}] };
+    return Promise.resolve();
+  };
+  return () => calls;
+}
+
+test("edge_recovery: recovers on attempt 2 (attempt 1 no_change) — the healthy field signature",
+  async () => {
+    const iv = makeHostViewer();
+    const raw = iv.viewer;
+    const img = { id: "anchor-1", spatialEdges: { cached: false, edges: [] } };
+    const callCount = twoStepSetFilter(raw, img);
+
+    iv.beginRound(5);
+    await iv.moveTo("anchor-1", "anchor");
+    iv.viewer.emit("image", { image: img });
+
+    iv.__edgeRecoveryTickForTests();          // grace tick → attempt 1 (uncached)
+    await flush();
+    iv.__edgeRecoveryTickForTests();          // recheck → classify attempt 1
+    const ev1 = lastEvent("edge_recovery");
+    assert.equal(ev1.props.surface, "host");
+    assert.equal(ev1.props.round_number, 5);
+    assert.equal(ev1.props.attempt, 1);
+    assert.equal(ev1.props.trigger, "uncached");
+    assert.equal(ev1.props.result, "no_change");
+    assert.equal(ev1.props.spatial_after, 0);
+
+    iv.__edgeRecoveryTickForTests();          // backoff tick → attempt 2 (zero)
+    await flush();
+    iv.__edgeRecoveryTickForTests();          // recheck → classify attempt 2
+    const ev2 = lastEvent("edge_recovery");
+    assert.equal(ev2.props.attempt, 2);
+    assert.equal(ev2.props.trigger, "zero");
+    assert.equal(ev2.props.result, "recovered");
+    assert.equal(ev2.props.spatial_after, 4);
+    assert.equal(callCount(), 2, "at most two setFilter() calls, ever");
+
+    iv.endRound();
+    const pano = lastEvent("pano_session");
+    assert.equal(pano.props.edge_recoveries, 2);
+    assert.equal(pano.props.anchor_spatial_edges, 4,
+      "a successful recovery backfills anchor_spatial_edges for the Phase 1 metric");
+    iv.destroy();
+  });
+
+test("boundary: stuck at null forever — at most 2 setFilter calls, then stops (no hot loop)",
+  async () => {
+    const iv = makeHostViewer();
+    const raw = iv.viewer;
+    let calls = 0;
+    raw.setFilter = () => { calls += 1; return Promise.resolve(); }; // never actually caches anything
+    iv.beginRound(1);
+    await iv.moveTo("stuck-1", "anchor");
+    iv.viewer.emit("image", { image: { id: "stuck-1", spatialEdges: { cached: false, edges: [] } } });
+
+    iv.__edgeRecoveryTickForTests(); await flush();   // attempt 1
+    iv.__edgeRecoveryTickForTests();                  // classify 1 → no_change, schedules tick 2
+    iv.__edgeRecoveryTickForTests(); await flush();   // attempt 2
+    iv.__edgeRecoveryTickForTests();                  // classify 2 → no_change, schedules tick 3
+    iv.__edgeRecoveryTickForTests();                  // tick 3 → attempts_exhausted, no 3rd call
+
+    assert.equal(calls, 2, "never more than 2 setFilter calls even though edges never recover");
+    assert.equal(events("edge_recovery").length, 2);
+    assert.equal(lastEvent("edge_recovery").props.result, "no_change");
+    iv.destroy();
+  });
+
+test("boundary: Frozen (moveEnabled false) never attempts, never touches activateComponent",
+  async () => {
+    const iv = makeHostViewer();
+    iv.setMoveAllowed(false);
+    const raw = iv.viewer;
+    raw.setFilter = () => { throw new Error("must not be called"); };
+    iv.beginRound(1);
+    await iv.moveTo("frozen-1", "anchor");
+    iv.viewer.emit("image", { image: { id: "frozen-1", spatialEdges: { cached: false, edges: [] } } });
+    const activatedBefore = (raw.activated || []).length;
+
+    iv.__edgeRecoveryTickForTests();   // grace tick → frozen → skip, silently
+    assert.equal(events("edge_recovery").length, 0);
+    assert.equal((raw.activated || []).length, activatedBefore);
+    iv.destroy();
+  });
+
+test("boundary: TV surface (moveEnabled always false) never attempts recovery", async () => {
+  const iv = viewerUi.createViewer({
+    surface: "tv", container: "tvViewer", moveAllowed: false, component: { cover: true },
+  });
+  const raw = iv.viewer;
+  raw.setFilter = () => { throw new Error("must not be called"); };
+  iv.beginRound(1);
+  await iv.moveTo("tv-1", "anchor");
+  iv.viewer.emit("image", { image: { id: "tv-1", spatialEdges: { cached: false, edges: [] } } });
+  iv.__edgeRecoveryTickForTests();
+  assert.equal(events("edge_recovery").length, 0);
+  iv.destroy();
+});
+
+test("Frozen round emits nothing; the next (un-Frozen) round recovers normally", async () => {
+  const iv = makeHostViewer();
+  iv.setMoveAllowed(false);
+  const raw = iv.viewer;
+  let calls = 0;
+  raw.setFilter = () => { calls += 1; return Promise.resolve(); };
+  iv.beginRound(1);
+  await iv.moveTo("frozen-r1", "anchor");
+  iv.viewer.emit("image", { image: { id: "frozen-r1", spatialEdges: { cached: false, edges: [] } } });
+  iv.__edgeRecoveryTickForTests();
+  assert.equal(calls, 0, "Frozen round never calls setFilter");
+  iv.endRound();
+
+  iv.setMoveAllowed(true);
+  const img2 = { id: "unfrozen-r2", spatialEdges: { cached: false, edges: [] } };
+  raw.setFilter = () => {
+    calls += 1;
+    img2.spatialEdges = { cached: true, edges: [{}] };
+    return Promise.resolve();
+  };
+  iv.beginRound(2);
+  await iv.moveTo("unfrozen-r2", "anchor");
+  iv.viewer.emit("image", { image: img2 });
+  iv.__edgeRecoveryTickForTests(); await flush();
+  iv.__edgeRecoveryTickForTests();
+  assert.equal(calls, 1);
+  assert.equal(lastEvent("edge_recovery").props.result, "recovered",
+    "the next round's own arm/state is not poisoned by the frozen round's skip");
+  iv.destroy();
+});
+
+test("boundary: recovery never blanks the pano — no resetView/showCover/moveTo calls, cover stays hidden",
+  async () => {
+    const cid = "cover-recovery";
+    const iv = makeCoverViewer(cid);
+    const raw = iv.viewer;
+    const img = { id: "cover-1", spatialEdges: { cached: false, edges: [] } };
+    twoStepSetFilter(raw, img);
+    iv.beginRound(1);
+    await iv.moveTo("cover-1", "anchor");
+    iv.viewer.emit("image", { image: img });
+    const callsBefore = (raw.calls || []).filter((c) => c !== "setFilter");
+
+    iv.__edgeRecoveryTickForTests(); await flush();
+    iv.__edgeRecoveryTickForTests();
+    iv.__edgeRecoveryTickForTests(); await flush();
+    iv.__edgeRecoveryTickForTests();
+
+    const callsAfter = (raw.calls || []).filter((c) => c !== "setFilter");
+    assert.deepEqual(callsAfter, callsBefore,
+      "no setCenter/setZoom/moveTo calls come from the recovery path");
+    assert.ok(coverOf(cid).classList.contains("hidden"), "the cover stays hidden — never re-shown");
+    assert.equal(lastEvent("edge_recovery").props.result, "recovered");
+    iv.destroy();
+  });
+
+test("boundary: an unexpected image event (user navigation) stops recovery silently", async () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  raw.setFilter = () => { throw new Error("must not be called"); };
+  iv.beginRound(1);
+  await iv.moveTo("anchor-nav", "anchor");
+  iv.viewer.emit("image", { image: { id: "anchor-nav", spatialEdges: { cached: false, edges: [] } } });
+  // The player clicked an arrow — the SDK emits an image event we never asked for.
+  iv.viewer.emit("image", { image: { id: "somewhere-else", spatialEdges: { cached: false, edges: [] } } });
+  iv.__edgeRecoveryTickForTests();
+  assert.equal(events("edge_recovery").length, 0);
+  iv.destroy();
+});
+
+test("boundary: a new attempt() before the tick cancels pending recovery — no setFilter call",
+  async () => {
+    const iv = makeHostViewer();
+    const raw = iv.viewer;
+    raw.setFilter = () => { throw new Error("must not be called"); };
+    iv.beginRound(1);
+    await iv.moveTo("anchor-mid", "anchor");
+    iv.viewer.emit("image", { image: { id: "anchor-mid", spatialEdges: { cached: false, edges: [] } } });
+    await iv.moveTo("anchor-mid-2", "nav");   // a second load supersedes recovery
+    iv.__edgeRecoveryTickForTests();          // nothing pending — a safe no-op
+    assert.equal(events("edge_recovery").length, 0);
+    iv.destroy();
+  });
+
+test("boundary: a stub viewer never exposes the recovery seam at all", () => {
+  mly.supported = false;
+  const iv = makeHostViewer();
+  assert.equal(iv.ok, false);
+  assert.equal(typeof iv.__edgeRecoveryTickForTests, "undefined");
+  iv.destroy();
+});
+
+test("boundary: setFilter rejecting classifies error, stays bounded, no unhandled rejection",
+  async () => {
+    const iv = makeHostViewer();
+    const raw = iv.viewer;
+    raw.setFilter = () => Promise.reject(new Error("setFilter failed"));
+    iv.beginRound(1);
+    await iv.moveTo("anchor-err", "anchor");
+    iv.viewer.emit("image", { image: { id: "anchor-err", spatialEdges: { cached: false, edges: [] } } });
+    iv.__edgeRecoveryTickForTests(); await flush();
+    iv.__edgeRecoveryTickForTests();
+    assert.equal(lastEvent("edge_recovery").props.result, "error");
+    iv.destroy();
+  });
+
+test("boundary: a still-blocked API keeps resolving setFilter with 0 edges — " +
+  "classified no_change, not error (correction #3, the blocked-API signature)", async () => {
+    const iv = makeHostViewer();
+    const raw = iv.viewer;
+    const img = { id: "blocked-1", spatialEdges: { cached: false, edges: [] } };
+    raw.setFilter = () => {
+      // The SDK swallows the 500 and resolves; the graph API is still down,
+      // so nothing ever actually populates real edges.
+      img.spatialEdges = { cached: true, edges: [] };
+      return Promise.resolve();
+    };
+    iv.beginRound(1);
+    await iv.moveTo("blocked-1", "anchor");
+    iv.viewer.emit("image", { image: img });
+
+    iv.__edgeRecoveryTickForTests(); await flush();   // attempt 1 (uncached)
+    iv.__edgeRecoveryTickForTests();                  // classify 1 → no_change
+    assert.equal(lastEvent("edge_recovery").props.result, "no_change");
+
+    iv.__edgeRecoveryTickForTests(); await flush();   // attempt 2 (zero) — API still 500ing
+    iv.__edgeRecoveryTickForTests();                  // classify 2 → STILL no_change, never error
+    const ev2 = lastEvent("edge_recovery");
+    assert.equal(ev2.props.attempt, 2);
+    assert.equal(ev2.props.trigger, "zero");
+    assert.equal(ev2.props.result, "no_change",
+      "setFilter resolved even though the API 500'd — never misclassified as error");
+    iv.destroy();
+  });
+
+test("endRound cancels pending recovery — a tick after endRound is a no-op", async () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  raw.setFilter = () => { throw new Error("must not be called"); };
+  iv.beginRound(1);
+  await iv.moveTo("anchor-end", "anchor");
+  iv.viewer.emit("image", { image: { id: "anchor-end", spatialEdges: { cached: false, edges: [] } } });
+  iv.endRound();
+  iv.__edgeRecoveryTickForTests();
+  assert.equal(events("edge_recovery").length, 0);
+  iv.destroy();
+});
+
+test("destroy cancels pending recovery — no setFilter after destroy", async () => {
+  const iv = makeHostViewer();
+  const raw = iv.viewer;
+  raw.setFilter = () => { throw new Error("must not be called"); };
+  iv.beginRound(1);
+  await iv.moveTo("anchor-destroy", "anchor");
+  iv.viewer.emit("image", { image: { id: "anchor-destroy", spatialEdges: { cached: false, edges: [] } } });
+  iv.destroy();
+  iv.__edgeRecoveryTickForTests();
+  assert.equal(events("edge_recovery").length, 0);
+});
+
+test("mutation guard: attempt 1 alone never recovers — proves EDGE_RECOVERY_MAX_ATTEMPTS must be 2",
+  async () => {
+    const iv = makeHostViewer();
+    const raw = iv.viewer;
+    const img = { id: "two-step-1", spatialEdges: { cached: false, edges: [] } };
+    const callCount = twoStepSetFilter(raw, img);
+    iv.beginRound(1);
+    await iv.moveTo("two-step-1", "anchor");
+    iv.viewer.emit("image", { image: img });
+
+    iv.__edgeRecoveryTickForTests(); await flush();   // attempt 1
+    iv.__edgeRecoveryTickForTests();                  // classify 1
+    assert.equal(callCount(), 1);
+    assert.equal(lastEvent("edge_recovery").props.result, "no_change",
+      "stopping after attempt 1 (as a cap of 1 would force) leaves the arrows unrecovered — " +
+      "this is why EDGE_RECOVERY_MAX_ATTEMPTS must be 2, not 1");
+
+    // The real cap (2) lets the second, recovering attempt fire:
+    iv.__edgeRecoveryTickForTests(); await flush();   // attempt 2
+    iv.__edgeRecoveryTickForTests();
+    assert.equal(callCount(), 2);
+    assert.equal(lastEvent("edge_recovery").props.result, "recovered");
+    iv.destroy();
+  });

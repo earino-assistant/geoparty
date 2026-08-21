@@ -870,6 +870,46 @@ test("sanitizeEvent: pano_session edge counts are ints; a known 0 survives (#2)"
   assert.ok(!("anchor_spatial_edges" in junk.props));
 });
 
+test("sanitizeEvent: pano_session.edge_recoveries survives as an int (issue #2 Phase 2)", () => {
+  const out = sanitizeEvent("pano_session", {
+    surface: "host", round_number: 2, edge_recoveries: 2,
+  });
+  assert.equal(out.props.edge_recoveries, 2);
+  const junk = sanitizeEvent("pano_session", {
+    surface: "host", round_number: 2, edge_recoveries: "two",
+  });
+  assert.ok(!("edge_recoveries" in junk.props));
+});
+
+test("sanitizeEvent: edge_recovery round-trips its full aggregate shape (issue #2 Phase 2)", () => {
+  const out = sanitizeEvent("edge_recovery", {
+    surface: "host", round_number: 4, attempt: 2, trigger: "zero",
+    result: "recovered", spatial_after: 4, sequence_after: 2,
+    duration_ms: 2510, net_type: "4g", online: true,
+    team_name: "The Wanderers", image_id: "1263588815098567",
+  });
+  assert.deepEqual(out.props, {
+    surface: "host", round_number: 4, attempt: 2, trigger: "zero",
+    result: "recovered", spatial_after: 4, sequence_after: 2,
+    duration_ms: 2510, net_type: "4g", online: true,
+  });
+});
+
+test("sanitizeEvent: edge_recovery drops unknown/malformed props, keeps a real 0", () => {
+  // spatial_after: 0 is a real, reportable outcome (attempt 1's cached-zero,
+  // or a still-stuck recovery) — must not be stripped like an unknown value.
+  const zero = sanitizeEvent("edge_recovery", {
+    surface: "host", round_number: 1, attempt: 1, trigger: "uncached",
+    result: "no_change", spatial_after: 0,
+  });
+  assert.equal(zero.props.spatial_after, 0);
+  const junk = sanitizeEvent("edge_recovery", {
+    surface: "host", round_number: 1, attempt: 1, trigger: "uncached",
+    result: "no_change", spatial_after: "none",
+  });
+  assert.ok(!("spatial_after" in junk.props));
+});
+
 test("sanitizeEvent: imagery_report carries the ref code and the consent path", () => {
   const out = sanitizeEvent("imagery_report", {
     surface: "player", ref_code: "GP-4K7QX2", error_class: "image_dead",

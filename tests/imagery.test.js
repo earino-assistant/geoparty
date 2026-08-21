@@ -32,6 +32,14 @@ import {
   boundEdgeCount,
   edgeStatusCount,
   extractEdgeCounts,
+  EDGE_RECOVERY_MAX_ATTEMPTS,
+  EDGE_RECOVERY_GRACE_MS,
+  EDGE_RECOVERY_RECHECK_MS,
+  EDGE_RECOVERY_BACKOFF_MS,
+  createEdgeRecovery,
+  decideEdgeRecovery,
+  edgeRecoveryStopped,
+  classifyEdgeRecoveryOutcome,
   classifySessionHealth,
   HEALTH_HEALTHY,
   HEALTH_DEGRADED,
@@ -333,6 +341,23 @@ test("pano fold: every counter and the navigable latch", () => {
   assert.equal(s.nav_available, false, "latch keeps the LAST state seen");
 });
 
+test("pano fold: edge_recovery_attempt counts setFilter() recovery attempts (issue #2 Phase 2)", () => {
+  let s = session();
+  assert.equal(s.edge_recoveries, 0);
+  s = foldPanoEvent(s, { type: "edge_recovery_attempt", at: 1100 });
+  assert.equal(s.edge_recoveries, 1);
+  s = foldPanoEvent(s, { type: "edge_recovery_attempt", at: 1200 });
+  assert.equal(s.edge_recoveries, 2);
+  assert.equal(s.first_move_ms, null, "a recovery attempt is not a user interaction");
+});
+
+test("panoSessionProps: edge_recoveries is reported only when > 0", () => {
+  let s = session();
+  assert.ok(!("edge_recoveries" in panoSessionProps(s)), "absent, not a false 0, on the healthy majority");
+  s = foldPanoEvent(s, { type: "edge_recovery_attempt", at: 1100 });
+  assert.equal(panoSessionProps(s).edge_recoveries, 1);
+});
+
 test("pano fold: unknown/absent events are inert, and it never mutates", () => {
   const s = session();
   const before = JSON.stringify(s);
@@ -439,6 +464,169 @@ test("extractEdgeCounts: never throws on hostile input or a throwing getter", ()
     get() { throw new Error("Image not initialized"); },
   });
   assert.deepEqual(extractEdgeCounts(hostile), { spatial: null, sequence: null });
+});
+
+/* ================================================================
+ * Issue #2 Phase 2 — bounded spatial-edge cache recovery (pure predicate)
+ * ================================================================ */
+
+function baseRecoveryCtx(overrides) {
+  return {
+    viewerOk: true, canSetFilter: true, moveEnabled: true,
+    inFlight: false, userNavigated: false, spatial: null,
+    ...overrides,
+  };
+}
+
+test("createEdgeRecovery: starts at zero attempts, not done", () => {
+  assert.deepEqual(createEdgeRecovery(), { attempts: 0, done: false });
+});
+
+test("edgeRecoveryStopped: marks done, preserves attempts, never mutates the input", () => {
+  const input = { attempts: 1, done: false };
+  const stopped = edgeRecoveryStopped(input);
+  assert.deepEqual(stopped, { attempts: 1, done: true });
+  assert.deepEqual(input, { attempts: 1, done: false }, "the input is untouched");
+  assert.deepEqual(edgeRecoveryStopped(null), { attempts: 0, done: true });
+});
+
+test("decideEdgeRecovery: done is terminal — beats every other condition", () => {
+  const state = { attempts: 0, done: true };
+  assert.deepEqual(
+    decideEdgeRecovery(state, baseRecoveryCtx({ spatial: null })),
+    { act: "stop", reason: "done" },
+  );
+});
+
+test("decideEdgeRecovery: viewer_stub — not ok, or no setFilter on the SDK build", () => {
+  const state = createEdgeRecovery();
+  assert.equal(
+    decideEdgeRecovery(state, baseRecoveryCtx({ viewerOk: false })).reason,
+    "viewer_stub",
+  );
+  assert.equal(
+    decideEdgeRecovery(state, baseRecoveryCtx({ canSetFilter: false })).reason,
+    "viewer_stub",
+  );
+});
+
+test("decideEdgeRecovery: user_navigated stops — never fight navigation", () => {
+  const state = createEdgeRecovery();
+  assert.deepEqual(
+    decideEdgeRecovery(state, baseRecoveryCtx({ userNavigated: true })),
+    { act: "stop", reason: "user_navigated" },
+  );
+});
+
+test("decideEdgeRecovery: edges_present stops — arrows exist, nothing to do", () => {
+  const state = createEdgeRecovery();
+  assert.equal(decideEdgeRecovery(state, baseRecoveryCtx({ spatial: 1 })).reason, "edges_present");
+  assert.equal(decideEdgeRecovery(state, baseRecoveryCtx({ spatial: 4 })).reason, "edges_present");
+});
+
+test("decideEdgeRecovery: attempts_exhausted stops at the hard bound", () => {
+  const state = { attempts: EDGE_RECOVERY_MAX_ATTEMPTS, done: false };
+  assert.deepEqual(
+    decideEdgeRecovery(state, baseRecoveryCtx({ spatial: 0 })),
+    { act: "stop", reason: "attempts_exhausted" },
+  );
+});
+
+test("decideEdgeRecovery: frozen is a SKIP, not a stop — a next round is not poisoned", () => {
+  const state = createEdgeRecovery();
+  const decision = decideEdgeRecovery(state, baseRecoveryCtx({ moveEnabled: false }));
+  assert.deepEqual(decision, { act: "skip", reason: "frozen" });
+  assert.deepEqual(state, { attempts: 0, done: false }, "a skip never mutates the passed-in state");
+});
+
+test("decideEdgeRecovery: in_flight is a skip — never during a load", () => {
+  const state = createEdgeRecovery();
+  assert.deepEqual(
+    decideEdgeRecovery(state, baseRecoveryCtx({ inFlight: true })),
+    { act: "skip", reason: "in_flight" },
+  );
+});
+
+test("decideEdgeRecovery: unknown (null) triggers an attempt with trigger 'uncached'", () => {
+  const state = createEdgeRecovery();
+  assert.deepEqual(
+    decideEdgeRecovery(state, baseRecoveryCtx({ spatial: null })),
+    { act: "attempt", reason: "uncached", trigger: "uncached" },
+  );
+});
+
+test("decideEdgeRecovery: a cached zero triggers an attempt with trigger 'zero' — unknown != zero", () => {
+  const state = createEdgeRecovery();
+  assert.deepEqual(
+    decideEdgeRecovery(state, baseRecoveryCtx({ spatial: 0 })),
+    { act: "attempt", reason: "zero", trigger: "zero" },
+  );
+});
+
+test("decideEdgeRecovery: precedence — edges_present beats frozen", () => {
+  const state = createEdgeRecovery();
+  const decision = decideEdgeRecovery(state, baseRecoveryCtx({ spatial: 2, moveEnabled: false }));
+  assert.equal(decision.reason, "edges_present");
+});
+
+test("decideEdgeRecovery: precedence — done beats attempts remaining and everything else", () => {
+  const state = { attempts: 0, done: true };
+  const decision = decideEdgeRecovery(state, baseRecoveryCtx({ spatial: null, userNavigated: true }));
+  assert.equal(decision.reason, "done");
+});
+
+test("decideEdgeRecovery: precedence — attempts_exhausted beats frozen/in_flight", () => {
+  const state = { attempts: EDGE_RECOVERY_MAX_ATTEMPTS, done: false };
+  assert.equal(
+    decideEdgeRecovery(state, baseRecoveryCtx({ spatial: 0, moveEnabled: false, inFlight: true })).reason,
+    "attempts_exhausted",
+  );
+});
+
+test("mutation guard: a state with one attempt already made must still be allowed a second — " +
+  "a cap of 1 would stop here and the real re-fetch would never fire", () => {
+    // Correction #1 (field-verified against MapillaryJS 4.1.2): attempt 1
+    // (trigger "uncached") only ever converts a stuck uncached status to
+    // cached-ZERO, WITHOUT issuing HTTP. Only attempt 2 (trigger "zero")
+    // re-issues the real fetch that restores arrows. If the cap were 1, this
+    // exact state (one attempt already spent, spatial now a cached 0) would
+    // read attempts_exhausted instead — recovery would silently give up
+    // right where the real fix is one attempt away.
+    const state = { attempts: 1, done: false };
+    const decision = decideEdgeRecovery(state, baseRecoveryCtx({ spatial: 0 }));
+    assert.equal(decision.act, "attempt", "the real cap (2) allows the recovering second attempt");
+    assert.equal(decision.trigger, "zero");
+    assert.equal(EDGE_RECOVERY_MAX_ATTEMPTS, 2, "the constant this test depends on");
+  });
+
+test("classifyEdgeRecoveryOutcome: truth table", () => {
+  assert.equal(classifyEdgeRecoveryOutcome(4, false), "recovered");
+  assert.equal(classifyEdgeRecoveryOutcome(1, false), "recovered");
+  assert.equal(classifyEdgeRecoveryOutcome(0, false), "no_change");
+  assert.equal(classifyEdgeRecoveryOutcome(null, false), "no_change");
+  assert.equal(classifyEdgeRecoveryOutcome(0, true), "error");
+  assert.equal(classifyEdgeRecoveryOutcome(null, true), "error");
+  assert.equal(
+    classifyEdgeRecoveryOutcome(4, true), "error",
+    "setFilterFailed wins even over a stray count that looks recovered (stub/dispose race)",
+  );
+});
+
+test("classifyEdgeRecoveryOutcome: a blocked graph API is no_change, never error — " +
+  "setFilter()'s promise resolves even while the API 500s (correction #3)", () => {
+    assert.equal(classifyEdgeRecoveryOutcome(0, false), "no_change");
+    assert.equal(classifyEdgeRecoveryOutcome(null, false), "no_change");
+  });
+
+test("edge recovery constants: the bounds ARE the design — guards accidental hot-loop edits", () => {
+  assert.ok(Number.isInteger(EDGE_RECOVERY_MAX_ATTEMPTS));
+  assert.ok(
+    EDGE_RECOVERY_MAX_ATTEMPTS >= 2 && EDGE_RECOVERY_MAX_ATTEMPTS <= 3,
+    "the two-step recovery (uncached->cached-zero, then zero->real fetch) needs at least 2 attempts",
+  );
+  for (const ms of [EDGE_RECOVERY_GRACE_MS, EDGE_RECOVERY_RECHECK_MS, EDGE_RECOVERY_BACKOFF_MS]) {
+    assert.ok(Number.isFinite(ms) && ms >= 1000, "every delay is finite and at least 1s");
+  }
 });
 
 test("pano fold: the edges event latches the ANCHOR's counts once per round", () => {

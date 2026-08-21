@@ -436,9 +436,32 @@ export const EVENT_SCHEMA = Object.freeze({
     // coordinate, no edge payload. Absent when never observed.
     anchor_spatial_edges: "int",
     anchor_sequence_edges: "int",
+    // Issue #2 Phase 2: count of setFilter() recovery attempts this round
+    // (0..EDGE_RECOVERY_MAX_ATTEMPTS). Absent when recovery never ran (the
+    // healthy majority) — pairs with the edge_recovery event below.
+    edge_recoveries: "int",
     reanchors: "int",        // re-anchor writes during active play
     first_move_ms: "int",    // round start → first user interaction
     pointer_downs: "int",    // with looks==0 → gesture_blocked signal
+  },
+
+  // Issue #2 Phase 2 (docs/issue-2-phase2-fix.md): one per bounded
+  // spatial-edge recovery attempt, capped at EDGE_RECOVERY_MAX_ATTEMPTS (2)
+  // per round by the pure state machine in imagery.js. trigger/result are
+  // the decideEdgeRecovery / classifyEdgeRecoveryOutcome enums; spatial_after
+  // / sequence_after are bounded post-attempt counts (absent when still
+  // unknown). Pure aggregates — no id, no coordinate, no edge payload.
+  edge_recovery: {
+    surface: "string",       // host|player|daily (moveEnabled surfaces only)
+    round_number: "int",
+    attempt: "int",          // 1-based, ≤ EDGE_RECOVERY_MAX_ATTEMPTS
+    trigger: "string",       // "uncached" | "zero"
+    result: "string",        // "recovered" | "no_change" | "error"
+    spatial_after: "int",
+    sequence_after: "int",
+    duration_ms: "int",      // setFilter call → outcome classified
+    net_type: "string",
+    online: "bool",
   },
 
   // One per user-initiated report (§10). consent is "analytics" (the user
