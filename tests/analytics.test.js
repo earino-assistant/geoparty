@@ -1310,15 +1310,6 @@ test("maskNetworkRequest: OSM tiles are dropped — a tile path is a coordinate"
   assert.ok(!NETWORK_HOST_ALLOWLIST.includes("tile.openstreetmap.org"));
 });
 
-test("maskNetworkRequest: CARTO basemap tiles (P0.1) are dropped too — same reasoning", () => {
-  assert.equal(
-    maskNetworkRequest({ name: "https://a.basemaps.cartocdn.com/dark_all/16/32791/21801.png" }, "x"),
-    null,
-  );
-  assert.ok(!NETWORK_HOST_ALLOWLIST.includes("basemaps.cartocdn.com"));
-  assert.ok(!NETWORK_HOST_ALLOWLIST.includes("a.basemaps.cartocdn.com"));
-});
-
 test("maskNetworkRequest: non-allowlisted hosts are dropped entirely", () => {
   assert.equal(maskNetworkRequest({ name: "https://tracker.example/beacon" }, "x"), null);
   assert.equal(maskNetworkRequest({ name: "https://evil.graph.mapillary.com.attacker.net/x" }, "x"), null);

@@ -136,17 +136,14 @@ The reveal maps changed size (36 vh → 52 vh) and gained a `touch-action`
 rule in the de-clutter pass, neither of which affects `blockSelector`: the
 selector matches `.leaflet-container`, which every one of them still is.
 
-**Why blocked and not masked:** Leaflet renders basemap tiles as
-`<img src="…/{z}/{x}/{y}{r}.png">`. A tile path *is* a coordinate. Masking
-the text would leave the tile URLs — and therefore the round's answer and
-the player's aim — sitting in the recording. Blocking is the only correct
-treatment, and it matches `captureCanvas: false` for the panorama. The P0.1
-dark-basemap swap (CARTO's `dark_all` tiles, `js/imagery.js#basemapTileLayerConfig`,
-replacing `tile.openstreetmap.org`) changed the tile host, not this reasoning.
+**Why blocked and not masked:** Leaflet renders OSM tiles as
+`<img src="…/{z}/{x}/{y}.png">`. A tile path *is* a coordinate. Masking the
+text would leave the tile URLs — and therefore the round's answer and the
+player's aim — sitting in the recording. Blocking is the only correct
+treatment, and it matches `captureCanvas: false` for the panorama.
 
 Map tile hosts are also **absent from `NETWORK_HOST_ALLOWLIST`**, so tile
-requests — CARTO's `basemaps.cartocdn.com` today, `tile.openstreetmap.org`
-before it — are dropped from the replay network waterfall entirely
+requests are dropped from the replay network waterfall entirely
 (`tests/analytics.test.js` asserts this).
 
 ## 4. Console output
@@ -223,7 +220,7 @@ recording in PostHog and confirm:
 - [ ] The panorama area is a blank/black box, not street imagery.
 - [ ] The guess map and reveal map are placeholder boxes, not tiles.
 - [ ] The network tab shows `graph.mapillary.com/<id>`-shaped entries with
-      **no** `?access_token=…`, and **no** `basemaps.cartocdn.com` rows.
+      **no** `?access_token=…`, and **no** `tile.openstreetmap.org` rows.
 - [ ] No request/response headers or bodies are present.
 - [ ] The console shows `Pool entry <8 chars> failed…`, not a 16-digit id.
 

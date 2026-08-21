@@ -5,7 +5,7 @@
 // heartbeat, as always).
 
 import { createViewer } from "./viewer-ui.js";
-import { scrubErrorMessage, basemapTileLayerConfig } from "./imagery.js";
+import { scrubErrorMessage } from "./imagery.js";
 import { formatCountdown, formatDistance, resultRowText, teamIds, standings, sanitizePose } from "./game.js";
 import { submittedCount, submitRank, revealOrder, roundClosest, revealAceKm } from "./h2h.js";
 import { twistHudTag, twistHidesRivalPins, twistCardForRound } from "./twist.js";
@@ -330,8 +330,10 @@ function ensurePanelMap(p) {
     doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false,
     attributionControl: false,
   }).setView([25, 10], 2);
-  const bm = basemapTileLayerConfig();
-  L.tileLayer(bm.url, bm.options).addTo(p.map);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(p.map);
 }
 
 // Same animated drop-pin the couch screen uses, in the team's color.
@@ -597,8 +599,10 @@ function runRevealAnimation(state, round) {
     scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
     keyboard: false, touchZoom: false,
   });
-  const bm = basemapTileLayerConfig();
-  L.tileLayer(bm.url, bm.options).addTo(revealMap);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(revealMap);
 
   const truth = L.latLng(round.truth.lat, round.truth.lng);
   const order = revealOrder(round); // farthest first, forfeits leading

@@ -269,10 +269,13 @@ function retractBanner() {
 }
 
 // The revoke/change control: a quiet "Privacy settings" text link once a
-// choice has been made. Reopens the banner. Lands in the page's existing
-// footer (landing) or, on pages with no footer, a small static footer-style
-// bar at the end of the body — never `position: fixed`, so it can no longer
-// float over the panorama or the guess map (P0.3).
+// choice has been made. Reopens the banner. It only exists where there is a
+// genuine page footer to fold it into (the landing page's `.ld-footer`).
+// Pages with no real footer of their own (host/player/daily/screen) get no
+// gear at all — no standalone floating/bar footer, per the owner's call
+// that the control was showing up far too prominently mid-game. Revoking
+// consent from those pages is no longer one tap away; the banner itself
+// still appears wherever consent is actually being asked.
 function ensureGear() {
   if (gear) return gear;
   gear = document.createElement("button");
@@ -291,11 +294,6 @@ function ensureGear() {
     sep.textContent = "·";
     footer.appendChild(sep);
     footer.appendChild(gear);
-  } else {
-    const bar = document.createElement("footer");
-    bar.className = "consent-settings-bar";
-    bar.appendChild(gear);
-    document.body.appendChild(bar);
   }
   return gear;
 }

@@ -45,7 +45,7 @@ import { medalForDistance } from "./records.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer } from "./viewer-ui.js";
-import { scrubErrorMessage, basemapTileLayerConfig } from "./imagery.js";
+import { scrubErrorMessage } from "./imagery.js";
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = [
@@ -461,8 +461,10 @@ function ensureLiveMap() {
     keyboard: false,
     touchZoom: false,
   }).setView([25, 10], 2);
-  const bm = basemapTileLayerConfig();
-  L.tileLayer(bm.url, bm.options).addTo(liveMap);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(liveMap);
   return true;
 }
 
@@ -695,8 +697,10 @@ function renderReveal(state) {
     keyboard: false,
     touchZoom: false,
   });
-  const bm = basemapTileLayerConfig();
-  L.tileLayer(bm.url, bm.options).addTo(revealMap);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(revealMap);
 
   const truth = L.latLng(round.truth.lat, round.truth.lng);
   const guess = L.latLng(round.guess.lat, round.guess.lng);
@@ -809,8 +813,10 @@ function renderShowdownReveal(state, round) {
     keyboard: false,
     touchZoom: false,
   });
-  const bm = basemapTileLayerConfig();
-  L.tileLayer(bm.url, bm.options).addTo(revealMap);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(revealMap);
 
   const truth = L.latLng(round.truth.lat, round.truth.lng);
   const guessPts = order.map(

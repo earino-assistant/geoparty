@@ -97,9 +97,8 @@ export const POSTHOG_INIT_OPTIONS = {
 
 // Hosts whose request TIMING may appear in a replay waterfall. Anything
 // else is dropped entirely rather than recorded with a stripped name.
-// Deliberately NOT here: basemaps.cartocdn.com (P0.1's dark basemap host —
-// tile.openstreetmap.org before it, same reasoning). A tile URL is
-// `/{z}/{x}/{y}{r}.png` — literally a coordinate — so map tile requests are
+// Deliberately NOT here: tile.openstreetmap.org. A tile URL is
+// `/{z}/{x}/{y}.png` — literally a coordinate — so map tile requests are
 // dropped from the waterfall entirely rather than recorded with a stripped
 // query string.
 export const NETWORK_HOST_ALLOWLIST = Object.freeze([

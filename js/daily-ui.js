@@ -66,7 +66,7 @@ import {
   initSound, playSound, buzz, stampFlash, prefersReducedMotion, spawnConfetti,
 } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
-import { scrubErrorMessage, basemapTileLayerConfig } from "./imagery.js";
+import { scrubErrorMessage } from "./imagery.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
@@ -373,8 +373,10 @@ function ensureGuessMap() {
   if (guessMap) return;
   guessMap = L.map("dailyGuessMap", { worldCopyJump: true, zoomControl: false })
     .setView([25, 10], 2);
-  const bm = basemapTileLayerConfig();
-  L.tileLayer(bm.url, bm.options).addTo(guessMap);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(guessMap);
   guessMap.on("click", (e) => {
     if (guessMarker) {
       guessMarker.setLatLng(e.latlng);
@@ -553,8 +555,10 @@ function renderRevealMap(guess, ghostRes) {
     zoomControl: false, dragging: false, scrollWheelZoom: false,
     doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false,
   });
-  const bm = basemapTileLayerConfig();
-  L.tileLayer(bm.url, bm.options).addTo(revealMap);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(revealMap);
   const truth = L.latLng(current.lat, current.lng);
   const bounds = [truth];
   if (guess) {

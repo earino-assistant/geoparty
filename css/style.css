@@ -1064,13 +1064,7 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
 .count-up { transition: none; }
 
 /* Leaflet dark-friendly tweaks */
-.leaflet-container { background: var(--bg); }
-
-/* P0.1: attribution control dimmed to match the dark basemap (§5 P2). */
-.leaflet-control-attribution {
-  background: rgba(14, 14, 18, 0.6);
-  color: var(--muted);
-}
+.leaflet-container { background: #0b0b0f; }
 
 /* Mapillary viewer fills its container */
 .mapillary-viewer, .viewer-full > div { width: 100%; height: 100%; }
@@ -1375,12 +1369,10 @@ body:has(.action-bar) .consent-banner {
   padding: 14px 16px;
 }
 
-/* Quiet control to reopen the banner once a choice has been made. Demoted
-   from a floating circular cookie button to a plain footer-style text link
-   (P0.3) — revoking consent stays exactly one tap away, it just no longer
-   floats over the panorama or the guess map. It lives in the page's real
-   footer (landing) or a static `.consent-settings-bar` at the end of the
-   body on pages with no footer of their own — never `position: fixed`. */
+/* Quiet control to reopen the banner once a choice has been made. Only
+   exists in the landing page's real `.ld-footer` — host/player/daily/screen
+   get no gear at all, no standalone bar. The owner's call: the control was
+   showing up too prominently mid-game. */
 .consent-settings {
   position: static;
   display: inline;
@@ -1397,38 +1389,6 @@ body:has(.action-bar) .consent-banner {
 .consent-settings:hover, .consent-settings:focus-visible {
   color: var(--fg);
   text-decoration: underline;
-}
-
-/* Standalone footer bar for pages (host/player/screen/daily/howto) that
-   have no `.ld-footer` of their own to fold this link into. Static/in-flow
-   by default — correct for howto.html, a normal scrolling document where
-   "after the content" already means "at the bottom". */
-.consent-settings-bar {
-  text-align: center;
-  padding: 16px 12px calc(16px + env(safe-area-inset-bottom));
-}
-
-/* host/player/daily/screen wrap their whole UI in `.phase-screen` sections
-   (`position: fixed; inset: 0` — css/style.css:89). Every visible screen is
-   pulled out of body's normal flow, so body itself collapses to zero
-   height and the static in-flow bar above renders at the very top of the
-   page instead of the bottom (P0.4). Pin it to the viewport bottom instead
-   so it reads as a real bottom footer on these app-shell pages, and clear
-   a bottom action bar's CTA the same way `.consent-banner` already does
-   (every one of these pages has an `.action-bar` somewhere in the DOM,
-   even on the current phase-screen it's `.hidden` rather than removed, so
-   the offset is always safe to reserve). */
-body:has(.phase-screen) .consent-settings-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 400;
-  background: var(--bg);
-  border-top: 1px solid var(--panel-2);
-}
-body:has(.phase-screen):has(.action-bar) .consent-settings-bar {
-  bottom: calc(var(--action-bar-h) + env(safe-area-inset-bottom));
 }
 
 /* ---------- Daily Challenge (S2) ---------- */
@@ -1734,44 +1694,41 @@ body:has(.phase-screen):has(.action-bar) .consent-settings-bar {
   100% { opacity: 0; transform: translate(-50%, -50%) rotate(-5deg) scale(1); }
 }
 
-/* The 🔊/🔇 toggle: quiet corner control, mirroring the consent 🍪 on the
-   opposite side. Always present in-game — sound must be one tap away. */
+/* The 🔊/🔇 toggle: a quiet corner glyph, visible only in-game. Mute is a
+   legitimate mid-round need (one tap away while playing), but it must not
+   be persistent chrome on every screen — hidden by default, revealed only
+   while body[data-play="1"] (chrome-ui.js/chrome.js, below). No button
+   background/border treatment; it reads as a mark, not a control. */
 .sound-toggle {
   position: fixed;
   right: 10px;
   bottom: calc(10px + env(safe-area-inset-bottom));
   z-index: 2900;
-  width: 34px;
-  height: 34px;
+  display: none;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border-radius: 50%;
-  background: rgba(28, 28, 34, 0.7);
-  font-size: 16px;
+  background: none;
+  font-size: 15px;
   line-height: 1;
-  opacity: 0.5;
+  opacity: 0.4;
 }
-.sound-toggle:hover, .sound-toggle:focus-visible { opacity: 1; }
+.sound-toggle:hover, .sound-toggle:focus-visible { opacity: 0.85; }
 /* Keep it clear of the bottom action bar on the phone pages. */
 body:has(.action-bar) .sound-toggle {
   bottom: calc(84px + env(safe-area-inset-bottom));
 }
 
-/* ---------- §4.1 utility corners: calm states only ----------
+/* ---------- §4.1 utility corners: play state only ----------
 
-   The privacy settings link and the 🔊 control disappear during a round.
    chrome-ui.js stamps body[data-play="1"] while a play screen is up
-   (chrome.js owns the predicate, under test); here they simply leave.
-   Nothing about the consent GATE changes — the control still reopens the
-   banner in every calm state, and revoking is never more than one tap away
-   from a moment that matters.
-
-   Review §4.3 also wants a 44×44 minimum target without visually enlarging
-   the sound toggle: a transparent pseudo-element does exactly that
-   (34 + 2×5 = 44), so the touch box grows and the ink does not. The privacy
-   link is plain text and needs no such trick. */
-body[data-play="1"] .consent-settings,
-body[data-play="1"] .consent-settings-bar,
-body[data-play="1"] .sound-toggle { display: none !important; }
+   (chrome.js owns the predicate, under test). The 🔊 control only shows up
+   there; the privacy link no longer exists on these app-shell pages at all
+   (js/consent.js#ensureGear — landing-only footer link). Nothing about the
+   consent GATE changes — the banner itself still reopens wherever consent
+   is actually being asked. */
+body[data-play="1"] .sound-toggle { display: block; }
 
 /* Overnight bundle #6 safety net: the undecided consent banner is retracted by
    consent.js when play begins, but pin the rule in CSS too — no GDPR dialog may
@@ -1786,17 +1743,15 @@ body[data-screen="p-home"] .sound-toggle {
   bottom: calc(10px + env(safe-area-inset-bottom));
 }
 
-.sound-toggle { position: fixed; }
+/* 44×44 minimum touch target without visually enlarging the glyph
+   (30 + 2×7 = 44): a transparent pseudo-element grows the touch box, the
+   ink stays a quiet 30px mark. */
 .sound-toggle::before {
   content: "";
   position: absolute;
-  inset: -5px;
+  inset: -7px;
   border-radius: 50%;
 }
-
-/* The sound toggle sits at 0.5 on the TV, where it is 4 m away and purely
-   decorative; on a phone it is a control and needs to be legible. */
-.sound-toggle { opacity: 0.75; }
 
 /* Reduced motion: collapse every CSS animation/transition to a single
    instant frame (states still land — nothing depends on motion), and drop
