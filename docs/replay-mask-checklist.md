@@ -120,10 +120,9 @@ one.
   deliberately: streaks, personal bests, and duel margins are non-identifying
   scores/counts. No name or user-entered text ever reaches these nodes
 - `#dDoneRecap` — the "Your five places" recap: masked wholesale, because the
-  per-round carousel captions carry city names (`recap.recapCaption`). The two
-  maps inside it (the overview mini-map `#dRecapOverview` and each carousel
-  card map, both built in `daily-ui.js#renderRecap`) are `.leaflet-container`,
-  already blocked by `blockSelector` — see §3
+  per-round carousel captions carry city names (`recap.recapCaption`). The
+  carousel card maps inside it (built in `daily-ui.js#renderRecap`) are
+  `.leaflet-container`, already blocked by `blockSelector` — see §3
 - `#dChallengeEyebrow` — unmasked: it shows the public Daily number only. The
   ghost payload is stripped from the URL (`history.replaceState`) before any
   capture and never renders (G5)
@@ -155,11 +154,10 @@ Every Leaflet map (`.leaflet-container`): `#guessMap`, `#hostRevealMap`,
 `#playerGuessMap`, `#pRevealMap`, `#dailyGuessMap`, the daily reveal map,
 `#guessLiveMap`, `#revealMap`, `#h2hRevealMap`, and the h2h TV panel maps.
 
-Two more daily-done map surfaces come from the "Your five places" recap
-(`daily-ui.js#renderRecap`): the numbered **overview** mini-map
-(`#dRecapOverview`) and each **carousel card** map (built in JS, no id). Both
-are rendered by `js/revealmap-ui.js` and are `.leaflet-container`, so they fall
-under `blockSelector` with no per-id entry — a tile there is still a
+More daily-done map surfaces come from the "Your five places" recap
+(`daily-ui.js#renderRecap`): each **carousel card** map (built in JS, no id).
+They are rendered by `js/revealmap-ui.js` and are `.leaflet-container`, so they
+fall under `blockSelector` with no per-id entry — a tile there is still a
 coordinate. The recap's city-name captions sit *outside* the maps and are
 covered by the wholesale `#dDoneRecap` mask (§2).
 

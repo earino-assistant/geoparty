@@ -89,14 +89,6 @@ export function recapCardScene(card, reducedMotion) {
   });
 }
 
-// Numbered pins for the overview mini-map: one per card, tagged with its round
-// number (1..5). `n` is our own integer — no user text, nothing to escape.
-export function overviewPins(cards) {
-  return (Array.isArray(cards) ? cards : []).map((c) => ({
-    n: c.round, lat: c.truth.lat, lng: c.truth.lng,
-  }));
-}
-
 // The caption under a card: round number, the city name (masked wholesale by
 // the recap block, so a real place name is safe here), and — when the round
 // was actually guessed — the distance and points. A forfeit reads "no guess".

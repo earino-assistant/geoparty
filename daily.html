@@ -132,14 +132,13 @@
       </div>
       <!-- G5: the duel verdict block (headline, margin, paired grid). -->
       <div id="dDoneDuel" class="done-duel hidden"></div>
-      <!-- "Your five places" recap: a numbered overview mini-map + a swipeable
-           per-round carousel (your pin, the truth, the ghost cue on a duel,
-           and the city name). Masked wholesale — the captions carry city
-           names — and the maps inside fall under blockSelector. The overview
-           and each card map are built in js/daily-ui.js (renderRecap). -->
+      <!-- "Your five places" recap: a swipeable per-round carousel (your pin,
+           the truth, the ghost cue on a duel, and the city name). Masked
+           wholesale — the captions carry city names — and the card maps inside
+           fall under blockSelector. Each card map is built in js/daily-ui.js
+           (renderRecap). -->
       <div id="dDoneRecap" class="recap hidden" data-ph-mask>
         <div class="recap-title">Your five places</div>
-        <div id="dRecapOverview" class="recap-overview"></div>
         <div id="dRecapCarousel" class="recap-carousel"></div>
       </div>
       <!-- G6: hard-mode entry after a normal run. -->

@@ -71,10 +71,10 @@ import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
 import { toastWithReport, toastPlain } from "./report-ui.js";
-import { dailyRevealScene, recapOverviewScene } from "./revealmap.js";
+import { dailyRevealScene } from "./revealmap.js";
 import { renderRevealScene } from "./revealmap-ui.js";
 import {
-  recapCards, recapCardScene, overviewPins, recapCaption,
+  recapCards, recapCardScene, recapCaption,
 } from "./recap.js";
 
 /* ================================================================
@@ -870,16 +870,16 @@ function renderDuelDone(verdict, result) {
 }
 
 /* ================================================================
- * "Your five places" recap (done screen). A numbered overview mini-map + a
- * swipeable per-round carousel, each card the same reveal scene as the live
- * round (guess pin, truth, the 👻 cue on a duel) plus the city name. The
- * truths are recomputed from the seed (fresh play) or taken from playedPlaces
- * — never persisted into the saved run. All decision logic is pure in
- * js/recap.js; this is the thin Leaflet/observer glue.
+ * "Your five places" recap (done screen). A swipeable per-round carousel,
+ * each card the same reveal scene as the live round (guess pin, truth, the
+ * 👻 cue on a duel) plus the city name. The truths are recomputed from the
+ * seed (fresh play) or taken from playedPlaces — never persisted into the
+ * saved run. All decision logic is pure in js/recap.js; this is the thin
+ * Leaflet/observer glue.
  * ================================================================ */
 
 // One daily_recap_engaged per render, latched on the first real engagement
-// (a scroll = "swipe", or an overview pin tap = "overview_tap").
+// (a carousel card scrolled = "swipe").
 function engageRecap(source) {
   if (recapEngaged) return;
   recapEngaged = true;
@@ -889,9 +889,9 @@ function engageRecap(source) {
 }
 function onRecapScroll() { engageRecap("swipe"); }
 
-// Tear down any live recap: reveal maps, the observer, the carousel/overview
-// DOM, the scroll latch. Safe to call repeatedly (renderRecap re-entry, a
-// hard-mode restart). Never throws.
+// Tear down any live recap: reveal maps, the observer, the carousel DOM, the
+// scroll latch. Safe to call repeatedly (renderRecap re-entry, a hard-mode
+// restart). Never throws.
 function destroyRecap() {
   if (recapObserver) { recapObserver.disconnect(); recapObserver = null; }
   for (const h of recapHandles) { try { h?.destroy(); } catch { /* gone */ } }
@@ -901,21 +901,8 @@ function destroyRecap() {
     carousel.removeEventListener("scroll", onRecapScroll);
     carousel.textContent = "";
   }
-  const overview = $("dRecapOverview");
-  if (overview) overview.textContent = "";
   $("dDoneRecap").classList.add("hidden");
   recapEngaged = false;
-}
-
-// Scroll the carousel to the card for round `n` (an overview pin tap).
-function jumpToRecapCard(n) {
-  const el = $("dRecapCarousel").querySelector(`.recap-card[data-round="${n}"]`);
-  if (el) {
-    el.scrollIntoView({
-      block: "nearest", inline: "center",
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-    });
-  }
 }
 
 async function renderRecap(result, alreadyPlayed) {
@@ -932,16 +919,6 @@ async function renderRecap(result, alreadyPlayed) {
       places, rounds: result.rounds, ghostRounds: ghostRoundResults,
     });
     if (!cards.length) { box.classList.add("hidden"); return; }
-
-    // Overview mini-map, then wire each numbered pin to jump to its card.
-    recapHandles.push(renderRevealScene(
-      $("dRecapOverview"), recapOverviewScene({ pins: overviewPins(cards) })));
-    for (const pinEl of $("dRecapOverview").querySelectorAll(".recap-pin")) {
-      pinEl.addEventListener("click", () => {
-        engageRecap("overview_tap");
-        jumpToRecapCard(Number(pinEl.textContent));
-      });
-    }
 
     // Carousel: one card per round, maps lazy-initialised as they scroll in.
     const carousel = $("dRecapCarousel");

@@ -325,13 +325,13 @@ test("sanitizeEvent: ghost_link_invalid carries only the reason", () => {
 
 test("sanitizeEvent: daily_recap_engaged — aggregates only, no place/coordinate", () => {
   const out = sanitizeEvent("daily_recap_engaged", {
-    day_number: 37, source: "overview_tap", vs_ghost: true, hard: false,
+    day_number: 37, source: "swipe", vs_ghost: true, hard: false,
     // None of these may ever ride the recap event:
     lat: 35.01, lng: 135.77, place_name: "Kyoto, Japan", pin: "x", guess: { lat: 1 },
   });
   assert.deepEqual(out.props,
-    { day_number: 37, source: "overview_tap", vs_ghost: true, hard: false });
-  // The other legitimate source too; flags strictly boolean.
+    { day_number: 37, source: "swipe", vs_ghost: true, hard: false });
+  // Flags strictly boolean across boards.
   const swipe = sanitizeEvent("daily_recap_engaged", {
     day_number: 2, source: "swipe", vs_ghost: false, hard: true,
   });

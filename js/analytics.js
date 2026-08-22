@@ -373,10 +373,10 @@ export const EVENT_SCHEMA = Object.freeze({
   ghost_link_invalid: { reason: "string" },
   // Daily "Your five places" recap (docs/analytics.md). Fired at most ONCE per
   // done-screen render, when the player actually engages the recap — swiping a
-  // carousel card or tapping an overview pin. source ∈ "swipe"|"overview_tap".
-  // vs_ghost/hard tag which board it was. Engagement rate = daily_recap_engaged
-  // ÷ daily_challenge_completed. Aggregates only; no place name or coordinate
-  // rides (the recap's city names live in the DOM, masked, never on an event).
+  // carousel card. source ∈ "swipe". vs_ghost/hard tag which board it was.
+  // Engagement rate = daily_recap_engaged ÷ daily_challenge_completed.
+  // Aggregates only; no place name or coordinate rides (the recap's city names
+  // live in the DOM, masked, never on an event).
   daily_recap_engaged: {
     day_number: "int", source: "string", vs_ghost: "bool", hard: "bool",
   },

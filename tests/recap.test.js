@@ -7,7 +7,6 @@ import {
   RECAP_SKEW_TOLERANCE_KM,
   recapCards,
   recapCardScene,
-  overviewPins,
   recapCaption,
 } from "../js/recap.js";
 import { haversineKm, formatDistance } from "../js/game.js";
@@ -137,20 +136,6 @@ test("recapCards: a place missing coordinates is skipped", () => {
     ghostRounds: [],
   });
   assert.deepEqual(cards, []);
-});
-
-/* ---------------- overviewPins ---------------- */
-
-test("overviewPins: one numbered pin per card at its truth", () => {
-  const cards = recapCards({
-    places: PLACES.slice(0, 2),
-    rounds: [round(D1, G1, 1), round(null, null, 0)],
-    ghostRounds: [],
-  });
-  assert.deepEqual(overviewPins(cards), [
-    { n: 1, lat: 35.01, lng: 135.77 },
-    { n: 2, lat: 50.9, lng: 15.9 },
-  ]);
 });
 
 /* ---------------- recapCaption ---------------- */
