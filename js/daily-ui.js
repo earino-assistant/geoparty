@@ -71,6 +71,8 @@ import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
 import { toastWithReport, toastPlain } from "./report-ui.js";
+import { dailyRevealScene } from "./revealmap.js";
+import { renderRevealScene } from "./revealmap-ui.js";
 
 /* ================================================================
  * Ghost fragment: parse, then STRIP immediately (§3.5.6 braces layer). This
@@ -200,7 +202,7 @@ let iv = null;
 let viewer = null;
 let guessMap = null;
 let guessMarker = null;
-let revealMap = null;
+let revealHandle = null;
 let tickInterval = null;
 let lastTickSecond = null;
 
@@ -549,80 +551,26 @@ function scoreGhostRound(idx) {
   return { points: dp + tb, distanceKm: km, pin: { lat: gr.lat, lng: gr.lng } };
 }
 
+// G5/C4: the reveal map — the player's guess pin + line, then the ghost's
+// distinct dashed 👻 marker materializing ~400 ms later with a fade (two
+// beats, not one — spec §3.5.3; reduced motion just appears), then the gold
+// truth. All of it is now a declarative scene built by js/revealmap.js and
+// executed by js/revealmap-ui.js (shared with the phone/TV reveals). Maps
+// stay replay-blocked.
 function renderRevealMap(guess, ghostRes) {
   destroyRevealMap();
-  revealMap = L.map("dRevealMap", {
-    zoomControl: false, dragging: false, scrollWheelZoom: false,
-    doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false,
-  });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(revealMap);
-  const truth = L.latLng(current.lat, current.lng);
-  const bounds = [truth];
-  if (guess) {
-    const pin = L.latLng(guess.lat, guess.lng);
-    bounds.push(pin);
-    L.polyline([pin, truth], { color: "#4dd6ff", weight: 3, dashArray: "6 8" })
-      .addTo(revealMap);
-    L.circleMarker(pin, {
-      radius: 8, color: "#fff", weight: 2, fillColor: "#4dd6ff", fillOpacity: 1,
-    }).addTo(revealMap);
-  }
-  // G5/C4: the ghost marker — distinct (dashed, muted, 👻) with a dashed line
-  // to the truth so its miss reads at a glance (mirrors the player's
-  // guess→truth line). It MATERIALIZES ~400 ms after your pin with a fade, so
-  // the two pins read as two beats, not one (spec §3.5.3). Reduced-motion: it
-  // just appears. The pin is included in `bounds` synchronously so fitBounds
-  // frames it even though the marker is added on a delay. Maps stay
-  // replay-blocked.
-  if (ghostRes && ghostRes.pin) {
-    const gpin = L.latLng(ghostRes.pin.lat, ghostRes.pin.lng);
-    bounds.push(gpin);
-    const reduced = prefersReducedMotion();
-    const addGhost = () => {
-      if (!revealMap) return;
-      L.polyline([gpin, truth], { color: "#c9a2ff", weight: 2, dashArray: "3 5" })
-        .addTo(revealMap);
-      const circle = L.circleMarker(gpin, {
-        radius: 8, color: "#c9a2ff", weight: 2, dashArray: "3 3",
-        fillColor: "#2a2140", fillOpacity: 0.85,
-      }).addTo(revealMap);
-      const chip = L.marker(gpin, {
-        icon: L.divIcon({ className: "ghost-chip", html: `👻 ${formatDistance(ghostRes.distanceKm)}` }),
-      }).addTo(revealMap);
-      if (!reduced) {
-        const els = [circle.getElement && circle.getElement(),
-          chip.getElement && chip.getElement()].filter(Boolean);
-        for (const el of els) {
-          el.style.opacity = "0";
-          el.style.transition = "opacity 350ms ease";
-        }
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          for (const el of els) el.style.opacity = "1";
-        }));
-      }
-    };
-    if (reduced) addGhost();
-    else setTimeout(addGhost, 400);
-  }
-  if (bounds.length > 1) {
-    revealMap.fitBounds(L.latLngBounds(bounds).pad(0.25), { maxZoom: 10 });
-  } else {
-    revealMap.setView(truth, 4);
-  }
-  L.circleMarker(truth, {
-    radius: 10, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
-  }).addTo(revealMap);
-  setTimeout(() => revealMap && revealMap.invalidateSize({ pan: false }), 60);
+  revealHandle = renderRevealScene("dRevealMap", dailyRevealScene({
+    truth: current,
+    guess,
+    ghost: ghostRes && ghostRes.pin
+      ? { pin: ghostRes.pin, distanceKm: ghostRes.distanceKm } : null,
+    reducedMotion: prefersReducedMotion(),
+  }));
 }
 
 function destroyRevealMap() {
-  if (revealMap) {
-    try { revealMap.remove(); } catch { /* already gone */ }
-    revealMap = null;
-  }
+  revealHandle?.destroy();
+  revealHandle = null;
 }
 
 function nextOrFinish() {
