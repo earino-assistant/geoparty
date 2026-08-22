@@ -9,3 +9,7 @@ tools/.pool-health-cache.json
 # Local agent task briefs — never committed (each self-instructs "do not
 # commit"; repo precedent 1f7073c removed the earlier batch before push).
 .feat-*.md
+
+# Never commit environment secrets. The tools read keys from the process env
+# (e.g. POSTHOG_PERSONAL_API_KEY), never from a file in the tree.
+.env
