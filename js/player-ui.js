@@ -28,6 +28,8 @@ import {
   twistedRoundScore, twistHudTag, twistRevealTag, twistCard,
 } from "./twist.js";
 import { revealDecoys } from "./decoy.js";
+import { teamHex, phoneRevealScene } from "./revealmap.js";
+import { renderRevealScene } from "./revealmap-ui.js";
 import {
   MODIFIERS, availableModifiers, modifierInitialState, modifierFold,
   shouldCalloutModifier, calloutSpec, MODIFIER_SHEETS, sheetActions,
@@ -134,10 +136,6 @@ const SCREENS = [
   "p-home", "p-setup", "p-lobby", "p-round", "p-guess",
   "p-locked", "p-reveal", "p-gameover",
 ];
-
-const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
-const teamHex = (teams, id) =>
-  TEAM_HEX[teamIds(teams).indexOf(id) % TEAM_HEX.length];
 
 let shownScreen = null;
 function showScreen(id) {
@@ -278,7 +276,7 @@ let anchoredImageId = null; // the round anchor the viewer was last sent to
 let guessMap = null;
 let guessMarker = null;
 let rivalMarkers = {};     // tid -> live rival pin on MY guess map
-let revealMap = null;      // per-round reveal map (phone-sized TV reveal)
+let revealHandle = null;   // per-round reveal map (phone-sized TV reveal)
 let revealMapShownFor = null; // round number the reveal map was built for
 
 let myBest = null;         // my team's closest guess — the share card brag (S1)
@@ -1925,65 +1923,27 @@ function holdAdvance() {
 // The all-pins reveal, phone-sized: every guess, a line to the truth, the
 // answer pinned gold. This is what makes head-to-head complete on a single
 // device per player — no TV required for the payoff moment.
+// The all-pins reveal is now a declarative scene (js/revealmap.js) executed
+// by the shared renderer (js/revealmap-ui.js): every guess pin + line, a
+// SUPER SURE verdict halo where a pin wore the bet (reveal-only, per the
+// hidden rule), each planted G7 decoy as a 🎭, and the gold truth. The
+// render-once latch and the truth guard stay here.
 function renderRevealMap(round) {
   if (revealMapShownFor === round.number) return;
   if (!round.truth || typeof round.truth.lat !== "number") return;
   destroyRevealMap();
   revealMapShownFor = round.number;
-  revealMap = L.map("pRevealMap", {
-    zoomControl: false, dragging: false, scrollWheelZoom: false,
-    doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false,
-  });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(revealMap);
-  const truth = L.latLng(round.truth.lat, round.truth.lng);
-  const pins = revealPins(round);
-  revealMap.fitBounds(
-    L.latLngBounds([truth, ...pins.map((p) => L.latLng(p.lat, p.lng))])
-      .pad(0.25),
-    { maxZoom: 10 }
-  );
-  for (const p of pins) {
-    const guess = L.latLng(p.lat, p.lng);
-    const color = teamHex(room.teams, p.id);
-    L.polyline([guess, truth], { color, weight: 3, dashArray: "6 8" })
-      .addTo(revealMap);
-    L.circleMarker(guess, {
-      radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1,
-    }).addTo(revealMap);
-    // The no-screen h2h payoff surface: a super-sure pin wears its verdict
-    // right on the map (halo + label) — reveal-only, per the hidden rule.
-    if (p.superSure) {
-      L.circleMarker(guess, {
-        radius: 14, color: "#ffcf3f", weight: 3, fill: false,
-        dashArray: "4 6", interactive: false,
-      }).addTo(revealMap)
-        .bindTooltip(
-          p.superSureOutcome === "won" ? "SUPER SURE ×2" : "SUPER SURE — 0",
-          { permanent: true, direction: "bottom", className: "ss-tooltip" });
-    }
-  }
-  // G7: expose each planted decoy with a 🎭 marker (muted, no line) — the
-  // reveal is where the bluff pays off.
-  for (const d of revealDecoys(round)) {
-    L.marker(L.latLng(d.lat, d.lng), {
-      icon: L.divIcon({ className: "decoy-marker reveal", html: "🎭" }),
-      interactive: false,
-    }).addTo(revealMap);
-  }
-  L.circleMarker(truth, {
-    radius: 10, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
-  }).addTo(revealMap);
-  setTimeout(() => revealMap && revealMap.invalidateSize({ pan: false }), 60);
+  revealHandle = renderRevealScene("pRevealMap", phoneRevealScene({
+    truth: round.truth,
+    pins: revealPins(round),
+    decoys: revealDecoys(round),
+    teams: room.teams,
+  }));
 }
 
 function destroyRevealMap() {
-  if (revealMap) {
-    try { revealMap.remove(); } catch { /* already gone */ }
-    revealMap = null;
-  }
+  revealHandle?.destroy();
+  revealHandle = null;
   revealMapShownFor = null;
 }
 
