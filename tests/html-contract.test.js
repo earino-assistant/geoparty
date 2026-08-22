@@ -182,3 +182,25 @@ test("D: the Mapillary SDK tag in every page matches viewer-ui's MAPILLARY_SDK",
   }
   assert.deepEqual(offenders, [], `SDK tag drift:\n${offenders.join("\n")}`);
 });
+
+/* ================================================================
+ * E. Retired-id lock — the owner's "the chip is dead" decision
+ * (guess-modifier design §A1.1 / §A2). The guess-modifier bar chip
+ * (`btnModifier`, and its predecessor `btnSuperSure`) must appear in NO page
+ * HTML: the pin-drop callout is the single door. A reintroduced button fails
+ * here, regression-locking the removal.
+ * ================================================================ */
+
+test("E: retired chip ids (btnModifier, btnSuperSure) appear in no page HTML", () => {
+  const retired = ["btnModifier", "btnSuperSure"];
+  const offenders = [];
+  for (const html of Object.keys(PAGES)) {
+    const src = read(html);
+    for (const id of retired) {
+      if (new RegExp(`id=["']${id}["']`).test(src)) {
+        offenders.push(`${html}: retired id #${id} is present`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `retired chip ids resurfaced:\n${offenders.join("\n")}`);
+});

@@ -55,12 +55,11 @@ import {
   panoHintCard,
 } from "./hints.js";
 import {
-  availableModifiers, modifierChipState, modifierInitialState, modifierFold,
-  shouldCalloutModifier, markCalloutShown, calloutSpec, MODIFIER_SHEETS,
-  sheetActions,
+  MODIFIERS, availableModifiers, modifierInitialState, modifierFold,
+  shouldCalloutModifier, calloutSpec, MODIFIER_SHEETS, sheetActions,
 } from "./modifier.js";
 import {
-  showModifierCallout, dismissModifierCallout, pulseModifierChip,
+  showModifierCallout, dismissModifierCallout,
 } from "./modifier-ui.js";
 import {
   oneShotHint,
@@ -255,9 +254,6 @@ let guessMarker = null;
 // no decoy — the decoy is mode-gated to h2h). One fold, shared with the h2h
 // phone via js/modifier.js. Local, this pin only.
 let deployState = modifierInitialState();
-// Teams that have already had their one pin-drop callout this game (§3.4). In
-// couch "team" is the active team, so each gets its moment on its own turn.
-let calloutShown = new Set();
 let timerInterval = null;
 let unsubHeartbeat = null;
 let screenBeat = null;    // S7 screen liveness (couchscreen.foldHeartbeat)
@@ -446,8 +442,7 @@ async function newGame() {
       code = makeRoomCode();
     }
     roomCode = code;
-    // A new game is a fresh set of once-per-game callouts and deploy state.
-    calloutShown = new Set();
+    // A new game is a fresh deploy state.
     deployState = modifierInitialState();
     room = initialRoomState(collectSettings(), collectTeams(), roomCode);
     // G3 Crown Night: seed the room with the tally carried from the last game
@@ -913,8 +908,8 @@ function ensureGuessMap() {
   // pinch-zooms that settle without a pan.
   guessMap.on("moveend zoomend", scheduleLiveViewWrite);
   guessMap.on("click", (e) => {
-    // Any tap dismisses a live pin-drop callout silently (§4.1).
-    dismissModifierCallout();
+    // Pin moves no longer dismiss a live callout (§A1.2): the pill is the only
+    // door now, and adjusting a fresh pin must not kill it.
     const firstPin = !guessMarker;
     if (guessMarker) {
       guessMarker.setLatLng(e.latlng);
@@ -1039,7 +1034,6 @@ function openGuessMap() {
   renderPlacedPins();
   updateGuessHint();
   deployState = modifierFold(deployState, { type: "newRound" }).state;
-  renderModifierChip();
   // First guess map ever on this device: the scoring one-liner and the
   // SUPER SURE stakes, at the moment they matter (M5 + M3).
   oneShotHint("guessmap", {
@@ -1051,14 +1045,16 @@ function openGuessMap() {
   setTimeout(() => guessMap.invalidateSize(), 50);
 }
 
-/* ---------------- Guess modifiers: the active team's once-per-game play -- */
+/* ---------------- Guess modifiers: one door, one sheet ----------------- */
 
 /* The couch runs the same modifier class as the h2h phone (js/modifier.js),
- * but only SUPER SURE applies here — the Decoy is mode-gated to h2h. The chip
- * belongs to whichever team holds the phone (the active team); the TV never
- * mirrors it, so the bet stays hidden from the couch until the reveal. One
- * chip, one sheet, and one pin-drop callout per team per game. Absence
- * communicates spent (§2.6); the armed stake shows on the primary button. */
+ * but only SUPER SURE applies here — the Decoy is mode-gated to h2h. There is
+ * no chip: the pin-drop callout is the single door (§A1.1), belonging to
+ * whichever team holds the phone (the active team); the TV never mirrors it, so
+ * the bet stays hidden from the couch until the reveal. The callout fires from
+ * round 1 on each team's first pin while unspent (§A2.1); arming is a
+ * commitment, no disarm (§A2.3), and the armed stake shows on the primary
+ * button. */
 
 // Ordered ids of modifiers the active team can still play this round.
 function currentModifiers() {
@@ -1069,91 +1065,72 @@ function currentModifiers() {
   });
 }
 
-// The pin-drop moment (§4): tease the priority modifier at most once per team.
+// The pin-drop moment (§4): tease every available modifier co-equally. Fires
+// every qualifying round's first pin per active team while unspent (§A2.1 —
+// stateless, no per-game memory).
 function maybeCalloutModifier() {
   if (!room || !room.round) return;
-  const id = shouldCalloutModifier({
+  const available = shouldCalloutModifier({
     mode: "couch",
     roundNumber: room.round.number,
     available: currentModifiers(),
     firstPinOfRound: true,
     hasResult: false,
-    calloutShown,
-    teamId: room.activeTeam,
   });
-  if (!id) return;
-  // §4.1: while a sheet is open, suppress and do NOT mark shown.
+  if (!available) return;
+  // §4.1: while a sheet is open, suppress — it fires again on a later round's
+  // first pin by construction (no latch).
   if (hintCardOpen()) return;
-  calloutShown = markCalloutShown(calloutShown, room.activeTeam);
   track("modifier_callout_shown", {
-    mode: "couch", modifier: id, round_number: room.round.number,
+    mode: "couch",
+    modifier: available.length > 1 ? "both" : available[0],
+    round_number: room.round.number,
   });
-  showModifierCallout(calloutSpec(id), () => openModifierSheet(id, "callout"));
-  pulseModifierChip($("btnModifier"));
+  showModifierCallout(calloutSpec(available), () => openModifierSheet("callout"));
 }
 
-// The chip tap opens the priority modifier's sheet (via: "chip").
-function onModifierChipTap() {
+// The one sheet: every available modifier as a co-equal section (its rule lines
+// + its own primary action), through the existing showHintCard (sheet layer,
+// one at a time). On couch that is only ever SUPER SURE.
+function openModifierSheet(via) {
   const avail = currentModifiers();
   if (!avail.length) return;
-  openModifierSheet(avail[0], "chip");
-}
-
-// One sheet renderer, driven by MODIFIER_SHEETS + the pure action rows, through
-// the existing showHintCard (sheet layer, one at a time).
-function openModifierSheet(id, via) {
-  const avail = currentModifiers();
-  if (!avail.includes(id)) {
-    if (!avail.length) return;
-    id = avail[0];
-  }
-  track("modifier_sheet_opened", { mode: "couch", modifier: id, via });
-  const sheet = MODIFIER_SHEETS[id];
-  showHintCard({
-    title: sheet.title,
-    lines: sheet.lines,
-    actions: sheetActions({ id, available: avail, deployState })
-      .map((row) => modifierActionButton(id, row)),
+  track("modifier_sheet_opened", {
+    mode: "couch", modifier: avail.length > 1 ? "both" : avail[0], via,
   });
-}
-
-function modifierActionButton(id, row) {
-  switch (row.kind) {
-    case "arm":
-      return { label: row.label, onClick: () => armModifier(id, true) };
-    case "disarm":
-      return { label: row.label, primary: false, onClick: () => armModifier(id, false) };
-    case "keep":
-      return { label: row.label }; // primary; stays armed (dismiss only)
-    case "cross":
-      return { label: row.label, primary: false,
-        onClick: () => openModifierSheet(row.target, "cross") };
-    case "cancel":
-    default:
-      return { label: row.label, primary: false };
+  const actions = sheetActions({ available: avail, deployState })
+    .map((row) => modifierActionButton(row));
+  if (avail.length === 1) {
+    const sheet = MODIFIER_SHEETS[avail[0]];
+    showHintCard({ title: sheet.title, lines: sheet.lines, actions });
+    return;
   }
+  const lines = [];
+  for (const m of MODIFIERS) {
+    if (!avail.includes(m.id)) continue;
+    const sheet = MODIFIER_SHEETS[m.id];
+    lines.push(`${m.icon} ${sheet.title}`);
+    lines.push(...sheet.lines);
+  }
+  showHintCard({ title: "Raise the stakes?", lines, actions });
 }
 
-// Arm/disarm through the shared fold. Couch only ever arms SUPER SURE.
-function armModifier(id, on) {
+// Map a pure sheet-action row to a showHintCard button spec. Co-equal arm rows
+// (each its own primary) + one cancel — no cross/disarm.
+function modifierActionButton(row) {
+  if (row.kind === "arm") {
+    return { label: row.label, onClick: () => armModifier(row.id) };
+  }
+  return { label: row.label, primary: false }; // cancel
+}
+
+// Arm through the shared fold — a commitment, no disarm (§A2.3). Couch only
+// ever arms SUPER SURE.
+function armModifier(id) {
   if (!currentModifiers().includes(id)) return;
   if (id === "super") {
-    deployState = modifierFold(deployState,
-      { type: on ? "arm" : "disarm", id: "super" }).state;
-    renderModifierChip();
+    deployState = modifierFold(deployState, { type: "arm", id: "super" }).state;
     updateLockButton();
-  }
-}
-
-function renderModifierChip() {
-  const btn = $("btnModifier");
-  const chip = modifierChipState({ available: currentModifiers(), deployState });
-  btn.classList.toggle("hidden", !chip.visible); // spent = gone, not disabled
-  btn.classList.toggle("armed", chip.armed);
-  btn.setAttribute("aria-pressed", String(chip.armed));
-  if (chip.visible) {
-    btn.textContent = chip.icon;
-    btn.setAttribute("aria-label", chip.ariaLabel);
   }
 }
 
@@ -1310,7 +1287,7 @@ function confirmShowdownGuess(result) {
     renderPlacedPins();
     updateGuessHint();
     deployState = { ...deployState, superArmed: false }; // the next team arms (or not) for itself
-    renderModifierChip();
+    updateLockButton(); // clear the armed stakes on the lock button for the handoff
     // S4: a mid-showdown turn has no reveal to punctuate it — the stamp
     // overlay marks the handoff instead.
     stampFlash("LOCKED IN");
@@ -1880,8 +1857,7 @@ async function resumeGame(code, state) {
       $("btnConfirmGuess").disabled = true;
       renderPlacedPins(); // mid-showdown resume: restore locked-in pins
       updateGuessHint();
-      renderModifierChip(); // armed state is local; a refresh disarms
-      startLockNowTicker();
+      startLockNowTicker(); // repaints the lock button; armed state is local, a refresh disarms
       setTimeout(() => guessMap.invalidateSize(), 50);
       break;
     case "reveal":
@@ -1934,7 +1910,6 @@ $("btnTvLink").addEventListener("click", () => {
   shareTvLink(screenLink(location.href, roomCode, "link"), roomCode, "couch", toast);
 });
 $("btnMakeGuess").addEventListener("click", openGuessMap);
-$("btnModifier").addEventListener("click", onModifierChipTap);
 $("btnConfirmGuess").addEventListener("click", confirmGuess);
 $("btnNextRound").addEventListener("click", nextOrFinish);
 $("btnHoldAdvance").addEventListener("click", holdAdvance);

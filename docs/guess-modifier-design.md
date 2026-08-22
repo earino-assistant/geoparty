@@ -2,8 +2,7 @@
 
 > **STATUS: BUILT at `fd166cc` (807 tests green, live) — AMENDED A2
 > (2026-08-22, owner corrections: round 1 reachable + co-equal options +
-> arm-is-commit), awaiting owner approval, then an Opus build in one
-> change per §A2.7.** Precedence: **§A2 > §A1 > original**. Passages
+> arm-is-commit), BUILT-with-A2, live.** Precedence: **§A2 > §A1 > original**. Passages
 > superseded by A2 are tagged **⚠A2** in place; by A1, **⚠A1** — the
 > original rationale stays legible either way. A1 (single entry point,
 > chip removed) otherwise stands in full. Original design authored by the

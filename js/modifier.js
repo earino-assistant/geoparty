@@ -4,8 +4,8 @@
 // reveal. Two instances exist: SUPER SURE 🔥 (double-or-nothing, h2h + couch)
 // and the Decoy 🎭 (a fake pin for rivals, h2h only).
 //
-// This module owns only the CLASS-LEVEL decisions — what's available, what the
-// one chip shows, when the pin-drop callout fires, what every surface says, and
+// This module owns only the CLASS-LEVEL decisions — what's available, when the
+// pin-drop callout fires, what every surface says, and
 // the per-round deploy state. It has NO DOM and NO network, the same discipline
 // as game.js. The MECHANICS stay where they live: supersure.js keeps
 // resolution/settlement/reveal, decoy.js keeps the plant fold / reveal
@@ -19,16 +19,15 @@ import { decoyAvailable, decoyInitialState, decoyDeployFold } from "./decoy.js";
  * The registry (§3.1)
  * ================================================================ */
 
-// Priority order IS array order: SUPER SURE is the hero tease; the decoy
-// teases only when SUPER is spent. A third modifier slots in by adding an
-// entry — no UI code changes. `ariaLabel` lives here so the chip's a11y name
-// tracks the icon it renders.
+// Array order is DISPLAY order only (§A2.2 revoked the SUPER-first priority):
+// tease line, sheet sections and action rows all follow this order, but both
+// available modifiers are presented co-equally. A third modifier slots in by
+// adding an entry — no UI code changes.
 export const MODIFIERS = Object.freeze([
   Object.freeze({
     id: "super",
     icon: "🔥",
     modes: Object.freeze(["h2h", "couch"]),
-    ariaLabel: "SUPER SURE — once-per-game plays",
     // (teams, teamId, twistId) → bool. Delegates to the mechanic module.
     isAvailable: (teams, teamId, _twistId) => superSureAvailable(teams, teamId),
   }),
@@ -36,15 +35,12 @@ export const MODIFIERS = Object.freeze([
     id: "decoy",
     icon: "🎭",
     modes: Object.freeze(["h2h"]),
-    ariaLabel: "Decoy — once-per-game plays",
     isAvailable: (teams, teamId, twistId) => decoyAvailable(teams, teamId, twistId),
   }),
 ]);
 
-const byId = (id) => MODIFIERS.find((m) => m.id === id) || null;
-
 /* ================================================================
- * Availability + chip state (§3.2)
+ * Availability (§3.2)
  * ================================================================ */
 
 // Ordered ids of modifiers this team can still play this round. deployState
@@ -65,33 +61,6 @@ export function availableModifiers({ mode, teams, teamId, twistId, deployState }
   return out;
 }
 
-// True when any AVAILABLE modifier is currently armed: super armed, or the
-// decoy armed and awaiting its plant tap.
-function anyArmed(available, deployState) {
-  if (!deployState) return false;
-  if (available.includes("super") && deployState.superArmed) return true;
-  const d = deployState.decoy;
-  if (available.includes("decoy") && d && d.armed && !d.planted) return true;
-  return false;
-}
-
-// What the one chip renders. icon is the FIRST available modifier's icon;
-// armed is true when ANY modifier is armed. visible=false ⇒ chip hidden
-// (spent = gone, §2.6).
-export function modifierChipState({ available, deployState }) {
-  const avail = available || [];
-  if (!avail.length) {
-    return { visible: false, icon: "", armed: false, ariaLabel: "" };
-  }
-  const first = byId(avail[0]);
-  return {
-    visible: true,
-    icon: first ? first.icon : "",
-    armed: anyArmed(avail, deployState),
-    ariaLabel: first ? first.ariaLabel : "",
-  };
-}
-
 /* ================================================================
  * The per-round deploy state (§3.3) — one fold, one shape, both screens
  * ================================================================ */
@@ -101,22 +70,20 @@ export function modifierInitialState() {
 }
 
 // Actions:
-//   { type: "arm",    id: "super" | "decoy" }
-//   { type: "disarm", id: "super" }            // decoy has no disarm (§3.7)
+//   { type: "arm",    id: "super" | "decoy" }  // arming commits — no disarm (§A2.3)
 //   { type: "tap" }                            // a guess-map tap
 //   { type: "newRound" }                       // reset everything round-local
 // Returns { state, place } where place is "decoy" | "pin" | null. "arm decoy"
 // and "tap" delegate to decoyDeployFold and pass its verdict through untouched,
 // so decoy.js remains the single owner of plant logic. superArmed survives a
 // "tap" (arming is per-pin but taps just move the pin); newRound resets both.
+// There is no disarm action (§A2.3: arm is a commitment); a stray
+// {type:"disarm"} falls through to the unknown-action row, unchanged.
 export function modifierFold(state, action) {
   const s = state || modifierInitialState();
   const a = action || {};
   if (a.type === "arm" && a.id === "super") {
     return { state: { ...s, superArmed: true }, place: null };
-  }
-  if (a.type === "disarm" && a.id === "super") {
-    return { state: { ...s, superArmed: false }, place: null };
   }
   if (a.type === "arm" && a.id === "decoy") {
     const d = decoyDeployFold(s.decoy, "arm");
@@ -136,34 +103,40 @@ export function modifierFold(state, action) {
  * The callout decision (§3.4)
  * ================================================================ */
 
-// Which modifier to tease at this pin drop, or null. Priority = registry order.
+// The ordered available modifiers to tease at this pin drop, or null. Stateless
+// — fires on EVERY qualifying round's first real-pin drop while at least one
+// modifier is unspent, from round 1 (§A2.1: no calm-round gate, no per-game
+// memory). `firstPinOfRound` is itself the once-per-round latch. Returns the
+// full `available` array (feeding the co-equal both-sheet, §A2.2), never a
+// single priority pick.
 export function shouldCalloutModifier({
-  mode, roundNumber, available, firstPinOfRound, hasResult, calloutShown, teamId,
+  mode, roundNumber, available, firstPinOfRound, hasResult,
 }) {
   if (mode !== "h2h" && mode !== "couch") return null;   // never on the Daily
-  if (typeof roundNumber !== "number" || roundNumber < 2) return null; // r1 calm
+  if (typeof roundNumber !== "number" || roundNumber < 1) return null; // defensive
   if (!firstPinOfRound) return null;    // only the tap that CREATED the real pin
   if (hasResult) return null;           // already locked in
-  if (!available || !available.length) return null;
-  if (calloutShown && calloutShown.has(teamId)) return null; // once per game/team
-  return available[0];
-}
-
-// The per-game memory. Pure Set-in/Set-out so couch (per active team) and h2h
-// (single team) share one shape. Non-mutating and idempotent.
-export function markCalloutShown(calloutShown, teamId) {
-  const next = new Set(calloutShown || []);
-  next.add(teamId);
-  return next;
+  if (!available || !available.length) return null; // spent → self-extinguishes
+  return available;
 }
 
 /* ================================================================
  * Copy — every modifier surface, one home (§3.5)
  * ================================================================ */
 
-// The tease (context pill). ≤ 2 short lines, stakes-headline HOOK only — the
-// full rule lives in the sheet and nowhere else (§4.5). No rule phrases.
-export function calloutSpec(id) {
+// The tease (context pill). Takes the ordered available array. ≤ 2 short lines,
+// stakes-headline HOOK only — the full rule lives in the sheet and nowhere else
+// (§4.5). No rule phrases. When both modifiers are available the both-tease
+// presents them co-equally (§A2.2); one tap opens the one two-section sheet.
+export function calloutSpec(available) {
+  const avail = available || [];
+  if (avail.length > 1) {
+    return {
+      title: "Raise the stakes?",
+      line: "🔥 Double or nothing · 🎭 Decoy pin",
+    };
+  }
+  const id = avail[0];
   if (id === "super") {
     return { title: "Are you SUPER SURE?", line: "Tap for double or nothing 🔥" };
   }
@@ -182,6 +155,8 @@ export const MODIFIER_SHEETS = Object.freeze({
     lines: Object.freeze([
       "Double or nothing, once per game. Closest pin this round: your " +
       "points ×2. Anyone closer: you score 0.",
+      // §A2.3: arming commits — the one place that rule is stated.
+      "Once armed, the bet is on — no backing out this round.",
     ]),
     armLabel: "Arm the bet",
     cancelLabel: "Not now",
@@ -197,31 +172,19 @@ export const MODIFIER_SHEETS = Object.freeze({
   }),
 });
 
-// The sheet's action rows, including the symmetric cross-offer: when BOTH are
-// available, each sheet ends with a secondary action opening the other. An
-// armed SUPER shows Disarm/Keep instead of Cancel/Arm; the decoy has no disarm.
-// Rows: { kind: "arm"|"disarm"|"keep"|"cancel"|"cross", label, target? }.
-export function sheetActions({ id, available, deployState }) {
-  const sheet = MODIFIER_SHEETS[id];
-  if (!sheet) return [];
+// The combined sheet's action rows: one co-equal "arm" row per available
+// modifier in registry order, each carrying its own id and primary label, then
+// one shared cancel (§A2.2). There are NO cross rows (both live options are
+// already on the one sheet) and NO disarm/keep rows (arming commits, §A2.3).
+// Rows: { kind: "arm", id, label } and { kind: "cancel", label }.
+export function sheetActions({ available, deployState: _deployState }) {
   const avail = available || [];
   const rows = [];
-  if (id === "super" && deployState && deployState.superArmed) {
-    rows.push({ kind: "disarm", label: "Disarm" });
-    rows.push({ kind: "keep", label: "Keep it armed" });
-  } else {
-    rows.push({ kind: "cancel", label: sheet.cancelLabel });
-    rows.push({ kind: "arm", label: sheet.armLabel });
+  for (const m of MODIFIERS) {
+    if (!avail.includes(m.id)) continue;
+    rows.push({ kind: "arm", id: m.id, label: MODIFIER_SHEETS[m.id].armLabel });
   }
-  const other = id === "super" ? "decoy" : "super";
-  if (avail.includes(id) && avail.includes(other)) {
-    rows.push({
-      kind: "cross",
-      label: other === "decoy"
-        ? "🎭 Plant a decoy instead"
-        : "🔥 Arm SUPER SURE instead",
-      target: other,
-    });
-  }
+  if (!rows.length) return [];
+  rows.push({ kind: "cancel", label: "Not now" });
   return rows;
 }

@@ -593,32 +593,9 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
 .time-note:empty { display: none; }
 .reveal-num .time-note { margin-top: 0.6vh; font-size: 2.2vh; }
 
-/* SUPER SURE (M6), de-cluttered (review §2.6 / §6.1). It used to be a
-   full-width labelled pill on the floating context layer that restated the
-   whole rule every round — and stayed on screen, disabled, once spent. Now:
-   a 🔥 chip docked INTO the action bar, present only while the bet is
-   unspent, whose only job is to open the one sheet that explains it.
-   Absence communicates spent; the armed state shows on the primary button's
-   own label. Still local-only — nothing about the bet reaches any rival
-   surface before the reveal. */
-.mod-chip {
-  flex: 0 0 auto;
-  width: 58px;
-  max-width: 58px;
-  min-height: 44px;
-  padding: 0;
-  font-size: 1.3rem;
-  line-height: 1;
-  background: rgba(17, 17, 17, 0.85);
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  border-radius: 14px;
-}
-.mod-chip.armed {
-  background: var(--accent);
-  color: #111;
-  box-shadow: 0 0 18px rgba(255, 207, 63, 0.6);
-}
+/* SUPER SURE (M6): the armed state shows on the primary button's own label
+   (the guess-modifier bar chip is retired — §A2). Still local-only — nothing
+   about the bet reaches any rival surface before the reveal. */
 /* Verdict line injected under points cards/tiles at reveal. */
 .ss-note {
   margin-top: 6px;
@@ -687,12 +664,13 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
 
    The guess modifier class's one discoverability moment: a transient tease
    pill in the context-pill slot (z 600), horizontally centered above the
-   action bar, caret pointing down at the 🔥/🎭 chip where the power
-   permanently lives. Static copy only — no team name, room code or place —
-   so no data-ph-mask (docs/replay-mask-checklist.md). It teases; a tap
-   converts it to the sheet (modifier-ui.js routes the tap). Built in
-   modifier-ui.js and never covers the primary button (it sits above the
-   bar, like the hint-card, but at the lower context-pill layer). */
+   action bar — the single, self-contained door to the modifier sheet (§A2:
+   the bar chip is retired, so there is no caret pointing at it). Static copy
+   only — no team name, room code or place — so no data-ph-mask
+   (docs/replay-mask-checklist.md). It teases; a tap converts it to the sheet
+   (modifier-ui.js routes the tap). Built in modifier-ui.js and never covers
+   the primary button (it sits above the bar, like the hint-card, but at the
+   lower context-pill layer). */
 .mod-callout {
   position: fixed;
   left: 50%;
@@ -721,17 +699,6 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
   font-weight: 600;
   font-size: 0.9rem;
 }
-/* Caret pointing down at the chip's permanent home in the action bar. */
-.mod-callout::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -8px;
-  transform: translateX(-50%);
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-top: 8px solid var(--accent);
-}
 /* Entry: spring-pop riding the pin-drop energy (§4.3) — scale 0.6→1.06→1
    with an ~8px upward settle. Exit: a short fade + 4px downward drift. */
 .mod-callout.animate-in {
@@ -749,21 +716,10 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
   0%   { transform: translateX(-50%) translateY(0); opacity: 1; }
   100% { transform: translateX(-50%) translateY(4px); opacity: 0; }
 }
-/* The chip's ONE soft pulse (pulseModifierChip) tying the pill to its
-   permanent home, so the player learns where the power lives (§4.3). */
-.mod-chip.mod-pulse {
-  animation: mod-chip-pulse 0.25s ease-out both;
-}
-@keyframes mod-chip-pulse {
-  0%   { transform: scale(1); }
-  50%  { transform: scale(1.18); }
-  100% { transform: scale(1); }
-}
 @media (prefers-reduced-motion: reduce) {
   /* Collapse entry/exit to plain show/hide (the file's existing pattern). */
   .mod-callout.animate-in,
-  .mod-callout.animate-out,
-  .mod-chip.mod-pulse { animation: none; }
+  .mod-callout.animate-out { animation: none; }
 }
 
 /* ---------- The context-pill layer, now down to one (review §4.1) -------
@@ -800,9 +756,8 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
 }
 .btn-sub:empty { display: none; }
 
-/* The chip and the ghost yield space to the primary, never the reverse
+/* The ghost yields space to the primary, never the reverse
    (§4.1: "primary always rightmost/widest"). */
-#p-guess .mod-chip, #h-guess .mod-chip { width: 48px; max-width: 48px; }
 #p-guess .btn-ghost, #d-guess .btn-ghost {
   flex: 0 1 auto;
   min-width: 0;

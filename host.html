@@ -177,13 +177,10 @@
          (host-ui.updateGuessHint) — replay masking (review P1-2). -->
     <div id="hGuessHint" class="guess-hint" data-ph-mask>Tap the map to drop your pin</div>
     <!-- §6.1: the estimate rides on the primary button's label; the guess
-         MODIFIER chip (SUPER SURE on couch) docks to the bar (unspent only)
-         and opens one sheet. Icon + aria-label are set at render
-         (host-ui.js#renderModifierChip). The pin-drop callout rides the empty
-         context-pill slot (js/modifier-ui.js). -->
+         MODIFIER class (SUPER SURE on couch) has one door — the pin-drop
+         callout in the empty context-pill slot (js/modifier-ui.js), which opens
+         one sheet (§A2: the bar chip is retired). -->
     <div class="action-bar">
-      <button id="btnModifier" class="mod-chip hidden" type="button"
-              aria-label="Guess modifiers — once-per-game plays"></button>
       <button id="btnConfirmGuess" class="btn-primary" disabled>Confirm guess</button>
     </div>
   </section>

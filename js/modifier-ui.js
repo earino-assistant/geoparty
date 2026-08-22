@@ -1,8 +1,8 @@
 // modifier-ui.js — DOM glue for the pin-drop modifier callout (the guess
 // modifier's one discoverability moment; docs/guess-modifier-design.md §4).
-// Every decision — which modifier to tease, when, and once-per-game — lives
+// Every decision — which modifier(s) to tease, and when — lives
 // upstream in modifier.js (pure, tested). This module only builds the transient
-// pill, animates it, routes its tap, and pulses the chip. Pattern: hints-ui.js
+// pill, animates it, and routes its tap. Pattern: hints-ui.js
 // — thin, unit-untested, all decisions upstream.
 
 import { prefersReducedMotion } from "./fx-ui.js";
@@ -69,16 +69,4 @@ export function dismissModifierCallout() {
   el.addEventListener("animationend", () => el.remove(), { once: true });
   // Safety net if animationend never fires (element detached mid-animation).
   setTimeout(() => el.remove(), 250);
-}
-
-// The chip's ONE soft pulse tying the pill to its permanent home (§4.3), so the
-// player learns where the power lives after the pill is gone. Reduced motion →
-// no-op (the callout itself already collapsed to plain show/hide).
-export function pulseModifierChip(btn) {
-  if (!btn || prefersReducedMotion()) return;
-  btn.classList.remove("mod-pulse");
-  void btn.offsetWidth; // reflow so re-adding the class restarts the animation
-  btn.classList.add("mod-pulse");
-  btn.addEventListener(
-    "animationend", () => btn.classList.remove("mod-pulse"), { once: true });
 }

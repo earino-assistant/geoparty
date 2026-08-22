@@ -302,13 +302,15 @@ export const EVENT_SCHEMA = Object.freeze({
     mode: "string", round_number: "int", rounds: "int",
     outcome: "string", round_total: "int",
   },
-  // Guess-modifier discovery funnel (docs/guess-modifier-design.md §5). One
-  // pin-drop callout is teased per game per team; when tapped it opens the
-  // modifier's sheet. modifier is "super" | "decoy" (which tease/sheet); via
-  // is "chip" | "callout" | "cross" (how the sheet was reached). These two
-  // REPLACE super_sure_sheet_opened (removed) with a per-modifier, per-path
-  // funnel — its historical data stays queryable in PostHog (docs/analytics.md
-  // records the supersession).
+  // Guess-modifier discovery funnel (docs/guess-modifier-design.md §A2). The
+  // pin-drop callout is teased on every round's first pin (from round 1) while
+  // a modifier is unspent; when tapped it opens the modifier's sheet. modifier
+  // is "super" | "decoy" | "both" ("both" when more than one is available, so
+  // the sheet/callout presents them co-equally). via is "callout" only — the
+  // callout is the single door (§A2: the bar chip and cross-offers are
+  // retired). These two REPLACE super_sure_sheet_opened (removed) with a
+  // per-modifier funnel — its historical data stays queryable in PostHog
+  // (docs/analytics.md records the supersession).
   modifier_callout_shown: { mode: "string", modifier: "string", round_number: "int" },
   modifier_sheet_opened: { mode: "string", modifier: "string", via: "string" },
   // A decoy was planted — the decoy's deployment moment (its analogue of

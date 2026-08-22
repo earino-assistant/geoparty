@@ -139,18 +139,10 @@
     <div class="guess-hint" id="pGuessHint">Tap the map to drop your pin</div>
     <div class="hud"><div></div><div class="hud-item" id="pGuessTimer"></div></div>
     <!-- §6.1: the M3 estimate rides on the primary button's label. The guess
-         MODIFIER class (SUPER SURE + Decoy) is one chip docked to the bar
-         (shown only while a modifier is unspent) that opens the one sheet
-         explaining it; the empty context-pill slot above carries the transient
-         pin-drop callout (js/modifier-ui.js). -->
+         MODIFIER class (SUPER SURE + Decoy) has one door — the pin-drop callout
+         in the empty context-pill slot above (js/modifier-ui.js), which opens
+         the one sheet explaining it (§A2: the bar chip is retired). -->
     <div class="action-bar">
-      <!-- One chip for the "once-per-game modifier" slot — SUPER SURE and the
-           Decoy no longer fit the bar side by side (style.css §6.1 width
-           budget). The icon + aria-label are set at render from the priority
-           available modifier (player-ui.js#renderModifierChip); when both are
-           live, the sheet cross-offers the other. -->
-      <button id="btnModifier" class="mod-chip hidden" type="button"
-              aria-label="Guess modifiers — once-per-game plays"></button>
       <button id="btnPGiveUpMap" class="btn-ghost hidden" type="button">Give up</button>
       <button id="btnBackToStreet" class="btn-ghost">Back to street</button>
       <button id="btnLockIn" class="btn-primary" disabled>Lock it in</button>

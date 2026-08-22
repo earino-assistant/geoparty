@@ -1,18 +1,17 @@
 // Tests for js/modifier.js — the class-level layer over the guess modifiers
-// (docs/guess-modifier-design.md §6). Availability + chip state, the shared
-// deploy fold, the pin-drop callout decision, and the one-home copy rules.
-// The MECHANICS (resolution/settlement/plant) stay proven by supersure.test.js
-// and decoy.test.js, which this change leaves untouched.
+// (docs/guess-modifier-design.md §A2.6). Availability, the shared deploy fold,
+// the pin-drop callout decision (stateless, round-1 reachable), and the
+// one-home copy rules (co-equal options, arm-is-commit). The MECHANICS
+// (resolution/settlement/plant) stay proven by supersure.test.js and
+// decoy.test.js, which this change leaves untouched.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   MODIFIERS,
   availableModifiers,
-  modifierChipState,
   modifierInitialState,
   modifierFold,
   shouldCalloutModifier,
-  markCalloutShown,
   calloutSpec,
   MODIFIER_SHEETS,
   sheetActions,
@@ -25,53 +24,43 @@ const teamRows = (over = {}) => ({
 });
 
 /* ================================================================
- * availableModifiers / modifierChipState (§6)
+ * availableModifiers (§A2.6)
  * ================================================================ */
 
-test("availableModifiers: h2h, nothing spent → super then decoy; chip 🔥", () => {
+test("availableModifiers: h2h, nothing spent → super then decoy", () => {
   const teams = teamRows();
   const avail = availableModifiers({
     mode: "h2h", teams, teamId: "t1", twistId: null,
     deployState: modifierInitialState(),
   });
   assert.deepEqual(avail, ["super", "decoy"]);
-  const chip = modifierChipState({ available: avail, deployState: modifierInitialState() });
-  assert.equal(chip.visible, true);
-  assert.equal(chip.icon, "🔥");
-  assert.equal(chip.armed, false);
-  assert.match(chip.ariaLabel, /SUPER SURE/);
 });
 
-test("availableModifiers: couch → super only (decoy is mode-gated); chip 🔥", () => {
+test("availableModifiers: couch → super only (decoy is mode-gated)", () => {
   const teams = teamRows();
   const avail = availableModifiers({
     mode: "couch", teams, teamId: "t1", twistId: null,
     deployState: modifierInitialState(),
   });
   assert.deepEqual(avail, ["super"]);
-  assert.equal(modifierChipState({ available: avail }).icon, "🔥");
 });
 
-test("availableModifiers: h2h, SUPER spent → decoy only; chip icon 🎭", () => {
+test("availableModifiers: h2h, SUPER spent → decoy only", () => {
   const teams = teamRows({ t1: { superSureUsed: 2 } });
   const avail = availableModifiers({
     mode: "h2h", teams, teamId: "t1", twistId: null,
     deployState: modifierInitialState(),
   });
   assert.deepEqual(avail, ["decoy"]);
-  const chip = modifierChipState({ available: avail, deployState: modifierInitialState() });
-  assert.equal(chip.icon, "🎭");
-  assert.match(chip.ariaLabel, /Decoy/);
 });
 
-test("availableModifiers: h2h, SUPER spent + Blind twist → []; chip hidden", () => {
+test("availableModifiers: h2h, SUPER spent + Blind twist → []", () => {
   const teams = teamRows({ t1: { superSureUsed: 2 } });
   const avail = availableModifiers({
     mode: "h2h", teams, teamId: "t1", twistId: "blind",
     deployState: modifierInitialState(),
   });
   assert.deepEqual(avail, []);
-  assert.equal(modifierChipState({ available: avail }).visible, false);
 });
 
 test("availableModifiers: a decoy planted this round is excluded via deployState", () => {
@@ -83,41 +72,31 @@ test("availableModifiers: a decoy planted this round is excluded via deployState
   assert.deepEqual(avail, ["super"]);
 });
 
-test("availableModifiers: both spent → []; chip hidden", () => {
+test("availableModifiers: both spent → []", () => {
   const teams = teamRows({ t1: { superSureUsed: 1, decoyUsed: 1 } });
   const avail = availableModifiers({
     mode: "h2h", teams, teamId: "t1", twistId: null,
     deployState: modifierInitialState(),
   });
   assert.deepEqual(avail, []);
-  const chip = modifierChipState({ available: avail, deployState: modifierInitialState() });
-  assert.equal(chip.visible, false);
-  assert.equal(chip.armed, false);
-});
-
-test("modifierChipState: armed when super armed OR decoy armed/awaiting-plant", () => {
-  const superArmed = modifierChipState({
-    available: ["super", "decoy"],
-    deployState: { superArmed: true, decoy: { armed: false, planted: false } },
-  });
-  assert.equal(superArmed.armed, true);
-  const decoyArmed = modifierChipState({
-    available: ["decoy"],
-    deployState: { superArmed: false, decoy: { armed: true, planted: false } },
-  });
-  assert.equal(decoyArmed.armed, true);
 });
 
 /* ================================================================
- * modifierFold (§6)
+ * modifierFold (§A2.6) — arm is a commitment; there is no disarm
  * ================================================================ */
 
-test("modifierFold: arm/disarm super toggles superArmed", () => {
+test("modifierFold: arm super sets superArmed (no disarm path)", () => {
   let s = modifierInitialState();
   s = modifierFold(s, { type: "arm", id: "super" }).state;
   assert.equal(s.superArmed, true);
-  s = modifierFold(s, { type: "disarm", id: "super" }).state;
-  assert.equal(s.superArmed, false);
+});
+
+test("modifierFold: a stray {type:'disarm'} falls through — state unchanged, place null", () => {
+  const armed = modifierFold(modifierInitialState(), { type: "arm", id: "super" }).state;
+  const out = modifierFold(armed, { type: "disarm", id: "super" });
+  assert.equal(out.state, armed);       // same object, unchanged (still armed)
+  assert.equal(out.state.superArmed, true);
+  assert.equal(out.place, null);
 });
 
 test("modifierFold: a tap with super armed → place 'pin', superArmed survives", () => {
@@ -151,57 +130,37 @@ test("modifierFold: newRound resets both; unknown action → unchanged, place nu
 });
 
 /* ================================================================
- * shouldCalloutModifier / markCalloutShown (§6)
+ * shouldCalloutModifier (§A2.6) — stateless, round-1 reachable, array return
  * ================================================================ */
 
 const CALLOUT_BASE = {
-  mode: "h2h", roundNumber: 2, available: ["super", "decoy"],
-  firstPinOfRound: true, hasResult: false, calloutShown: new Set(), teamId: "t1",
+  mode: "h2h", roundNumber: 1, available: ["super", "decoy"],
+  firstPinOfRound: true, hasResult: false,
 };
 
-test("shouldCalloutModifier: round 1 → null in every configuration", () => {
-  for (const mode of ["h2h", "couch"]) {
-    for (const available of [["super", "decoy"], ["decoy"], []]) {
-      assert.equal(shouldCalloutModifier({
-        ...CALLOUT_BASE, mode, roundNumber: 1, available,
-      }), null);
-    }
+test("shouldCalloutModifier: fires on rounds 1, 2 and 5 alike — no memory, no calm gate", () => {
+  for (const roundNumber of [1, 2, 5]) {
+    assert.deepEqual(
+      shouldCalloutModifier({ ...CALLOUT_BASE, roundNumber }),
+      ["super", "decoy"],
+    );
   }
 });
 
-test("shouldCalloutModifier: round ≥ 2 first pin — super, then decoy, then null", () => {
-  assert.equal(shouldCalloutModifier(CALLOUT_BASE), "super");
-  assert.equal(shouldCalloutModifier({ ...CALLOUT_BASE, available: ["decoy"] }), "decoy");
-  assert.equal(shouldCalloutModifier({ ...CALLOUT_BASE, available: [] }), null);
+test("shouldCalloutModifier: returns the full ordered available array", () => {
+  assert.deepEqual(shouldCalloutModifier(CALLOUT_BASE), ["super", "decoy"]);
+  assert.deepEqual(
+    shouldCalloutModifier({ ...CALLOUT_BASE, available: ["decoy"] }),
+    ["decoy"],
+  );
 });
 
-test("shouldCalloutModifier: not-first-pin / has-result / already-shown → null", () => {
+test("shouldCalloutModifier: non-numeric round / not-first-pin / has-result / empty → null", () => {
+  assert.equal(shouldCalloutModifier({ ...CALLOUT_BASE, roundNumber: "1" }), null);
+  assert.equal(shouldCalloutModifier({ ...CALLOUT_BASE, roundNumber: 0 }), null);
   assert.equal(shouldCalloutModifier({ ...CALLOUT_BASE, firstPinOfRound: false }), null);
   assert.equal(shouldCalloutModifier({ ...CALLOUT_BASE, hasResult: true }), null);
-  assert.equal(shouldCalloutModifier({
-    ...CALLOUT_BASE, calloutShown: new Set(["t1"]),
-  }), null);
-});
-
-test("markCalloutShown is non-mutating and idempotent", () => {
-  const before = new Set();
-  const after = markCalloutShown(before, "t1");
-  assert.equal(before.has("t1"), false);   // original untouched
-  assert.equal(after.has("t1"), true);
-  const again = markCalloutShown(after, "t1");
-  assert.deepEqual([...again], ["t1"]);     // no duplicate
-});
-
-test("shouldCalloutModifier (couch): two teams, one shown → the other fires", () => {
-  const shown = markCalloutShown(new Set(), "t1");
-  assert.equal(shouldCalloutModifier({
-    ...CALLOUT_BASE, mode: "couch", available: ["super"],
-    calloutShown: shown, teamId: "t1",
-  }), null);
-  assert.equal(shouldCalloutModifier({
-    ...CALLOUT_BASE, mode: "couch", available: ["super"],
-    calloutShown: shown, teamId: "t2",
-  }), "super");
+  assert.equal(shouldCalloutModifier({ ...CALLOUT_BASE, available: [] }), null);
 });
 
 test("shouldCalloutModifier: daily / unknown mode → null", () => {
@@ -210,31 +169,47 @@ test("shouldCalloutModifier: daily / unknown mode → null", () => {
   }
 });
 
+test("shouldCalloutModifier (couch): both teams' turns fire in the same round, incl. round 1", () => {
+  // No per-team memory: whichever team holds the phone, the first pin fires.
+  for (const roundNumber of [1, 3]) {
+    assert.deepEqual(shouldCalloutModifier({
+      ...CALLOUT_BASE, mode: "couch", roundNumber, available: ["super"],
+    }), ["super"]);
+  }
+});
+
 /* ================================================================
- * Copy — the exactly-one-place rule (§6)
+ * Copy — the exactly-one-place rule (§A2.6)
  * ================================================================ */
 
-test("calloutSpec: teases carry the stakes hook only, never a rule phrase", () => {
-  const sup = calloutSpec("super");
+test("calloutSpec: all three tease variants, exact, with no rule phrase leaking in", () => {
+  const both = calloutSpec(["super", "decoy"]);
+  assert.deepEqual(both, {
+    title: "Raise the stakes?", line: "🔥 Double or nothing · 🎭 Decoy pin",
+  });
+  const sup = calloutSpec(["super"]);
   assert.deepEqual(sup, { title: "Are you SUPER SURE?", line: "Tap for double or nothing 🔥" });
-  const dec = calloutSpec("decoy");
+  const dec = calloutSpec(["decoy"]);
   assert.deepEqual(dec, { title: "Feeling sneaky?", line: "Tap to plant a decoy pin 🎭" });
-  // No rule phrases from the sheet may leak into the tease.
-  for (const spec of [sup, dec]) {
+  // No rule phrases from the sheet may leak into any tease (§4.5, both-tease too).
+  for (const spec of [both, sup, dec]) {
     const text = `${spec.title} ${spec.line}`;
     assert.ok(!/Closest pin/i.test(text));
     assert.ok(!/once per game/i.test(text));
     assert.ok(!/×2|score 0/i.test(text));
+    assert.ok(!/no backing out/i.test(text));
   }
-  assert.equal(calloutSpec("nope"), null);
+  assert.equal(calloutSpec([]), null);
+  assert.equal(calloutSpec(["nope"]), null);
 });
 
-test("MODIFIER_SHEETS.super.lines is byte-equal to the moved SUPER_SURE_SHEET copy", () => {
-  // The rule text must not drift when it moves out of hints.js. This is the
-  // verbatim pre-move string (hints.SUPER_SURE_SHEET.lines), now deleted there.
+test("MODIFIER_SHEETS.super.lines is the moved copy verbatim + the §A2.3 commitment line", () => {
+  // The original rule text (previously hints.SUPER_SURE_SHEET.lines) must not
+  // drift; A2.3 appends exactly one commitment line, and nothing else.
   assert.deepEqual(MODIFIER_SHEETS.super.lines, [
     "Double or nothing, once per game. Closest pin this round: your " +
     "points ×2. Anyone closer: you score 0.",
+    "Once armed, the bet is on — no backing out this round.",
   ]);
   assert.equal(MODIFIER_SHEETS.super.title, "SUPER SURE");
   assert.equal(MODIFIER_SHEETS.super.armLabel, "Arm the bet");
@@ -242,32 +217,41 @@ test("MODIFIER_SHEETS.super.lines is byte-equal to the moved SUPER_SURE_SHEET co
   assert.equal(MODIFIER_SHEETS.decoy.armLabel, "Plant the decoy");
 });
 
-test("sheetActions: both available → each sheet ends with the cross-offer", () => {
-  const both = ["super", "decoy"];
-  const superRows = sheetActions({ id: "super", available: both, deployState: modifierInitialState() });
-  assert.equal(superRows[superRows.length - 1].kind, "cross");
-  assert.equal(superRows[superRows.length - 1].target, "decoy");
-  const decoyRows = sheetActions({ id: "decoy", available: both, deployState: modifierInitialState() });
-  assert.equal(decoyRows[decoyRows.length - 1].kind, "cross");
-  assert.equal(decoyRows[decoyRows.length - 1].target, "super");
-});
-
-test("sheetActions: a single available modifier has no cross row", () => {
-  const rows = sheetActions({ id: "super", available: ["super"], deployState: modifierInitialState() });
-  assert.ok(!rows.some((r) => r.kind === "cross"));
-  assert.deepEqual(rows.map((r) => r.kind), ["cancel", "arm"]);
-});
-
-test("sheetActions: an armed super shows the Disarm/Keep pair", () => {
+test("sheetActions: both available → two co-equal arm rows (registry order) + one cancel", () => {
   const rows = sheetActions({
-    id: "super", available: ["super"],
-    deployState: { superArmed: true, decoy: { armed: false, planted: false } },
+    available: ["super", "decoy"], deployState: modifierInitialState(),
   });
-  assert.deepEqual(rows.map((r) => r.kind), ["disarm", "keep"]);
-  assert.equal(rows[0].label, "Disarm");
-  assert.equal(rows[1].label, "Keep it armed");
+  assert.deepEqual(rows, [
+    { kind: "arm", id: "super", label: "Arm the bet" },
+    { kind: "arm", id: "decoy", label: "Plant the decoy" },
+    { kind: "cancel", label: "Not now" },
+  ]);
 });
 
-test("MODIFIERS: priority order is super then decoy (the hero teases first)", () => {
+test("sheetActions: a single available modifier → one arm row + cancel, nothing else", () => {
+  const rows = sheetActions({ available: ["decoy"], deployState: modifierInitialState() });
+  assert.deepEqual(rows, [
+    { kind: "arm", id: "decoy", label: "Plant the decoy" },
+    { kind: "cancel", label: "Not now" },
+  ]);
+});
+
+test("sheetActions: NO cross rows and NO disarm/keep rows in any configuration", () => {
+  const configs = [
+    { available: ["super", "decoy"], deployState: modifierInitialState() },
+    { available: ["super"], deployState: { superArmed: true, decoy: { armed: false, planted: false } } },
+    { available: ["decoy"], deployState: modifierInitialState() },
+    { available: [], deployState: modifierInitialState() },
+  ];
+  for (const cfg of configs) {
+    const rows = sheetActions(cfg);
+    assert.ok(!rows.some((r) => r.kind === "cross"));
+    assert.ok(!rows.some((r) => r.kind === "disarm"));
+    assert.ok(!rows.some((r) => r.kind === "keep"));
+  }
+  assert.deepEqual(sheetActions({ available: [] }), []); // nothing available → no rows
+});
+
+test("MODIFIERS: display order is super then decoy", () => {
   assert.deepEqual(MODIFIERS.map((m) => m.id), ["super", "decoy"]);
 });
