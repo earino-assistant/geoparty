@@ -909,6 +909,13 @@ async function renderRecap(result, alreadyPlayed) {
   const box = $("dDoneRecap");
   try {
     destroyRecap();
+    // The static "Your five places" title must not wait on async place
+    // reconstruction — show the recap frame in the same beat as the done
+    // screen so the header never blinks in late (worst on the re-opened
+    // ghost-link path, where peekDayPlaces below actually awaits). Only the
+    // carousel cards fill in once places resolve. The no-cards / error paths
+    // re-hide the box, so a zero-card run never leaves a lonely header.
+    box.classList.remove("hidden");
     // Fresh play: the places we actually showed (skip-adjusted, aligned to
     // result.rounds). Replay / ghost-verdict: recompute from the seed (the
     // skew guard in recapCards drops any card the pool has drifted under).
