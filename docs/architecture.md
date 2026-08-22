@@ -50,6 +50,9 @@ js/imagery.js      Pure field observability: imagery error taxonomy,
                    exception-cap policy, pano_session fold, session-health
                    classifier, ref codes, report bundle                    ← tested
 js/qr.js           Self-contained QR encoder (join/screen URLs)            ← tested
+js/revealmap.js    Pure reveal-map scene builder: the four surfaces' pins,
+                   lines, halos, decoys, ghost beat + cascade as data
+                   (colors/sizes/durations/escaping all here)              ← tested
 js/firebase.js     Firebase init + thin typed helpers (the only SDK import)
 js/landing-ui.js   The one front door: hero pano, chooser, code routing
 js/hints-ui.js     One-shot hint / bottom-sheet renderer, one sheet at a
@@ -67,6 +70,9 @@ js/screen-h2h.js   TV renderer, head-to-head split panels + reveal
 js/viewer-ui.js    Instrumented MapillaryJS wrapper — the ONLY place a
                    Viewer is constructed or moveTo'd; times, classifies
                    and reports every load
+js/revealmap-ui.js Thin Leaflet glue for the reveal map — the ONLY place the
+                   four reveal maps are built; executes a revealmap.js scene,
+                   drives the cascade, fires surface hooks, tears down safely
 js/report-ui.js    "Report it" flow: reactive toast action, calm-state
                    settings link, one-time diagnostic consent sheet
 ```

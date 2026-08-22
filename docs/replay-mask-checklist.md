@@ -154,6 +154,17 @@ The reveal maps changed size (36 vh → 52 vh) and gained a `touch-action`
 rule in the de-clutter pass, neither of which affects `blockSelector`: the
 selector matches `.leaflet-container`, which every one of them still is.
 
+The four reveal maps (`#dRevealMap`, `#pRevealMap`, `#revealMap`,
+`#h2hRevealMap`) are now rendered by a single shared module,
+`js/revealmap-ui.js` (from the `js/revealmap.js` scene), instead of four
+per-surface copies. This changes nothing about masking — the containers are
+still `.leaflet-container` and still fall under `blockSelector`, and the
+module adds no DOM outside them. But it means **any new reveal label** (a new
+pin tooltip, chip, or badge) must be added as a scene op in `js/revealmap.js`,
+and any such addition still renders inside `.leaflet-container` (blocked). Any
+new reveal *container* would need its own `blockSelector`/mask entry here.
+Re-run the §5 verify-on-a-real-recording step after any reveal-scene change.
+
 **Why blocked and not masked:** Leaflet renders OSM tiles as
 `<img src="…/{z}/{x}/{y}.png">`. A tile path *is* a coordinate. Masking the
 text would leave the tile URLs — and therefore the round's answer and the
