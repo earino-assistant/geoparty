@@ -287,16 +287,18 @@ export function dailyEntryRoute({ hasSaved, isExhibition, isDuel, ghostOk }) {
 // finishRun's fold plan. A duel whose day+mode is ALREADY resolved (an earlier
 // instant-verdict, or a replay that somehow raced the boot guard) folds NOTHING
 // again — no duplicate W/L, ACE, PB, saved-run overwrite, or verdict/completed
-// event. An exhibition folds no records but still reports (it changed nothing
-// on this device by design). A first play folds everything. The verdict itself
-// is always computed by the caller for the done screen regardless of this plan.
+// event. An exhibition folds no records AND reports nothing: it changed nothing
+// on this device by design and is not a counted run, so it must not emit
+// ghost_duel_completed / daily_challenge_completed (nor daily_challenge_started,
+// gated in daily-ui.js). A first play folds everything. The verdict itself is
+// always computed by the caller for the done screen regardless of this plan.
 export function duelFoldPlan({ isDuel, isExhibition, alreadyResolved }) {
   const duelDone = !!(isDuel && alreadyResolved);
   return {
     foldRecords: !isExhibition && !duelDone,
     foldDuel: !!isDuel && !isExhibition && !duelDone,
-    emitDuel: !!isDuel && !duelDone,
-    emitCompleted: !duelDone,
+    emitDuel: !!isDuel && !isExhibition && !duelDone,
+    emitCompleted: !isExhibition && !duelDone,
   };
 }
 

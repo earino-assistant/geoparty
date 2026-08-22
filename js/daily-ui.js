@@ -282,12 +282,14 @@ async function startChallenge() {
         toast("This challenge was built on an older Daily — playing without the ghost.");
       }
     }
-    track("daily_challenge_started", {
-      day_number: runDayNum,
-      hard: mode === "hard",
-      vs_ghost: isDuel,
-      streak: records.streak.count,
-    });
+    if (!isExhibition) {
+      track("daily_challenge_started", {
+        day_number: runDayNum,
+        hard: mode === "hard",
+        vs_ghost: isDuel,
+        streak: records.streak.count,
+      });
+    }
     await startRound();
   } catch (e) {
     console.error(scrubErrorMessage(e));

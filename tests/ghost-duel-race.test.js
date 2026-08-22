@@ -98,10 +98,16 @@ test("duelFoldPlan: a plain (non-duel) daily folds records + completed only", ()
     { foldRecords: true, foldDuel: false, emitDuel: false, emitCompleted: true });
 });
 
-test("duelFoldPlan: an exhibition folds no records but still reports (it changed nothing on-device)", () => {
+test("duelFoldPlan: an exhibition folds nothing AND reports nothing (not a counted run)", () => {
   assert.deepEqual(
     duelFoldPlan({ isDuel: true, isExhibition: true, alreadyResolved: false }),
-    { foldRecords: false, foldDuel: false, emitDuel: true, emitCompleted: true });
+    { foldRecords: false, foldDuel: false, emitDuel: false, emitCompleted: false });
+});
+
+test("duelFoldPlan: an already-resolved exhibition also folds and reports nothing", () => {
+  assert.deepEqual(
+    duelFoldPlan({ isDuel: true, isExhibition: true, alreadyResolved: true }),
+    { foldRecords: false, foldDuel: false, emitDuel: false, emitCompleted: false });
 });
 
 /* ================================================================

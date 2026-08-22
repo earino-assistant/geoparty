@@ -1444,6 +1444,23 @@ test("sanitizeBeforeSend: scrubs exception values and stack frames", () => {
   assert.ok(!ev.properties.$exception_message.includes("1263588815098567"));
 });
 
+test("sanitizeBeforeSend: scrubs coordinate-shaped decimals from exception props", () => {
+  const ev = sanitizeBeforeSend({
+    event: "$exception",
+    properties: {
+      $exception_message: "moveTo near 48.8566, 2.3522 failed",
+      $exception_list: [{
+        type: "Error",
+        value: "guess at 48.8566, 2.3522 rejected",
+      }],
+    },
+  });
+  assert.ok(!ev.properties.$exception_message.includes("48.8566"));
+  assert.ok(!ev.properties.$exception_message.includes("2.3522"));
+  assert.ok(!ev.properties.$exception_list[0].value.includes("48.8566"));
+  assert.ok(!ev.properties.$exception_list[0].value.includes("2.3522"));
+});
+
 test("sanitizeBeforeSend: never drops an event (that is the schema's job)", () => {
   assert.deepEqual(sanitizeBeforeSend({ event: "x" }), { event: "x" });
   assert.equal(sanitizeBeforeSend(null), null);

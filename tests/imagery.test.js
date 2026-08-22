@@ -206,6 +206,25 @@ test("scrubErrorMessage: replaces image ids and truncates", () => {
   assert.equal(scrubErrorMessage("x".repeat(1000)).length, MESSAGE_MAX);
 });
 
+test("scrubErrorMessage: coordinate-shaped decimals become <coord>", () => {
+  assert.equal(
+    scrubErrorMessage("moveTo near 48.856614, 2.352200 failed"),
+    "moveTo near <coord>, <coord> failed",
+  );
+  // A high-precision coord must collapse whole, not leak its integer part as
+  // "48.<id>" — the coord pass runs before the digit run.
+  assert.equal(
+    scrubErrorMessage("at 48.856614231234 now"),
+    "at <coord> now",
+  );
+  assert.equal(scrubErrorMessage("at -2.3522 south"), "at <coord> south");
+  // A long id (no decimal point) still collapses to <id>.
+  assert.equal(
+    scrubErrorMessage("Image 1263588815098567 not found"),
+    "Image <id> not found",
+  );
+});
+
 test("scrubErrorMessage: accepts Errors and nullish input", () => {
   assert.equal(scrubErrorMessage(new Error("Image 1263588815098567 dead")),
     "Image <id> dead");

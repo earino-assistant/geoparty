@@ -132,6 +132,9 @@ export function classifyImageryError(err, ctx) {
 
 const DIGIT_RUN_RE = /\d{10,}/g;
 const URL_TOKEN_RE = /\b(?:https?:\/\/|www\.)[^\s"'<>()\]]+/gi;
+// A decimal with a fractional part (e.g. 48.856614, -2.3522) reverses to a
+// place, so any coordinate-shaped number dies before a digit run could split it.
+const COORD_RE = /-?\d{1,3}\.\d+/g;
 export const MESSAGE_MAX = 300;
 
 // Mapillary access tokens ride in query params and image ids are long digit
@@ -157,7 +160,8 @@ export function scrubErrorMessage(value) {
     const cut = m.search(/[?#]/);
     return cut === -1 ? m : m.slice(0, cut);
   });
-  const noIds = noQuery.replace(DIGIT_RUN_RE, "<id>");
+  const noCoords = noQuery.replace(COORD_RE, "<coord>");
+  const noIds = noCoords.replace(DIGIT_RUN_RE, "<id>");
   return noIds.length > MESSAGE_MAX ? noIds.slice(0, MESSAGE_MAX) : noIds;
 }
 
