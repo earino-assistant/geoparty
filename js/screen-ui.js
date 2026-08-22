@@ -46,6 +46,10 @@ import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer } from "./viewer-ui.js";
 import { scrubErrorMessage } from "./imagery.js";
+import {
+  TEAM_HEX, teamHex, escapeHtml, tvSoloRevealScene, tvCascadeRevealScene,
+} from "./revealmap.js";
+import { renderRevealScene } from "./revealmap-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = [
@@ -55,16 +59,8 @@ const SCREENS = [
 const TEAM_COLORS = ["var(--team-1)", "var(--team-2)", "var(--team-3)", "var(--team-4)"];
 // Same palette as concrete hex: Leaflet paints SVG markers with these, and
 // CSS var() strings don't resolve inside SVG presentation attributes.
-const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
-
-const teamHex = (teams, id) => {
-  const i = teamIds(teams).indexOf(id);
-  return i >= 0 ? TEAM_HEX[i % TEAM_HEX.length] : TEAM_HEX[0];
-};
-
-// Leaflet tooltip content is HTML; team names are user input.
-const escapeHtml = (s) =>
-  String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+// TEAM_HEX/teamHex (guarded) and escapeHtml are shared with the reveal
+// renderer; the live guessing-phase map here still uses them directly.
 
 function showScreen(id) {
   for (const s of SCREENS) $(s).classList.toggle("hidden", s !== id);
@@ -84,7 +80,7 @@ let viewer = null;        // its raw MapillaryJS viewer (pose APIs unchanged)
 let currentImageId = null;
 let countdownInterval = null;
 
-let revealMap = null;
+let revealHandle = null;
 let revealShownForRound = null;
 let confettiDone = false;
 
@@ -686,68 +682,21 @@ function renderReveal(state) {
   placeEl.textContent = round.truth.name || "";
   placeEl.classList.remove("show");
 
-  if (revealMap) { revealMap.remove(); revealMap = null; }
-  revealMap = L.map("revealMap", {
-    zoomControl: false,
-    attributionControl: true,
-    dragging: false,
-    scrollWheelZoom: false,
-    doubleClickZoom: false,
-    boxZoom: false,
-    keyboard: false,
-    touchZoom: false,
-  });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(revealMap);
-
-  const truth = L.latLng(round.truth.lat, round.truth.lng);
-  const guess = L.latLng(round.guess.lat, round.guess.lng);
   // G4 (C2): the medal grade of this pin — its caption rides the distance line,
-  // and a sub-1km ACE fires the burst when the truth lands (below).
+  // and a sub-1km ACE fires the burst when the truth lands (in onFinish).
   const medal = medalForDistance(round.score.distanceKm);
-  L.circleMarker(guess, {
-    radius: 12, color: "#fff", weight: 3, fillColor: "#555", fillOpacity: 1,
-  }).addTo(revealMap).bindTooltip("Guess", { permanent: true, direction: "top" });
-  if (round.score.superSure) {
-    // The bet steps out of hiding: verdict halo on the pin (reveal-only).
-    L.circleMarker(guess, {
-      radius: 18, color: "#ffcf3f", weight: 3, fill: false,
-      dashArray: "4 6", interactive: false,
-    }).addTo(revealMap)
-      .bindTooltip(superSureLabel(round.score),
-        { permanent: true, direction: "bottom", className: "ss-tooltip" });
-  }
-  const truthMarker = L.circleMarker(truth, {
-    radius: 12, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
-  });
 
-  revealMap.fitBounds(L.latLngBounds([truth, guess]).pad(0.25), { maxZoom: 10 });
-  setTimeout(() => revealMap.invalidateSize({ pan: false }), 60);
-
-  // Animate the guess-to-truth line drawing over ~1s, then count the score up
-  // (spec §11 — get this beat right). Reduced motion collapses the draw to
-  // an instant land (fx.js: zero duration => fraction 1 on the first frame).
-  const line = L.polyline([guess], { color: "#ffcf3f", weight: 4, dashArray: "8 10" })
-    .addTo(revealMap);
-  const DRAW_MS = motionDuration(1000, prefersReducedMotion());
-  let start = null;
-  const step = (t) => {
-    if (start === null) start = t;
-    const eased = animFraction(t - start, DRAW_MS);
-    line.setLatLngs([
-      guess,
-      L.latLng(
-        guess.lat + (truth.lat - guess.lat) * eased,
-        guess.lng + (truth.lng - guess.lng) * eased
-      ),
-    ]);
-    if (eased < 1) {
-      requestAnimationFrame(step);
-    } else {
-      truthMarker.addTo(revealMap)
-        .bindTooltip("Answer", { permanent: true, direction: "top" });
+  // The grey Guess pin, the optional SUPER SURE halo, the ~1s animated line
+  // and the gold Answer are the shared solo scene now (js/revealmap.js).
+  // onFinish carries the off-map beats that ride the truth landing.
+  revealHandle?.destroy();
+  revealHandle = renderRevealScene("revealMap", tvSoloRevealScene({
+    truth: round.truth,
+    guess: round.guess,
+    score: round.score,
+    reducedMotion: prefersReducedMotion(),
+  }), {
+    onFinish: () => {
       placeEl.classList.add("show");
       playSound("sting"); // S4: the truth lands — the shout-it-out beat
       countUpPoints(adjustedPoints(round.score)); // ×2/0 applied for bets
@@ -756,13 +705,13 @@ function renderReveal(state) {
       // C2: the ACE burst fires with the truth landing (reduced-motion collapses
       // the stamp via CSS, like LOCKED IN).
       if (medal.ace) stampFlash(`🎯 ACE — ${formatDistance(round.score.distanceKm)}`);
-    }
-  };
+    },
+  });
+
   $("tvDistance").textContent = formatDistance(round.score.distanceKm) +
     (medal.caption ? ` · ${medal.caption}` : "");
   $("tvPoints").textContent = "0";
   ensureSpeedNote().textContent = "";
-  requestAnimationFrame(step);
 }
 
 /* Showdown reveal: every team's pin on one map. Lines draw one after
@@ -802,39 +751,29 @@ function renderShowdownReveal(state, round) {
   placeEl.textContent = round.truth.name || "";
   placeEl.classList.remove("show");
 
-  if (revealMap) { revealMap.remove(); revealMap = null; }
-  revealMap = L.map("revealMap", {
-    zoomControl: false,
-    attributionControl: true,
-    dragging: false,
-    scrollWheelZoom: false,
-    doubleClickZoom: false,
-    boxZoom: false,
-    keyboard: false,
-    touchZoom: false,
-  });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(revealMap);
-
-  const truth = L.latLng(round.truth.lat, round.truth.lng);
-  const guessPts = order.map(
-    (id) => L.latLng(results[id].guess.lat, results[id].guess.lng)
-  );
-  revealMap.fitBounds(
-    L.latLngBounds([truth, ...guessPts]).pad(0.25), { maxZoom: 10 }
-  );
-  setTimeout(() => revealMap.invalidateSize({ pan: false }), 60);
-
+  const entries = order.map((id) => ({ id, ...results[id] }));
   const closestId = showdownResults(round)[0].id;
   const rows = {};
 
+  // Each team's row is appended as its line lands (onStep); the truth marker +
+  // "Answer" land in the scene finale, and onFinish crowns the closest + fires
+  // the ACE burst. The cascade order is the surface's `order` (no re-sort).
+  const addRow = (e) => {
+    const color = teamHex(state.teams, e.id);
+    const row = document.createElement("div");
+    row.className = "row";
+    const name = document.createElement("span");
+    name.textContent = state.teams[e.id].name;
+    name.style.color = color;
+    const val = document.createElement("span");
+    val.className = "pts";
+    val.textContent = resultRowText(e);
+    row.append(name, val);
+    rows[e.id] = row;
+    boardEl.appendChild(row);
+  };
+
   const finish = () => {
-    L.circleMarker(truth, {
-      radius: 12, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
-    }).addTo(revealMap)
-      .bindTooltip("Answer", { permanent: true, direction: "top" });
     placeEl.classList.add("show");
     playSound("sting"); // S4: the truth lands
     const row = rows[closestId];
@@ -849,56 +788,17 @@ function renderShowdownReveal(state, round) {
     if (medalForDistance(aceKm).ace) stampFlash(`🎯 ACE — ${formatDistance(aceKm)}`);
   };
 
-  const DRAW_MS = motionDuration(800, prefersReducedMotion());
-  const drawNext = (i) => {
-    if (i >= order.length) { finish(); return; }
-    const id = order[i];
-    const r = results[id];
-    const guess = L.latLng(r.guess.lat, r.guess.lng);
-    const color = teamHex(state.teams, id);
-    L.circleMarker(guess, {
-      radius: 10, color: "#fff", weight: 3, fillColor: color, fillOpacity: 1,
-    }).addTo(revealMap)
-      .bindTooltip(escapeHtml(state.teams[id].name),
-        { permanent: true, direction: "top" });
-    if (r.superSure) {
-      L.circleMarker(guess, {
-        radius: 16, color: "#ffcf3f", weight: 3, fill: false,
-        dashArray: "4 6", interactive: false,
-      }).addTo(revealMap)
-        .bindTooltip(superSureLabel(r),
-          { permanent: true, direction: "bottom", className: "ss-tooltip" });
-    }
-    const line = L.polyline([guess], { color, weight: 4, dashArray: "8 10" })
-      .addTo(revealMap);
-    let start = null;
-    const step = (t) => {
-      if (start === null) start = t;
-      const eased = animFraction(t - start, DRAW_MS);
-      line.setLatLngs([
-        guess,
-        L.latLng(
-          guess.lat + (truth.lat - guess.lat) * eased,
-          guess.lng + (truth.lng - guess.lng) * eased
-        ),
-      ]);
-      if (eased < 1) { requestAnimationFrame(step); return; }
-      const row = document.createElement("div");
-      row.className = "row";
-      const name = document.createElement("span");
-      name.textContent = state.teams[id].name;
-      name.style.color = color;
-      const val = document.createElement("span");
-      val.className = "pts";
-      val.textContent = resultRowText(r);
-      row.append(name, val);
-      rows[id] = row;
-      boardEl.appendChild(row);
-      setTimeout(() => drawNext(i + 1), 300);
-    };
-    requestAnimationFrame(step);
-  };
-  drawNext(0);
+  revealHandle?.destroy();
+  revealHandle = renderRevealScene("revealMap", tvCascadeRevealScene({
+    truth: round.truth,
+    entries,
+    decoys: [],
+    teams: state.teams,
+    reducedMotion: prefersReducedMotion(),
+  }), {
+    onStep: ({ index }) => addRow(entries[index]),
+    onFinish: finish,
+  });
 }
 
 // Speed line under the points tile (injected — HTML untouched): the
