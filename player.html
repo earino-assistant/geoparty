@@ -138,18 +138,19 @@
          itself, so there is no second "drag to adjust" state (§6.1). -->
     <div class="guess-hint" id="pGuessHint">Tap the map to drop your pin</div>
     <div class="hud"><div></div><div class="hud-item" id="pGuessTimer"></div></div>
-    <!-- §6.1: the M3 estimate now rides on the primary button's label and
-         SUPER SURE is a 🔥 chip docked to the bar (shown only while the bet
-         is unspent) that opens the one sheet explaining it. The floating
-         context-pill layer is empty on this screen. -->
+    <!-- §6.1: the M3 estimate rides on the primary button's label. The guess
+         MODIFIER class (SUPER SURE + Decoy) is one chip docked to the bar
+         (shown only while a modifier is unspent) that opens the one sheet
+         explaining it; the empty context-pill slot above carries the transient
+         pin-drop callout (js/modifier-ui.js). -->
     <div class="action-bar">
-      <!-- P1.6: one chip for the guess bar's "once-per-game bet" slot — the
-           SUPER SURE bet and (h2h) the Decoy no longer fit the bar side by
-           side (style.css §6.1 width budget). Whichever is available opens
-           its sheet; when both are, the SUPER SURE sheet gains a secondary
-           action offering the decoy too (player-ui.js#openGuessBarSheet). -->
-      <button id="btnSuperSure" class="ss-chip hidden" type="button"
-              aria-label="SUPER SURE or Decoy — once-per-game plays">🔥</button>
+      <!-- One chip for the "once-per-game modifier" slot — SUPER SURE and the
+           Decoy no longer fit the bar side by side (style.css §6.1 width
+           budget). The icon + aria-label are set at render from the priority
+           available modifier (player-ui.js#renderModifierChip); when both are
+           live, the sheet cross-offers the other. -->
+      <button id="btnModifier" class="mod-chip hidden" type="button"
+              aria-label="Guess modifiers — once-per-game plays"></button>
       <button id="btnPGiveUpMap" class="btn-ghost hidden" type="button">Give up</button>
       <button id="btnBackToStreet" class="btn-ghost">Back to street</button>
       <button id="btnLockIn" class="btn-primary" disabled>Lock it in</button>

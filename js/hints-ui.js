@@ -61,6 +61,13 @@ export function dismissHintCard() {
   if (scrim) { scrim.remove(); scrim = null; }
 }
 
+// Is a hint/sheet currently on screen? The pin-drop modifier callout uses this
+// to stay suppressed while a sheet is open (§4.1: one sheet at a time), and to
+// leave itself un-marked-shown so it can fire on a later round's first pin.
+export function hintCardOpen() {
+  return !!card;
+}
+
 // The one call feature code makes: show hint `id` if this device has never
 // seen it. `spec` overrides/extends the canned card (dynamic lines, e.g.
 // the guess-map hint). Returns whether the card was shown.

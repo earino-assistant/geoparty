@@ -601,7 +601,7 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
    Absence communicates spent; the armed state shows on the primary button's
    own label. Still local-only — nothing about the bet reaches any rival
    surface before the reveal. */
-.ss-chip {
+.mod-chip {
   flex: 0 0 auto;
   width: 58px;
   max-width: 58px;
@@ -614,7 +614,7 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
   color: var(--accent);
   border-radius: 14px;
 }
-.ss-chip.armed {
+.mod-chip.armed {
   background: var(--accent);
   color: #111;
   box-shadow: 0 0 18px rgba(255, 207, 63, 0.6);
@@ -683,6 +683,89 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
   text-align: center;
 }
 
+/* ---------- The pin-drop modifier callout (design §4) ----------
+
+   The guess modifier class's one discoverability moment: a transient tease
+   pill in the context-pill slot (z 600), horizontally centered above the
+   action bar, caret pointing down at the 🔥/🎭 chip where the power
+   permanently lives. Static copy only — no team name, room code or place —
+   so no data-ph-mask (docs/replay-mask-checklist.md). It teases; a tap
+   converts it to the sheet (modifier-ui.js routes the tap). Built in
+   modifier-ui.js and never covers the primary button (it sits above the
+   bar, like the hint-card, but at the lower context-pill layer). */
+.mod-callout {
+  position: fixed;
+  left: 50%;
+  bottom: calc(96px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 600;
+  max-width: min(360px, calc(100vw - 24px));
+  min-height: 44px; /* the whole pill is one 44px+ tap target — no ✕ */
+  padding: 10px 18px;
+  background: rgba(17, 17, 17, 0.92);
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+  text-align: center;
+  cursor: pointer;
+}
+.mod-callout .title {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+.mod-callout .line {
+  margin-top: 2px;
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+/* Caret pointing down at the chip's permanent home in the action bar. */
+.mod-callout::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  transform: translateX(-50%);
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid var(--accent);
+}
+/* Entry: spring-pop riding the pin-drop energy (§4.3) — scale 0.6→1.06→1
+   with an ~8px upward settle. Exit: a short fade + 4px downward drift. */
+.mod-callout.animate-in {
+  animation: mod-callout-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.mod-callout.animate-out {
+  animation: mod-callout-out 0.15s ease-in both;
+}
+@keyframes mod-callout-in {
+  0%   { transform: translateX(-50%) translateY(8px) scale(0.6); opacity: 0; }
+  70%  { transform: translateX(-50%) translateY(0) scale(1.06); opacity: 1; }
+  100% { transform: translateX(-50%) translateY(0) scale(1); }
+}
+@keyframes mod-callout-out {
+  0%   { transform: translateX(-50%) translateY(0); opacity: 1; }
+  100% { transform: translateX(-50%) translateY(4px); opacity: 0; }
+}
+/* The chip's ONE soft pulse (pulseModifierChip) tying the pill to its
+   permanent home, so the player learns where the power lives (§4.3). */
+.mod-chip.mod-pulse {
+  animation: mod-chip-pulse 0.25s ease-out both;
+}
+@keyframes mod-chip-pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Collapse entry/exit to plain show/hide (the file's existing pattern). */
+  .mod-callout.animate-in,
+  .mod-callout.animate-out,
+  .mod-chip.mod-pulse { animation: none; }
+}
+
 /* ---------- The context-pill layer, now down to one (review §4.1) -------
 
    THREE things used to float here at z600 on the guess map: the "tap the
@@ -719,7 +802,7 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
 
 /* The chip and the ghost yield space to the primary, never the reverse
    (§4.1: "primary always rightmost/widest"). */
-#p-guess .ss-chip, #h-guess .ss-chip { width: 48px; max-width: 48px; }
+#p-guess .mod-chip, #h-guess .mod-chip { width: 48px; max-width: 48px; }
 #p-guess .btn-ghost, #d-guess .btn-ghost {
   flex: 0 1 auto;
   min-width: 0;

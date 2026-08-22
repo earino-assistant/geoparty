@@ -424,29 +424,55 @@ test("sanitizeEvent: super_sure_resolved keeps its aggregates, strips the rest",
   });
 });
 
-test("sanitizeEvent: super_sure_sheet_opened carries the mode and nothing else", () => {
-  // The de-clutter pass (review §6.1) replaced the always-on SUPER SURE
-  // pill with a 🔥 chip + sheet; this event is the pair that tells us
-  // whether a chip you must tap is still discovered as often as a pill you
-  // could not miss (against super_sure_resolved's deployment rate).
-  const out = sanitizeEvent("super_sure_sheet_opened", {
-    mode: "h2h",
-    // Nothing else may ride along, including the aimed pin's distance —
-    // the sheet opens while the player is still aiming.
+test("sanitizeEvent: super_sure_sheet_opened was removed (superseded by modifier_sheet_opened)", () => {
+  // The guess-modifier redesign (docs/guess-modifier-design.md §5.1) replaced
+  // the SUPER-only event with a per-modifier funnel. The old name is gone from
+  // the schema, so it drops entirely — historical data stays in PostHog.
+  assert.equal(sanitizeEvent("super_sure_sheet_opened", { mode: "h2h" }), null);
+});
+
+test("sanitizeEvent: modifier_callout_shown carries only aggregates", () => {
+  const out = sanitizeEvent("modifier_callout_shown", {
+    mode: "h2h", modifier: "super", round_number: 3,
+    // None of these may ever ride — the callout fires while aiming.
     room: "KWPFRT", team_id: "t2", team_name: "The Atlas Cats",
-    distance_km: 812, lat: 48.85, lng: 2.35, guess: { lat: 1, lng: 2 },
-    deviceId: "d-1", pin: { lat: 1, lng: 2 },
+    lat: 48.85, lng: 2.35, guess: { lat: 1, lng: 2 }, pin: { lat: 1, lng: 2 },
   });
   assert.deepEqual(out, {
-    event: "super_sure_sheet_opened",
-    props: { mode: "h2h" },
+    event: "modifier_callout_shown",
+    props: { mode: "h2h", modifier: "super", round_number: 3 },
   });
 });
 
-test("sanitizeEvent: super_sure_sheet_opened drops a non-string mode", () => {
-  for (const bad of [1, null, undefined, true, { mode: "h2h" }]) {
-    const out = sanitizeEvent("super_sure_sheet_opened", { mode: bad });
-    assert.deepEqual(out.props, {});
+test("sanitizeEvent: modifier_sheet_opened carries mode/modifier/via, strips the rest", () => {
+  const out = sanitizeEvent("modifier_sheet_opened", {
+    mode: "h2h", modifier: "decoy", via: "callout",
+    room: "KWPFRT", team_name: "The Atlas Cats", distance_km: 812,
+    lat: 1, lng: 2, guess: { lat: 1, lng: 2 },
+  });
+  assert.deepEqual(out, {
+    event: "modifier_sheet_opened",
+    props: { mode: "h2h", modifier: "decoy", via: "callout" },
+  });
+});
+
+test("sanitizeEvent: decoy_planted keeps its aggregates, strips a smuggled coordinate", () => {
+  const out = sanitizeEvent("decoy_planted", {
+    mode: "h2h", round_number: 4, rounds: 5,
+    // The decoy's own coordinates must never leave the device (BANNED_KEY_RE
+    // strips "decoy_lat"/"lat"/"lng" before the allowlist is even consulted).
+    decoy_lat: 48.85, lat: 48.85, lng: 2.35, team_name: "The Atlas Cats",
+  });
+  assert.deepEqual(out, {
+    event: "decoy_planted",
+    props: { mode: "h2h", round_number: 4, rounds: 5 },
+  });
+});
+
+test("sanitizeEvent: modifier_sheet_opened drops a non-string via", () => {
+  for (const bad of [1, null, undefined, true, { via: "chip" }]) {
+    const out = sanitizeEvent("modifier_sheet_opened", { mode: "h2h", via: bad });
+    assert.ok(!("via" in out.props), `coerced ${JSON.stringify(bad)}`);
   }
 });
 

@@ -27,9 +27,15 @@ import {
   normalizeTwistSetting, drawTwist, twistRoundSeconds, twistMoveAllowed,
   twistedRoundScore, twistHudTag, twistRevealTag, twistCard,
 } from "./twist.js";
+import { revealDecoys } from "./decoy.js";
 import {
-  decoyAvailable, decoyInitialState, decoyDeployFold, revealDecoys,
-} from "./decoy.js";
+  availableModifiers, modifierChipState, modifierInitialState, modifierFold,
+  shouldCalloutModifier, markCalloutShown, calloutSpec, MODIFIER_SHEETS,
+  sheetActions,
+} from "./modifier.js";
+import {
+  showModifierCallout, dismissModifierCallout, pulseModifierChip,
+} from "./modifier-ui.js";
 import {
   makeRoomCode,
   isValidRoomCode,
@@ -79,20 +85,17 @@ import {
 } from "./supersure.js";
 import {
   HINT_CARDS,
-  SUPER_SURE_SHEET,
   LOCK_LABELS,
   guessMapHintLines,
   lockNowEstimate,
   lockButtonLabel,
   panoHintCard,
-  shouldHintSuperSure,
-  SUPER_SURE_HINT,
-  SUPER_SURE_HINT_ID,
 } from "./hints.js";
 import {
   oneShotHint,
   showHintCard,
   dismissHintCard,
+  hintCardOpen,
   paintLockButton,
 } from "./hints-ui.js";
 import {
@@ -282,14 +285,18 @@ let revealMapShownFor = null; // round number the reveal map was built for
 let myBest = null;         // my team's closest guess — the share card brag (S1)
 let localStage = "explore"; // "explore" (pano) | "map" — this phone's UI mode
 let lastRoundSeen = null;   // round number the UI has been reset for
-let superSureArmed = false; // SUPER SURE toggled on for THIS pin — local only
-                            // until lock-in, so rivals can't see it coming
-// G7 Decoy (h2h): the deploy state machine + the decoy's own marker/coords.
-// Reset per round. The decoy rides the live feed as an ordinary pin (hidden in
-// play by construction); the real pin never rides once a decoy is planted.
-let decoyState = decoyInitialState();
+// The guess-modifier deploy state (one fold for SUPER SURE arming AND the
+// Decoy plant machine; js/modifier.js). Local until lock-in, so rivals can't
+// see a bet coming, and reset per round. The decoy's own marker/coords are
+// separate render state (the fold tracks only armed/planted). The decoy rides
+// the live feed as an ordinary pin (hidden in play by construction); the real
+// pin never rides once a decoy is planted.
+let deployState = modifierInitialState();
 let decoyMarker = null;
 let decoyPin = null;
+// Which teams have already had their one pin-drop callout this game (§3.4).
+// In h2h this is just my own team; module-local, reset on game start.
+let calloutShown = new Set();
 let autoSubmitted = false;  // timeout auto-lock fired for this round
 let sweepDone = false;      // host forfeit sweep fired for this round
 let revealFlipPushed = null; // round number this phone already flipped for
@@ -554,7 +561,8 @@ function enterRoom(code, teamId) {
   fanfarePlayed = false;
   winCelebrated = false;
   localStage = "explore";
-  superSureArmed = false;
+  deployState = modifierInitialState();
+  calloutShown = new Set();
   switchingRooms = false;
   persistActive();
   let sawState = false;
@@ -931,19 +939,20 @@ function renderRoundActive() {
     sweepDone = false;
     hideGiveUp(); // #2: a stale give-up affordance never carries into a round
     localStage = "explore";
-    superSureArmed = false; // the bet is armed per-pin, never carried over
+    // Reset the whole modifier deploy state (bet + decoy) — round-local, never
+    // carried over. A stale callout never outlives the round either.
+    deployState = modifierFold(deployState, { type: "newRound" }).state;
+    dismissModifierCallout();
     lastTickSecond = null;
     revealTickSecond = null;
     clearTimeout(revealFlipTimer);
     if (guessMarker) { guessMarker.remove(); guessMarker = null; }
-    // G7: reset the decoy deploy state for the new round.
-    decoyState = decoyInitialState();
     if (decoyMarker) { decoyMarker.remove(); decoyMarker = null; }
     decoyPin = null;
     clearRivalPins();
     if (guessMap) guessMap.setView([25, 10], 2);
     $("btnLockIn").disabled = true;
-    renderSuperSureChip();
+    renderModifierChip();
     updateLockButton();
     updateGuessBanner();
     startTick();
@@ -1111,23 +1120,34 @@ function ensureGuessMap() {
   }).addTo(guessMap);
   guessMap.on("moveend zoomend", scheduleLiveWrite);
   guessMap.on("click", (e) => {
-    // G7: while a decoy is armed-but-not-yet-planted, the FIRST tap plants the
-    // decoy; every tap after places/moves the real pin (decoy.js decides).
-    const fold = decoyDeployFold(decoyState, "tap");
-    decoyState = fold.state;
+    // While a decoy is armed-but-not-yet-planted, the FIRST tap plants the
+    // decoy; every tap after places/moves the real pin (modifier.js → decoy.js
+    // decides). Any tap dismisses a live pin-drop callout silently (§4.1).
+    const fold = modifierFold(deployState, { type: "tap" });
+    deployState = fold.state;
+    dismissModifierCallout();
     if (fold.place === "decoy") {
       placeDecoyMarker(e.latlng);
-      renderSuperSureChip();
+      renderModifierChip();
       // C5 (spec §3.7): the spend is recorded at PLANT time, not lock-in, so a
-      // decoy stays spent across a refresh (decoyState is local and lost on
+      // decoy stays spent across a refresh (deployState is local and lost on
       // reload) AND across a host forfeit-sweep of this phone — no refund. The
       // lock-in patch re-writes the same value harmlessly.
       if (room && room.round) {
         push({ [`teams/${myTeam}/decoyUsed`]: room.round.number });
+        // decoy_planted: the decoy's deployment moment (its analogue of
+        // super_sure_resolved — plant time IS its resolution). Aggregates only;
+        // the decoy's coordinates never ride.
+        track("decoy_planted", {
+          mode: "h2h",
+          round_number: room.round.number,
+          rounds: room.settings.roundCount,
+        });
       }
       scheduleLiveWrite();        // the decoy now rides the live feed
       return;                     // no real pin yet → lock stays disabled
     }
+    const firstPin = !guessMarker;
     if (guessMarker) {
       guessMarker.setLatLng(e.latlng);
     } else {
@@ -1139,6 +1159,8 @@ function ensureGuessMap() {
     $("btnLockIn").disabled = false;  // a real pin exists (canLockWithDecoy)
     updateGuessBanner();
     updateLockButton();
+    // The tap that CREATED the real pin is the pin-drop moment (§4.1).
+    if (firstPin) maybeCalloutModifier();
   });
 }
 
@@ -1157,15 +1179,16 @@ function updateGuessBanner() {
  * decays with time), on pin moves, and on SUPER SURE arm/disarm. */
 function updateLockButton() {
   const btn = $("btnLockIn");
-  btn.classList.toggle("armed", superSureArmed);
+  const superArmed = deployState.superArmed;
+  btn.classList.toggle("armed", superArmed);
   if (!room || room.phase !== "roundActive" || !room.round ||
       localStage !== "map" || !guessMarker || myResult()) {
-    paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, null, superSureArmed));
+    paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, null, superArmed));
     return;
   }
   const truth = room.round.truth;
   if (!truth || typeof truth.lat !== "number") {
-    paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, null, superSureArmed));
+    paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, null, superArmed));
     return;
   }
   const g = guessMarker.getLatLng();
@@ -1180,7 +1203,7 @@ function updateLockButton() {
   const est = twistId
     ? twistedRoundScore(twistId, km, elapsed, room.settings)
     : lockNowEstimate(km, elapsed, room.settings.roundSeconds);
-  paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, est, superSureArmed));
+  paintLockButton(btn, lockButtonLabel(LOCK_LABELS.h2h, est, superArmed));
 }
 
 // Live rival pins, in team colors, on this phone's own guess map — the
@@ -1221,7 +1244,7 @@ function openGuessMapScreen() {
   ensureGuessMap();
   $("btnLockIn").disabled = !guessMarker;
   updateGuessBanner();
-  renderSuperSureChip();
+  renderModifierChip();
   // First guess map ever: the scoring one-liner and the rival-pins warning,
   // at the moment they matter (M5). The SUPER SURE line has left this card
   // — the bet is explained in exactly one place now, its own sheet (§6.1).
@@ -1235,100 +1258,128 @@ function openGuessMapScreen() {
   scheduleLiveWrite();
 }
 
-/* ---------------- SUPER SURE: arm/disarm the one-per-game bet --------- */
+/* ---------------- Guess modifiers: one chip, one sheet, one callout ----- */
 
-/* The chip lives on this phone's own guess screen only. Arming is purely
- * local state until lock-in commits it — nothing about the bet ever rides
- * on the live feed, so rivals can't learn it before the reveal. That rule
- * is untouched by the de-clutter pass; what changed is the presentation:
+/* The whole modifier class (SUPER SURE 🔥 + the Decoy 🎭) runs through one chip,
+ * one sheet, and one pin-drop callout (js/modifier.js). It all lives on this
+ * phone's own guess screen only; arming/planting is purely local state until
+ * lock-in commits it — nothing about a bet ever rides on the live feed, so
+ * rivals can't learn it before the reveal.
  *
- *   - the full-width pill that restated "double or nothing, once per game"
- *     every single round is now a 🔥 chip in the action bar;
- *   - the chip is ABSENT once the bet is spent (a disabled button
- *     explaining a thing you can no longer do is pure noise — §2.6);
- *   - the arm/disarm toasts are gone: mechanic rules never live in a 2.5 s
- *     toast (§5). The rule lives in the sheet; the armed state lives on
- *     the primary button's own label.
- *
- * P1.6: a second once-per-game chip (G7 Decoy) used to dock in the same bar
- * — two 48px chips no longer fit the guess bar's 360px width budget
- * (style.css §6.1) alongside the ghost + primary. The bar keeps exactly one
- * chip slot; when both plays are available, its sheet gains a secondary
- * action offering the other one instead of a second bar control. */
-function decoyChipAvailable() {
-  const twistId = room && room.round && room.round.twist ? room.round.twist.id : null;
-  return !!room && decoyAvailable(room.teams, myTeam, twistId) && !decoyState.planted;
-}
+ * The bar keeps exactly one chip slot: it shows the highest-priority AVAILABLE
+ * modifier's icon (🔥, else 🎭), and when both are live its sheet cross-offers
+ * the other instead of a second bar control (the guess bar's 360px width budget
+ * fits only one chip). Absence communicates spent (§2.6); the armed SUPER stake
+ * shows on the primary button's own label. */
 
-function openSuperSureSheet() {
-  if (!room || myResult()) return;
-  const ssAvailable = superSureAvailable(room.teams, myTeam);
-  const decoyAvail = decoyChipAvailable();
-  if (!ssAvailable && !decoyAvail) return;
-  if (!ssAvailable) { openDecoySheet(); return; } // only the decoy is left to offer
-  track("super_sure_sheet_opened", { mode: "h2h" });
-  showHintCard({
-    title: SUPER_SURE_SHEET.title,
-    lines: SUPER_SURE_SHEET.lines,
-    actions: [
-      ...(superSureArmed
-        ? [{ label: "Disarm", primary: false, onClick: () => setSuperSure(false) },
-           { label: "Keep it armed", onClick: () => setSuperSure(true) }]
-        : [{ label: SUPER_SURE_SHEET.cancelLabel, primary: false },
-           { label: SUPER_SURE_SHEET.armLabel, onClick: () => setSuperSure(true) }]),
-      ...(decoyAvail
-        ? [{ label: "🎭 Plant a decoy instead", primary: false, onClick: openDecoySheet }]
-        : []),
-    ],
+// Ordered ids of modifiers this team can still play this round.
+function currentModifiers() {
+  if (!room || !room.round) return [];
+  return availableModifiers({
+    mode: "h2h",
+    teams: room.teams,
+    teamId: myTeam,
+    twistId: room.round.twist ? room.round.twist.id : null,
+    deployState,
   });
 }
 
-function setSuperSure(armed) {
-  if (!room || myResult() || !superSureAvailable(room.teams, myTeam)) return;
-  superSureArmed = !!armed;
-  renderSuperSureChip();
-  updateLockButton(); // the button flips to the bet's real stakes
+// The pin-drop moment (§4): tease the priority modifier at most once per game.
+function maybeCalloutModifier() {
+  if (!room || !room.round) return;
+  const id = shouldCalloutModifier({
+    mode: "h2h",
+    roundNumber: room.round.number,
+    available: currentModifiers(),
+    firstPinOfRound: true,
+    hasResult: !!myResult(),
+    calloutShown,
+    teamId: myTeam,
+  });
+  if (!id) return;
+  // §4.1: while a sheet is open, suppress the callout for this pin drop and do
+  // NOT mark it shown — it may fire on a later round's first pin instead.
+  if (hintCardOpen()) return;
+  calloutShown = markCalloutShown(calloutShown, myTeam);
+  track("modifier_callout_shown", {
+    mode: "h2h", modifier: id, round_number: room.round.number,
+  });
+  showModifierCallout(calloutSpec(id), () => openModifierSheet(id, "callout"));
+  pulseModifierChip($("btnModifier"));
 }
 
-function renderSuperSureChip() {
-  const btn = $("btnSuperSure");
-  const ssAvailable = !!room && superSureAvailable(room.teams, myTeam);
-  const decoyAvail = decoyChipAvailable();
-  const available = ssAvailable || decoyAvail;
-  const armed = (ssAvailable && superSureArmed) || (decoyAvail && decoyState.armed);
-  btn.classList.toggle("hidden", !available); // spent = gone, not disabled
-  btn.classList.toggle("armed", armed);
-  btn.setAttribute("aria-pressed", String(armed));
-  // #7: a one-shot nudge toward the 🔥 chip, only on the guess map, from round
-  // 2 on while the SUPER SURE bet specifically is unspent — points at the
-  // chip, never re-explains it.
-  if (shownScreen === "p-guess" && room && room.round &&
-      shouldHintSuperSure({
-        mode: "h2h", roundNumber: room.round.number, available: ssAvailable,
-      })) {
-    oneShotHint(SUPER_SURE_HINT_ID, SUPER_SURE_HINT);
+// The chip tap opens the priority modifier's sheet (via: "chip").
+function onModifierChipTap() {
+  if (!room || myResult()) return;
+  const avail = currentModifiers();
+  if (!avail.length) return;
+  openModifierSheet(avail[0], "chip");
+}
+
+// One sheet renderer for every modifier, driven by MODIFIER_SHEETS + the pure
+// action rows, through the existing showHintCard (sheet layer, one at a time).
+// Requesting an unavailable modifier falls back to the first live one.
+function openModifierSheet(id, via) {
+  if (!room || myResult()) return;
+  const avail = currentModifiers();
+  if (!avail.includes(id)) {
+    if (!avail.length) return;
+    id = avail[0];
+  }
+  track("modifier_sheet_opened", { mode: "h2h", modifier: id, via });
+  const sheet = MODIFIER_SHEETS[id];
+  showHintCard({
+    title: sheet.title,
+    lines: sheet.lines,
+    actions: sheetActions({ id, available: avail, deployState })
+      .map((row) => modifierActionButton(id, row)),
+  });
+}
+
+// Map a pure sheet-action row to a showHintCard button spec, wiring the effect.
+function modifierActionButton(id, row) {
+  switch (row.kind) {
+    case "arm":
+      return { label: row.label, onClick: () => armModifier(id, true) };
+    case "disarm":
+      return { label: row.label, primary: false, onClick: () => armModifier(id, false) };
+    case "keep":
+      return { label: row.label }; // primary; stays armed (dismiss only)
+    case "cross":
+      return { label: row.label, primary: false,
+        onClick: () => openModifierSheet(row.target, "cross") };
+    case "cancel":
+    default:
+      return { label: row.label, primary: false };
   }
 }
 
-/* ---------------- G7 Decoy: plant a fake pin for rivals ---------------- */
+// Arm/disarm a modifier through the shared fold. SUPER arming is local until
+// lock-in and re-prices the primary button; a decoy "arm" queues the plant tap.
+function armModifier(id, on) {
+  if (!room || myResult() || !currentModifiers().includes(id)) return;
+  if (id === "super") {
+    deployState = modifierFold(deployState,
+      { type: on ? "arm" : "disarm", id: "super" }).state;
+    renderModifierChip();
+    updateLockButton(); // the button flips to the bet's real stakes
+  } else if (id === "decoy") {
+    deployState = modifierFold(deployState, { type: "arm", id: "decoy" }).state;
+    renderModifierChip();
+    toast("Your next tap plants the decoy — then tap again for your real pin.");
+  }
+}
 
-function openDecoySheet() {
-  if (!room || myResult() || !decoyChipAvailable()) return;
-  showHintCard({
-    title: "🎭 Decoy",
-    lines: [
-      "Plant a fake pin for rivals to see. Your real pin goes dark.",
-      "Once per game.",
-    ],
-    actions: [
-      { label: "Not now", primary: false },
-      { label: "Plant the decoy", onClick: () => {
-        decoyState = decoyDeployFold(decoyState, "arm").state;
-        renderSuperSureChip();
-        toast("Your next tap plants the decoy — then tap again for your real pin.");
-      } },
-    ],
-  });
+function renderModifierChip() {
+  const btn = $("btnModifier");
+  const chip = modifierChipState({ available: currentModifiers(), deployState });
+  btn.classList.toggle("hidden", !chip.visible); // spent = gone, not disabled
+  btn.classList.toggle("armed", chip.armed);
+  btn.setAttribute("aria-pressed", String(chip.armed));
+  if (chip.visible) {
+    btn.textContent = chip.icon;
+    btn.setAttribute("aria-label", chip.ariaLabel);
+  }
 }
 
 // The decoy marker on THIS phone's map — visually distinct (🎭), non-draggable,
@@ -1447,8 +1498,8 @@ function lockIn(auto = false, voluntary = false) {
   // An armed bet commits here — with a pin it rides on the result; with no
   // pin at the buzzer it rides on the forfeit and burns at settlement.
   // Either way the one use is spent (superSureUsed on the team row).
-  const betting = superSureArmed && superSureAvailable(room.teams, myTeam);
-  superSureArmed = false;
+  const betting = deployState.superArmed && superSureAvailable(room.teams, myTeam);
+  deployState = { ...deployState, superArmed: false };
   const result = {
     guess,
     distanceKm,
@@ -2258,7 +2309,7 @@ $("btnPLeave").addEventListener("click", leaveOrAbandon);
 $("btnPStart").addEventListener("click", startRound);
 $("btnOpenMap").addEventListener("click", openGuessMapScreen);
 $("btnBackToStreet").addEventListener("click", backToStreet);
-$("btnSuperSure").addEventListener("click", openSuperSureSheet);
+$("btnModifier").addEventListener("click", onModifierChipTap);
 $("btnLockIn").addEventListener("click", () => lockIn(false));
 $("btnPGiveUpStreet").addEventListener("click", giveUp);
 $("btnPGiveUpMap").addEventListener("click", giveUp);

@@ -99,30 +99,12 @@ export function panoHintCard(moveAllowed) {
   };
 }
 
-/* #7 SUPER SURE discoverability. A one-shot (per device) nudge that POINTS at
- * the 🔥 chip so the bet is findable without a permanent pill — it never
- * re-explains the mechanic (that lives in exactly one place, SUPER_SURE_SHEET).
- * Shown from round 2 onward (round 1 is deliberately calm), only while the bet
- * is still unspent, and NEVER on the Daily (which has no bet). */
-export const SUPER_SURE_HINT_ID = "supersure";
-export const SUPER_SURE_HINT = Object.freeze({
-  title: "Feeling SUPER SURE?",
-  lines: Object.freeze([
-    "Tap 🔥 to place your once-a-game bet.",
-  ]),
-});
-
-export function shouldHintSuperSure({ mode, roundNumber, available }) {
-  return (mode === "h2h" || mode === "couch") &&
-    typeof roundNumber === "number" && roundNumber >= 2 &&
-    available === true;
-}
-
 // First guess map (id "guessmap"): the scoring one-liner always, plus the
-// rival-pins warning where rivals can actually watch (h2h). The SUPER SURE
-// line is deliberately absent — after the de-clutter pass the bet is
-// explained in exactly one place, its own sheet (SUPER_SURE_SHEET below;
-// review §5, "each rule of the game is explained in exactly one place").
+// rival-pins warning where rivals can actually watch (h2h). The modifier line
+// is deliberately absent — each rule is explained in exactly one place, and
+// the SUPER SURE / Decoy rules live in their sheets (js/modifier.js
+// MODIFIER_SHEETS; review §5, "each rule of the game is explained in exactly
+// one place").
 export function guessMapHintLines(mode) {
   const lines = ["Closer = more points. Faster = bonus."];
   if (mode === "h2h") {
@@ -130,20 +112,6 @@ export function guessMapHintLines(mode) {
   }
   return lines;
 }
-
-/* The one place SUPER SURE is explained (review §6.1). Opened from the 🔥
- * chip docked to the guess map's action bar — never from a pill, a button
- * label, a toast, or the guess-map hint card, all four of which used to
- * carry a copy of the rule at the same time. */
-export const SUPER_SURE_SHEET = Object.freeze({
-  title: "SUPER SURE",
-  lines: Object.freeze([
-    "Double or nothing, once per game. Closest pin this round: your " +
-    "points ×2. Anyone closer: you score 0.",
-  ]),
-  armLabel: "Arm the bet",
-  cancelLabel: "Not now",
-});
 
 /* ================================================================
  * "If you locked in now" (M3): the live point hint while aiming.

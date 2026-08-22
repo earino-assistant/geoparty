@@ -176,11 +176,14 @@
     <!-- The whose-turn banner interpolates the active team's name
          (host-ui.updateGuessHint) — replay masking (review P1-2). -->
     <div id="hGuessHint" class="guess-hint" data-ph-mask>Tap the map to drop your pin</div>
-    <!-- §6.1: the estimate rides on the primary button's label; SUPER SURE
-         is a 🔥 chip docked to the bar (unspent only) opening one sheet. -->
+    <!-- §6.1: the estimate rides on the primary button's label; the guess
+         MODIFIER chip (SUPER SURE on couch) docks to the bar (unspent only)
+         and opens one sheet. Icon + aria-label are set at render
+         (host-ui.js#renderModifierChip). The pin-drop callout rides the empty
+         context-pill slot (js/modifier-ui.js). -->
     <div class="action-bar">
-      <button id="btnSuperSure" class="ss-chip hidden" type="button"
-              aria-label="SUPER SURE — double or nothing">🔥</button>
+      <button id="btnModifier" class="mod-chip hidden" type="button"
+              aria-label="Guess modifiers — once-per-game plays"></button>
       <button id="btnConfirmGuess" class="btn-primary" disabled>Confirm guess</button>
     </div>
   </section>

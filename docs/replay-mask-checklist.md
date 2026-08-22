@@ -137,6 +137,11 @@ one.
 - `.pano-nav-hint` — the "Finding your way…" nav-arrows-loading pill (issue
   #3 follow-up): static, hardcoded copy only, no name/place/coordinate ever
   renders into it. No mask needed.
+- `.mod-callout` — the pin-drop guess-modifier callout (guess-modifier design
+  §5.3): its title + line come from `modifier.calloutSpec` — static, hardcoded
+  tease copy ("Are you SUPER SURE?" / "Feeling sneaky?"), no team name, room
+  code, place name or coordinate. Audited no-mask; the guess map beneath it is
+  already blocked by `blockSelector`. No mask needed.
 
 ## 3. Blocked outright (`blockSelector`)
 

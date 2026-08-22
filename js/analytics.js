@@ -302,15 +302,21 @@ export const EVENT_SCHEMA = Object.freeze({
     mode: "string", round_number: "int", rounds: "int",
     outcome: "string", round_total: "int",
   },
-  // The de-clutter pass (docs/ui-ux-design-review.md §6.1) replaced the
-  // always-on SUPER SURE pill — which shouted "double or nothing, once per
-  // game" through every round — with a 🔥 chip that opens one explaining
-  // sheet. This fires when the sheet is opened, so the pair
-  // (super_sure_sheet_opened → super_sure_resolved) answers the question
-  // the change raises: does a chip you must tap still get discovered and
-  // deployed as often as a pill you couldn't miss? mode only: the bet
-  // exists on "h2h" and "couch", never on the Daily.
-  super_sure_sheet_opened: { mode: "string" },
+  // Guess-modifier discovery funnel (docs/guess-modifier-design.md §5). One
+  // pin-drop callout is teased per game per team; when tapped it opens the
+  // modifier's sheet. modifier is "super" | "decoy" (which tease/sheet); via
+  // is "chip" | "callout" | "cross" (how the sheet was reached). These two
+  // REPLACE super_sure_sheet_opened (removed) with a per-modifier, per-path
+  // funnel — its historical data stays queryable in PostHog (docs/analytics.md
+  // records the supersession).
+  modifier_callout_shown: { mode: "string", modifier: "string", round_number: "int" },
+  modifier_sheet_opened: { mode: "string", modifier: "string", via: "string" },
+  // A decoy was planted — the decoy's deployment moment (its analogue of
+  // super_sure_resolved; a decoy has no won/lost, so plant time IS its
+  // resolution). Fired on the planter's phone at plant. rounds mirrors
+  // super_sure_resolved for the timing KPI. mode is always "h2h" today; carried
+  // for uniformity.
+  decoy_planted: { mode: "string", round_number: "int", rounds: "int" },
   // S6: the host held the auto-advance countdown open (wanted more time on
   // the reveal). seconds_left is what remained of the countdown when held —
   // consistently small values mean the default countdown is too short.
