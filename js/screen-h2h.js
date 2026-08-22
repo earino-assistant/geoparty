@@ -16,20 +16,14 @@ import {
   advanceTarget,
   countdownText,
 } from "./autoadvance.js";
-import { superSureLabel } from "./supersure.js";
 import { phoneJoinLine } from "./tvlink.js";
-import { countdownTick, motionDuration, animFraction } from "./fx.js";
+import { countdownTick } from "./fx.js";
 import { playSound, prefersReducedMotion, stampFlash } from "./fx-ui.js";
 import { medalForDistance } from "./records.js";
+import { teamHex, tvCascadeRevealScene } from "./revealmap.js";
+import { renderRevealScene } from "./revealmap-ui.js";
 
 const $ = (id) => document.getElementById(id);
-const TEAM_HEX = ["#ffcf3f", "#4dd6ff", "#ff6ec7", "#7dff8a"];
-const teamHex = (teams, id) => {
-  const i = teamIds(teams).indexOf(id);
-  return i >= 0 ? TEAM_HEX[i % TEAM_HEX.length] : TEAM_HEX[0];
-};
-const escapeHtml = (s) =>
-  String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 export const H2H_SCREEN_IDS = ["s-h2h-lobby", "s-h2h-live", "s-h2h-reveal"];
 
@@ -45,7 +39,7 @@ let gridKey = null;     // teams+room fingerprint; rebuild when it changes
 let roundSeen = null;   // round number the panels were reset for
 let timerInterval = null;
 
-let revealMap = null;
+let revealHandle = null;
 let revealShownFor = null;   // `${createdAt}:${round}` — animate once
 let countInterval = null;
 let countTicked = null;      // S4: last 3-2-1 second the TV ticked for
@@ -111,7 +105,8 @@ export function disposeH2H() {
   stopTimer();
   stopCount();
   stopAdvanceNote();
-  if (revealMap) { try { revealMap.remove(); } catch { /* gone */ } revealMap = null; }
+  revealHandle?.destroy();
+  revealHandle = null;
   revealShownFor = null;
   twistCardShownFor = null;
   if (twistCardEl) twistCardEl.classList.add("hidden");
@@ -593,26 +588,7 @@ function runRevealAnimation(state, round) {
   const boardEl = $("h2hRoundBoard");
   boardEl.innerHTML = "";
 
-  if (revealMap) { revealMap.remove(); revealMap = null; }
-  revealMap = L.map("h2hRevealMap", {
-    zoomControl: false, attributionControl: true, dragging: false,
-    scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
-    keyboard: false, touchZoom: false,
-  });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(revealMap);
-
-  const truth = L.latLng(round.truth.lat, round.truth.lng);
   const order = revealOrder(round); // farthest first, forfeits leading
-  const guessPts = order.filter((r) => r.guess)
-    .map((r) => L.latLng(r.guess.lat, r.guess.lng));
-  revealMap.fitBounds(
-    L.latLngBounds([truth, ...guessPts]).pad(0.25), { maxZoom: 10 }
-  );
-  setTimeout(() => revealMap.invalidateSize({ pan: false }), 60);
-
   const closestId = roundClosest(round);
   const rows = {};
   const addRow = (r) => {
@@ -629,11 +605,9 @@ function runRevealAnimation(state, round) {
     boardEl.appendChild(row);
   };
 
+  // The truth marker + "Answer" now land in the scene finale; finish() keeps
+  // only the off-map beats: place-name pop, sting, crown, ACE burst.
   const finish = () => {
-    L.circleMarker(truth, {
-      radius: 12, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1,
-    }).addTo(revealMap)
-      .bindTooltip("Answer", { permanent: true, direction: "top" });
     placeEl.classList.add("show");
     playSound("sting"); // S4: the truth lands — every head turns up
     if (closestId && rows[closestId]) {
@@ -648,55 +622,20 @@ function runRevealAnimation(state, round) {
     if (medalForDistance(aceKm).ace) stampFlash(`🎯 ACE — ${formatDistance(aceKm)}`);
   };
 
-  const DRAW_MS = motionDuration(800, prefersReducedMotion());
-  const drawNext = (i) => {
-    if (i >= order.length) { finish(); return; }
-    const r = order[i];
-    if (!r.guess) { addRow(r); setTimeout(() => drawNext(i + 1), 250); return; }
-    const guess = L.latLng(r.guess.lat, r.guess.lng);
-    const color = teamHex(state.teams, r.id);
-    L.circleMarker(guess, {
-      radius: 10, color: "#fff", weight: 3, fillColor: color, fillOpacity: 1,
-    }).addTo(revealMap)
-      .bindTooltip(escapeHtml(state.teams[r.id].name),
-        { permanent: true, direction: "top" });
-    // A super-sure pin steps out of hiding here (and only here): verdict
-    // halo on the map, verdict text in the round board via resultRowText.
-    if (r.superSure) {
-      L.circleMarker(guess, {
-        radius: 16, color: "#ffcf3f", weight: 3, fill: false,
-        dashArray: "4 6", interactive: false,
-      }).addTo(revealMap)
-        .bindTooltip(superSureLabel(r),
-          { permanent: true, direction: "bottom", className: "ss-tooltip" });
-    }
-    const line = L.polyline([guess], { color, weight: 4, dashArray: "8 10" })
-      .addTo(revealMap);
-    let start = null;
-    const step = (t) => {
-      if (start === null) start = t;
-      const eased = animFraction(t - start, DRAW_MS);
-      line.setLatLngs([
-        guess,
-        L.latLng(
-          guess.lat + (truth.lat - guess.lat) * eased,
-          guess.lng + (truth.lng - guess.lng) * eased
-        ),
-      ]);
-      if (eased < 1) { requestAnimationFrame(step); return; }
-      addRow(r);
-      setTimeout(() => drawNext(i + 1), 300);
-    };
-    requestAnimationFrame(step);
-  };
-  // G7: expose every planted decoy with a 🎭 marker BEFORE the real pins land.
-  for (const d of revealDecoys(round)) {
-    L.marker(L.latLng(d.lat, d.lng), {
-      icon: L.divIcon({ className: "decoy-marker reveal", html: "🎭" }),
-      interactive: false,
-    }).addTo(revealMap);
-  }
-  drawNext(0);
+  // The cascade (decoys 🎭 first, then farthest-first pins with SUPER SURE
+  // halos, then the gold answer) is a shared scene now. Each pin's row is
+  // appended as its line lands (or immediately for a forfeit beat).
+  revealHandle?.destroy();
+  revealHandle = renderRevealScene("h2hRevealMap", tvCascadeRevealScene({
+    truth: round.truth,
+    entries: order,
+    decoys: revealDecoys(round),
+    teams: state.teams,
+    reducedMotion: prefersReducedMotion(),
+  }), {
+    onStep: ({ index }) => addRow(order[index]),
+    onFinish: finish,
+  });
 }
 
 function renderTotalsBoard(state) {
