@@ -323,6 +323,22 @@ test("sanitizeEvent: ghost_link_invalid carries only the reason", () => {
   assert.deepEqual(out.props, { reason: "malformed" });
 });
 
+test("sanitizeEvent: daily_recap_engaged — aggregates only, no place/coordinate", () => {
+  const out = sanitizeEvent("daily_recap_engaged", {
+    day_number: 37, source: "overview_tap", vs_ghost: true, hard: false,
+    // None of these may ever ride the recap event:
+    lat: 35.01, lng: 135.77, place_name: "Kyoto, Japan", pin: "x", guess: { lat: 1 },
+  });
+  assert.deepEqual(out.props,
+    { day_number: 37, source: "overview_tap", vs_ghost: true, hard: false });
+  // The other legitimate source too; flags strictly boolean.
+  const swipe = sanitizeEvent("daily_recap_engaged", {
+    day_number: 2, source: "swipe", vs_ghost: false, hard: true,
+  });
+  assert.deepEqual(swipe.props,
+    { day_number: 2, source: "swipe", vs_ghost: false, hard: true });
+});
+
 test("sanitizeEvent: night_champion — mode + games", () => {
   const out = sanitizeEvent("night_champion", { mode: "h2h", games: 4, winner_name: "Cats" });
   assert.deepEqual(out.props, { mode: "h2h", games: 4 });

@@ -9,6 +9,7 @@ import {
   TEAM_HEX, teamHex, escapeHtml, REVEAL_SIZES,
   LEAFLET_MAP_OPTIONS, TILE_URL, TILE_ATTRIBUTION, TILE_OPTIONS,
   dailyRevealScene, phoneRevealScene, tvSoloRevealScene, tvCascadeRevealScene,
+  recapOverviewScene,
 } from "../js/revealmap.js";
 import { superSureLabel } from "../js/supersure.js";
 import { formatDistance } from "../js/game.js";
@@ -302,6 +303,42 @@ test("tvCascadeRevealScene: finale is the gold Answer truth pin (tv size 12)", (
     style: { radius: 12, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1 },
     tooltip: { html: "Answer", direction: "top", permanent: true },
   }]);
+});
+
+/* ---------------- recapOverviewScene ---------------- */
+
+test("recapOverviewScene: numbered chips + a fit for ≥2 pins", () => {
+  const scene = recapOverviewScene({ pins: [
+    { n: 1, lat: 10, lng: 20 }, { n: 2, lat: 30, lng: 40 }, { n: 3, lat: 50, lng: 60 },
+  ] });
+  assert.deepEqual(scene.ops.map((o) => o.op), ["chip", "chip", "chip", "fit"]);
+  assert.deepEqual(scene.cascade, []);
+  assert.deepEqual(scene.finale, []);
+  assert.deepEqual(scene.ops[0],
+    { op: "chip", at: { lat: 10, lng: 20 }, className: "recap-pin", html: "1" });
+  assert.deepEqual(scene.ops[2],
+    { op: "chip", at: { lat: 50, lng: 60 }, className: "recap-pin", html: "3" });
+  assert.deepEqual(scene.ops[3], {
+    op: "fit",
+    points: [{ lat: 10, lng: 20 }, { lat: 30, lng: 40 }, { lat: 50, lng: 60 }],
+    pad: 0.25, maxZoom: 10,
+  });
+});
+
+test("recapOverviewScene: a single pin uses a view, not a fit", () => {
+  const scene = recapOverviewScene({ pins: [{ n: 1, lat: 10, lng: 20 }] });
+  assert.deepEqual(scene.ops.map((o) => o.op), ["chip", "view"]);
+  assert.deepEqual(scene.ops[1], { op: "view", center: { lat: 10, lng: 20 }, zoom: 4 });
+});
+
+test("recapOverviewScene: the chip number is our own int (html is the integer)", () => {
+  const scene = recapOverviewScene({ pins: [{ n: 5, lat: 1, lng: 2 }] });
+  assert.equal(scene.ops[0].html, "5");
+});
+
+test("recapOverviewScene: no pins → an empty scene", () => {
+  assert.deepEqual(recapOverviewScene({ pins: [] }), { ops: [], cascade: [], finale: [] });
+  assert.deepEqual(recapOverviewScene({}), { ops: [], cascade: [], finale: [] });
 });
 
 /* ---------------- size table ---------------- */

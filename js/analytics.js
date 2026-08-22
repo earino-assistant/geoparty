@@ -371,6 +371,15 @@ export const EVENT_SCHEMA = Object.freeze({
   // G5: a challenge link failed to open into a duel. reason ∈
   // malformed|version|expired|pool — link rot in the wild.
   ghost_link_invalid: { reason: "string" },
+  // Daily "Your five places" recap (docs/analytics.md). Fired at most ONCE per
+  // done-screen render, when the player actually engages the recap — swiping a
+  // carousel card or tapping an overview pin. source ∈ "swipe"|"overview_tap".
+  // vs_ghost/hard tag which board it was. Engagement rate = daily_recap_engaged
+  // ÷ daily_challenge_completed. Aggregates only; no place name or coordinate
+  // rides (the recap's city names live in the DOM, masked, never on an event).
+  daily_recap_engaged: {
+    day_number: "int", source: "string", vs_ghost: "bool", hard: "bool",
+  },
   // G3 Crown Night (§7.1). Fired by the phase-writing device at a champion.
   // games is how many games the night took to reach first-to-3.
   night_champion: { mode: "string", games: "int" },

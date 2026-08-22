@@ -71,8 +71,11 @@ import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
 import { toastWithReport, toastPlain } from "./report-ui.js";
-import { dailyRevealScene } from "./revealmap.js";
+import { dailyRevealScene, recapOverviewScene } from "./revealmap.js";
 import { renderRevealScene } from "./revealmap-ui.js";
+import {
+  recapCards, recapCardScene, overviewPins, recapCaption,
+} from "./recap.js";
 
 /* ================================================================
  * Ghost fragment: parse, then STRIP immediately (§3.5.6 braces layer). This
@@ -194,15 +197,27 @@ let stage = "explore";
 // Ghost bookkeeping (duel runs). Each entry: { points, distanceKm, pin }.
 const ghostRoundResults = [];
 let ghostTotalSoFar = 0;
-// The day's five image ids in seeded order (for the OUTGOING ghost's poolCheck,
-// §3.5.1). Populated lazily from the seeded order (deterministic, skip-free).
-let peekIdsCache = null;
+// The day's five places in seeded order (name + coords + image id) — the
+// deterministic, skip-free basis for the OUTGOING ghost's poolCheck (§3.5.1)
+// AND the done-screen recap's truths on a replay/verdict path. Populated
+// lazily; peekDayIds derives the id list from it.
+let peekPlacesCache = null;
+
+// The places actually shown this run, in play order (skip-adjusted), captured
+// at each lock-in so the recap can pair the player's saved pins with the truth
+// they actually saw without recomputing. Reset on a hard-mode restart.
+const playedPlaces = [];
 
 let iv = null;
 let viewer = null;
 let guessMap = null;
 let guessMarker = null;
 let revealHandle = null;
+// Recap (done-screen "Your five places"): live reveal handles, the lazy-init
+// observer, and the one-shot engagement latch.
+let recapHandles = [];
+let recapObserver = null;
+let recapEngaged = false;
 let tickInterval = null;
 let lastTickSecond = null;
 
@@ -281,21 +296,29 @@ async function startChallenge() {
   }
 }
 
-// The seeded order's first DAILY_ROUNDS image ids (deterministic, skip-free) —
-// the stable basis for the poolCheck on both sender and recipient (§3.5.1).
-async function peekDayIds(key) {
-  if (peekIdsCache && peekIdsCache.key === key) return peekIdsCache.ids;
+// The seeded order's first DAILY_ROUNDS places (deterministic, skip-free) —
+// name + coords + image id. The stable basis for the poolCheck on both sender
+// and recipient (§3.5.1), for the ghost-verdict truths (instantVerdict), and
+// for the recap's truths when the run wasn't played live this session.
+async function peekDayPlaces(key) {
+  if (peekPlacesCache && peekPlacesCache.key === key) return peekPlacesCache.places;
   const pool = await loadPool();
   const s = new PoolSampler(pool, dailySeed(key));
-  const ids = [];
+  const places = [];
   for (let i = 0; i < DAILY_ROUNDS; i++) {
     const e = s.peek();
     if (!e) break;
-    ids.push(e.image_id);
+    places.push({ name: e.name, lat: e.lat, lng: e.lng, image_id: e.image_id });
     s.advance();
   }
-  peekIdsCache = { key, ids };
-  return ids;
+  peekPlacesCache = { key, places };
+  return places;
+}
+
+// The seeded order's image ids — the poolCheck basis (§3.5.1), derived from
+// the places above so the two can never drift.
+async function peekDayIds(key) {
+  return (await peekDayPlaces(key)).map((p) => p.image_id);
 }
 
 /* ================================================================
@@ -484,6 +507,10 @@ function lockIn(auto = false) {
   // v2 (§5.2): store the pin + elapsed so this run can later become a ghost.
   run = recordDailyRound(run, guess
     ? { distanceKm, elapsedMs, lat: guess.lat, lng: guess.lng } : null);
+  // Record the truth actually shown this round (skip-adjusted play order), so
+  // the done-screen recap can pair pins to places with no recompute (index i
+  // aligns with run.rounds[i]).
+  playedPlaces.push({ name: current.name, lat: current.lat, lng: current.lng });
   if (auto) {
     toast(guess
       ? "Time! Your pin was locked in."
@@ -687,17 +714,9 @@ function markDuelResolved(dayNum, m) {
 // play path. Never throws to the user — any failure falls back to plain done.
 async function instantVerdict(saved) {
   try {
-    const pool = await loadPool();
-    const s = new PoolSampler(pool, dailySeed(runKey));
-    const truths = [];
-    const ids = [];
-    for (let i = 0; i < DAILY_ROUNDS; i++) {
-      const e = s.peek();
-      if (!e) break;
-      truths.push({ lat: e.lat, lng: e.lng });
-      ids.push(e.image_id);
-      s.advance();
-    }
+    const places = await peekDayPlaces(runKey);
+    const truths = places.map((p) => ({ lat: p.lat, lng: p.lng }));
+    const ids = places.map((p) => p.image_id);
     if (!poolMatches(ghost.poolCheck, ids)) {
       track("ghost_link_invalid", { reason: "pool" });
       toast("This challenge was built on an older Daily — showing your result.");
@@ -820,6 +839,10 @@ function renderDone(result, alreadyPlayed, extra = {}) {
   hardDone.classList.toggle("hidden", !showHard);
 
   wireShare(result, extra.verdict);
+
+  // "Your five places" recap — best-effort; a failure here must never break
+  // the done screen (async, self-wrapped in try/catch, fire-and-forget).
+  renderRecap(result, alreadyPlayed);
 }
 
 function renderDuelDone(verdict, result) {
@@ -844,6 +867,125 @@ function renderDuelDone(verdict, result) {
   strip.append(yours, theirs);
   box.append(head, margin, strip);
   box.classList.remove("hidden");
+}
+
+/* ================================================================
+ * "Your five places" recap (done screen). A numbered overview mini-map + a
+ * swipeable per-round carousel, each card the same reveal scene as the live
+ * round (guess pin, truth, the 👻 cue on a duel) plus the city name. The
+ * truths are recomputed from the seed (fresh play) or taken from playedPlaces
+ * — never persisted into the saved run. All decision logic is pure in
+ * js/recap.js; this is the thin Leaflet/observer glue.
+ * ================================================================ */
+
+// One daily_recap_engaged per render, latched on the first real engagement
+// (a scroll = "swipe", or an overview pin tap = "overview_tap").
+function engageRecap(source) {
+  if (recapEngaged) return;
+  recapEngaged = true;
+  track("daily_recap_engaged", {
+    day_number: runDayNum, source, vs_ghost: isDuel, hard: mode === "hard",
+  });
+}
+function onRecapScroll() { engageRecap("swipe"); }
+
+// Tear down any live recap: reveal maps, the observer, the carousel/overview
+// DOM, the scroll latch. Safe to call repeatedly (renderRecap re-entry, a
+// hard-mode restart). Never throws.
+function destroyRecap() {
+  if (recapObserver) { recapObserver.disconnect(); recapObserver = null; }
+  for (const h of recapHandles) { try { h?.destroy(); } catch { /* gone */ } }
+  recapHandles = [];
+  const carousel = $("dRecapCarousel");
+  if (carousel) {
+    carousel.removeEventListener("scroll", onRecapScroll);
+    carousel.textContent = "";
+  }
+  const overview = $("dRecapOverview");
+  if (overview) overview.textContent = "";
+  $("dDoneRecap").classList.add("hidden");
+  recapEngaged = false;
+}
+
+// Scroll the carousel to the card for round `n` (an overview pin tap).
+function jumpToRecapCard(n) {
+  const el = $("dRecapCarousel").querySelector(`.recap-card[data-round="${n}"]`);
+  if (el) {
+    el.scrollIntoView({
+      block: "nearest", inline: "center",
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+    });
+  }
+}
+
+async function renderRecap(result, alreadyPlayed) {
+  const box = $("dDoneRecap");
+  try {
+    destroyRecap();
+    // Fresh play: the places we actually showed (skip-adjusted, aligned to
+    // result.rounds). Replay / ghost-verdict: recompute from the seed (the
+    // skew guard in recapCards drops any card the pool has drifted under).
+    const places = alreadyPlayed
+      ? await peekDayPlaces(runKey)
+      : playedPlaces.slice();
+    const cards = recapCards({
+      places, rounds: result.rounds, ghostRounds: ghostRoundResults,
+    });
+    if (!cards.length) { box.classList.add("hidden"); return; }
+
+    // Overview mini-map, then wire each numbered pin to jump to its card.
+    recapHandles.push(renderRevealScene(
+      $("dRecapOverview"), recapOverviewScene({ pins: overviewPins(cards) })));
+    for (const pinEl of $("dRecapOverview").querySelectorAll(".recap-pin")) {
+      pinEl.addEventListener("click", () => {
+        engageRecap("overview_tap");
+        jumpToRecapCard(Number(pinEl.textContent));
+      });
+    }
+
+    // Carousel: one card per round, maps lazy-initialised as they scroll in.
+    const carousel = $("dRecapCarousel");
+    const reduced = prefersReducedMotion();
+    const pending = new Map();     // card element -> { card, mapEl }
+    for (const card of cards) {
+      const el = document.createElement("div");
+      el.className = "recap-card";
+      el.dataset.round = String(card.round);
+      const mapEl = document.createElement("div");
+      mapEl.className = "recap-card-map";
+      const cap = document.createElement("div");
+      cap.className = "recap-caption";
+      cap.textContent = recapCaption(card);
+      el.append(mapEl, cap);
+      carousel.appendChild(el);
+      pending.set(el, { card, mapEl });
+    }
+
+    const initCard = (el) => {
+      const p = pending.get(el);
+      if (!p) return;
+      pending.delete(el);
+      recapHandles.push(renderRevealScene(p.mapEl, recapCardScene(p.card, reduced)));
+    };
+
+    if (typeof IntersectionObserver === "function") {
+      recapObserver = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) { initCard(e.target); recapObserver.unobserve(e.target); }
+        }
+      }, { root: carousel, threshold: 0.25 });
+      for (const el of pending.keys()) recapObserver.observe(el);
+    } else {
+      for (const el of [...pending.keys()]) initCard(el);
+    }
+
+    carousel.addEventListener("scroll", onRecapScroll, { passive: true });
+    box.classList.remove("hidden");
+  } catch (e) {
+    console.error(scrubErrorMessage(e));
+    try { destroyRecap(); } catch { /* nothing left to lose */ }
+    box.classList.add("hidden");
+  }
 }
 
 // The share is a Ghost Duel challenge link by DEFAULT once G5 ships (§3.5.1) —
@@ -894,6 +1036,10 @@ function startHardMode() {
   run = newDailyRun(runKey, true);
   ghostRoundResults.length = 0;
   ghostTotalSoFar = 0;
+  // The recap belongs to the finished normal run; a hard restart starts a
+  // fresh five, so tear it down and clear the captured play order.
+  destroyRecap();
+  playedPlaces.length = 0;
   destroyViewer();
   renderIntro();
   startChallenge();

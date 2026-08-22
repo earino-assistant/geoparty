@@ -201,3 +201,25 @@ export function tvCascadeRevealScene({ truth, entries, decoys, teams, reducedMot
   const finale = [truthCircle(t, REVEAL_SIZES.tv.truth, { html: "Answer", direction: "top", permanent: true })];
   return { ops, cascade, finale };
 }
+
+/* ================================================================
+ * Daily recap overview — a static at-a-glance mini-map: one numbered chip
+ * per round (1..N), then a fit (≥2 pins) or a single view (1 pin). `n` is
+ * our own integer, so the chip html carries no user text to escape. Empty
+ * pins → an empty scene. The daily-ui glue queries `.recap-pin` after render
+ * to wire tap → jump-to-card. Blocked in replay like every reveal map.
+ * ================================================================ */
+
+export function recapOverviewScene({ pins } = {}) {
+  const ps = Array.isArray(pins) ? pins : [];
+  const ops = [];
+  const points = [];
+  for (const p of ps) {
+    const at = { lat: p.lat, lng: p.lng };
+    ops.push({ op: "chip", at, className: "recap-pin", html: `${p.n}` });
+    points.push(at);
+  }
+  if (points.length >= 2) ops.push({ op: "fit", points, pad: 0.25, maxZoom: 10 });
+  else if (points.length === 1) ops.push({ op: "view", center: points[0], zoom: 4 });
+  return { ops, cascade: [], finale: [] };
+}

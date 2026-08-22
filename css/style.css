@@ -1511,6 +1511,70 @@ body:has(.action-bar) .consent-banner {
   line-height: 1.5;
 }
 
+/* "Your five places" recap on the Daily done screen: a numbered overview
+   mini-map above a horizontally swipeable per-round carousel. Maps inside are
+   Leaflet (.leaflet-container), blocked in replay; the whole block is masked
+   (captions carry city names). */
+.recap { margin: 16px 0; text-align: left; }
+.recap-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
+}
+.recap-overview {
+  height: 150px;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+/* Numbered chip pins on the overview map (a Leaflet divIcon). */
+.recap-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;               /* center the divIcon on its point */
+  border-radius: 50%;
+  background: var(--accent);
+  color: #111;
+  font-weight: 800;
+  font-size: 0.8rem;
+  border: 2px solid #111;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.recap-carousel {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 6px;
+  touch-action: pan-x pan-y;
+}
+.recap-card {
+  flex: 0 0 86%;
+  scroll-snap-align: center;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+}
+.recap-card-map {
+  height: 180px;
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+}
+.recap-caption {
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
 /* G2 Twists: the ritual-interstitial card flip (center overlay + scrim). */
 .twist-card-overlay {
   position: fixed;
