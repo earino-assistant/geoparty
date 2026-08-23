@@ -816,7 +816,7 @@ function renderDone(result, alreadyPlayed, extra = {}) {
   const aceEl = $("dDoneAce");
   aceEl.classList.add("hidden");
   if (!isExhibition && (extra.aces || 0) > 0) {
-    aceEl.textContent = `🎯 ${ordinal(records.aces.monthCount)} ace this month`;
+    aceEl.textContent = `🎯 ${ordinal(records.aces.monthCount)} ACE this month`;
     aceEl.classList.remove("hidden");
   }
 
@@ -856,7 +856,7 @@ function renderDuelDone(verdict, result) {
   const head = document.createElement("div");
   head.className = "done-duel-head";
   head.textContent = verdict.outcome === "won" ? "You beat the ghost! 🏆"
-    : verdict.outcome === "lost" ? "The ghost got you 👻" : "You and the ghost tied.";
+    : verdict.outcome === "lost" ? "The ghost got you 👻" : "You and the ghost tied";
   const margin = document.createElement("div");
   margin.className = "done-duel-margin";
   margin.textContent = verdict.outcome === "tie"
@@ -1062,7 +1062,7 @@ function renderIntro() {
     explain.classList.add("hidden");
     if (rules) rules.classList.remove("hidden");
     $("btnDailyStart").textContent = mode === "hard"
-      ? "Play Hard Mode ⚡" : "Play Today's Daily";
+      ? "Play hard mode ⚡" : "Play Today's Daily";
   }
 
   // Records line (G1/G8) — streak + PB, normal board on a normal intro.
@@ -1138,7 +1138,7 @@ const savedForRun = savedResultForRun();
 if (ghostLinkReason === "malformed") {
   toast("That challenge link got damaged in transit — today's Daily is right here.");
 } else if (ghostLinkReason === "version") {
-  toast("This challenge needs a newer GeoParty — play today's Daily meanwhile.");
+  toast("This challenge needs a newer GeoParty — reload this page, then open the link again.");
 } else if (ghostLinkReason === "expired") {
   toast("This challenge expired — the Daily is a fresh five every day.");
 }

@@ -106,7 +106,7 @@ test("human lines degrade on file:// instead of showing a path", () => {
   assert.equal(tvBrowserLine("file:///x/player.html"), null);
   assert.equal(
     phoneJoinLine("file:///x/screen.html", "KWPFRT"),
-    "Scan the host's QR to join"
+    "Scan the QR on the host's phone to join"
   );
 });
 

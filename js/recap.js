@@ -99,14 +99,14 @@ export function recapCardScene(card, reducedMotion) {
 
 // The caption under a card: round number, the city name (masked wholesale by
 // the recap block, so a real place name is safe here), and — when the round
-// was actually guessed — the distance and points. A forfeit reads "no guess".
+// was actually guessed — the distance and points. A forfeit reads "no pin".
 export function recapCaption(card) {
   const parts = [`Round ${card.round} of 5`, card.name || "Somewhere mysterious"];
   if (card.distanceKm != null) {
     parts.push(formatDistance(card.distanceKm));
     parts.push(`${card.points.toLocaleString()} pts`);
   } else {
-    parts.push("no guess");
+    parts.push("no pin");
   }
   return parts.join(" · ");
 }

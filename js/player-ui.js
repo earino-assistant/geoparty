@@ -181,7 +181,7 @@ function showImageryDegraded(onRetry) {
     degradedEl.className = "imagery-degraded";
     const p = document.createElement("p");
     p.textContent =
-      "Couldn’t load the imagery. Nobody was scored — check your connection " +
+      "Couldn’t load the street view. Nobody was scored — check your connection " +
       "and try again.";
     const btn = document.createElement("button");
     btn.type = "button";
@@ -427,7 +427,7 @@ function commitTeamName(name) {
 // that gates on a team name before the settings are worth filling in.
 function startNewGame() {
   if (!$("myTeamName").value.trim()) {
-    toast("Give your team a name first");
+    toast("Give your team a name first.");
     $("myTeamName").focus();
     return;
   }
@@ -451,7 +451,7 @@ async function pickFreeRoomCode() {
 
 async function createRoom() {
   const name = $("myTeamName").value.trim();
-  if (!name) { toast("Give your team a name first"); return; }
+  if (!name) { toast("Give your team a name first."); return; }
   $("btnOpenRoom").disabled = true;
   try {
     const code = await pickFreeRoomCode();
@@ -749,10 +749,7 @@ function renderLobby() {
       (id === myTeam ? " (you)" : "") +
       (id === room.hostTeam ? " · host" : "");
     name.style.color = teamHex(room.teams, id);
-    const tag = document.createElement("span");
-    tag.textContent = "ready";
-    tag.style.color = "var(--muted)";
-    li.append(name, tag);
+    li.append(name);
     list.appendChild(li);
   });
 
@@ -1011,7 +1008,7 @@ function renderRoundActive() {
         // Raw SDK rejections carry the image id / a tokened URL, and console
         // capture rides into replays — log only the scrubbed message (P1-1).
         console.warn("player: image load failed —", scrubErrorMessage(e));
-        toast("Imagery didn’t load — guess from the map.",
+        toast("Street view didn’t load — guess from the map.",
           { surface: "player" });
       });
     }

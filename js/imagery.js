@@ -719,13 +719,13 @@ export function directionComponentConfig(moveAllowed) {
 }
 
 /* ================================================================
- * §17 "Finding your way…" nav hint (issue #3 follow-up)
+ * §17 "Loading the arrows…" nav hint (issue #3 follow-up)
  * ================================================================
  * A move-enabled round can render an interactive street before Mapillary's
  * DirectionComponent has any arrow glyphs to draw (the spatial-edge cache
  * pass — see Issue #2 Phase 2 above — is asynchronous and sometimes slow-but-
  * healthy). Without a cue, that reads as "am I stuck?" A non-blocking pill
- * ("Finding your way…") bridges the gap: shown the instant a round-anchor
+ * ("Loading the arrows…") bridges the gap: shown the instant a round-anchor
  * lands, faded the instant a real arrow glyph appears in the DOM, or after a
  * bounded timeout regardless. Pure decision + DOM probe live here (tested in
  * tests/imagery.test.js); the polling timer and DOM node live in

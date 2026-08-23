@@ -161,7 +161,7 @@ function showImageryDegraded(onRetry) {
     degradedEl.className = "imagery-degraded";
     const p = document.createElement("p");
     p.textContent =
-      "Couldn’t load the imagery. Nobody was scored — check your connection " +
+      "Couldn’t load the street view. Nobody was scored — check your connection " +
       "and try again.";
     const btn = document.createElement("button");
     btn.type = "button";
@@ -990,7 +990,7 @@ function updateGuessHint() {
   if (room.round && room.round.showdown) {
     const order = room.round.order || [];
     const idx = order.indexOf(room.activeTeam);
-    el.textContent = `${name} — drop your pin (${idx + 1}/${order.length})`;
+    el.textContent = `${name} — drop your pin (${idx + 1} of ${order.length})`;
   } else {
     el.textContent = `${name} — tap the map to drop your pin`;
   }
@@ -1841,7 +1841,7 @@ async function resumeGame(code, state) {
         // Raw SDK rejections carry the image id / a tokened URL, and console
         // capture rides into replays — log only the scrubbed message (P1-1).
         console.warn("resume: image failed to load —", scrubErrorMessage(e));
-        toast("Imagery didn’t load — guess from the map.",
+        toast("Street view didn’t load — guess from the map.",
           { surface: "host" });
       }
       $("hudRound").textContent =

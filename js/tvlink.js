@@ -58,7 +58,7 @@ export function phoneJoinLine(baseHref, code) {
   const site = siteAddress(baseHref);
   return site
     ? `Join on your phone: ${site} — code ${code}`
-    : "Scan the host's QR to join";
+    : "Scan the QR on the host's phone to join";
 }
 
 // Normalize the ?via= a screen arrived with into the screen_joined

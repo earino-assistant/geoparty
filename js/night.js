@@ -112,12 +112,12 @@ export function tallyLineText(night, teams) {
   return `👑 ${parts.join(" · ")} — first to ${CROWNS_TO_WIN} takes the night`;
 }
 
-// The game-over hook: "👑 Ana ×2 · Ben ×1 — Game 4?" on the primary sub-line.
+// The game-over hook: "👑 Ana ×2 · Ben ×1 — Game 4 next?" on the primary sub-line.
 export function crownHookText(night, teams, nextGameNumber) {
   const rows = nightSummary(night, teams);
   const parts = rows.map((r) => `${r.name} ×${r.crowns}`);
   const tally = parts.length ? `👑 ${parts.join(" · ")} — ` : "";
-  return `${tally}Game ${nextGameNumber}?`;
+  return `${tally}Game ${nextGameNumber} next?`;
 }
 
 // "👑 CHAMPION OF THE NIGHT — Atlas Cats" for the ceremony.

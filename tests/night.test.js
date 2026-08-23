@@ -104,7 +104,7 @@ test("nightSummary / tallyLineText: sorted, named, invisible before game 2", () 
     ["Atlas Cats:2", "Pin Pals:1"]);
   assert.equal(tallyLineText(n, teams),
     `👑 Atlas Cats ×2 · Pin Pals ×1 — first to ${CROWNS_TO_WIN} takes the night`);
-  assert.equal(crownHookText(n, teams, 4), "👑 Atlas Cats ×2 · Pin Pals ×1 — Game 4?");
+  assert.equal(crownHookText(n, teams, 4), "👑 Atlas Cats ×2 · Pin Pals ×1 — Game 4 next?");
   assert.equal(championText("Atlas Cats"), "👑 CHAMPION OF THE NIGHT — Atlas Cats");
 });
 

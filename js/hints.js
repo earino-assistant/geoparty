@@ -71,7 +71,7 @@ export const HINT_CARDS = Object.freeze({
   phonescreen: {
     title: "This phone is the big screen",
     lines: Object.freeze([
-      "No TV attached — the reveal lands right here.",
+      "No TV connected — the reveal lands right here.",
       "Hold the phone up so the couch can see.",
     ]),
   },

@@ -158,7 +158,7 @@ export function openReportSheet(ctx) {
       if (refCode) {
         title.textContent = "Thanks — sent.";
         body.textContent =
-          `Your reference code is ${refCode}. Mention it if you get in touch.`;
+          `Your reference code is ${refCode}. Mention it if you get in touch on GitHub.`;
       } else {
         title.textContent = "Not sent";
         body.textContent = COPY.failed;

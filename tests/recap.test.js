@@ -150,18 +150,18 @@ test("recapCaption: a guessed round shows round · city · distance · points", 
     `Round 1 of 5 · Kyoto, Japan · ${formatDistance(D1)} · ${(4820).toLocaleString()} pts`);
 });
 
-test("recapCaption: a forfeit reads 'no guess'", () => {
+test("recapCaption: a forfeit reads 'no pin'", () => {
   const [card] = recapCards({
     places: [PLACES[0]], rounds: [round(null, null, 0)], ghostRounds: [],
   });
-  assert.equal(recapCaption(card), "Round 1 of 5 · Kyoto, Japan · no guess");
+  assert.equal(recapCaption(card), "Round 1 of 5 · Kyoto, Japan · no pin");
 });
 
 test("recapCaption: a missing name falls back to a friendly placeholder", () => {
   const [card] = recapCards({
     places: [{ lat: 1, lng: 2 }], rounds: [round(null, null, 0)], ghostRounds: [],
   });
-  assert.equal(recapCaption(card), "Round 1 of 5 · Somewhere mysterious · no guess");
+  assert.equal(recapCaption(card), "Round 1 of 5 · Somewhere mysterious · no pin");
 });
 
 /* ---------------- recapEagerCount ---------------- */

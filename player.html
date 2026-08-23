@@ -6,6 +6,7 @@
        their own gestures via `touch-action` in style.css. -->
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GeoParty — Everyone on their own phone</title>
+  <meta name="description" content="Join a GeoParty on your phone — grab a team, drop your pin, and race your rivals to guess where in the world you are." />
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
   <link rel="icon" href="assets/favicon-48.png" type="image/png" sizes="48x48" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
@@ -88,7 +89,7 @@
   <!-- 2. Lobby: room code + QR for the other phones, team roster -->
   <section id="p-lobby" class="phase-screen hidden">
     <div class="host-wrap">
-      <h1>Room</h1>
+      <h1>Room code</h1>
       <div id="pRoomCodeHuge" class="room-code-huge skeleton" data-ph-mask>······</div>
       <div class="qr-box"><canvas id="pQrCanvas"></canvas></div>
       <p id="pJoinUrl" data-ph-mask class="tv-add-alt"></p>
@@ -260,7 +261,7 @@
           <div class="label">When time runs out</div>
           <div class="seg" id="pSegAutoSubmit" data-value="0">
             <button data-v="0" class="sel">Wait for players</button>
-            <button data-v="1">Auto-lock pins</button>
+            <button data-v="1">Lock in dropped pins</button>
           </div>
         </div>
         <!-- G2 Twists -->

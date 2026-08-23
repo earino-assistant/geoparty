@@ -582,7 +582,7 @@ function instrument({ surface, container, viewer }) {
   // mirroring), seed/hero (decorative) must never blank the pano.
   const coversRound = (purpose) => purpose === "anchor" || purpose === "resume";
 
-  /* "Finding your way…" nav hint (issue #3 follow-up, docs §17 in
+  /* "Loading the arrows…" nav hint (issue #3 follow-up, docs §17 in
    * imagery.js). A move-enabled round anchor can land before Mapillary's
    * DirectionComponent has any arrow glyphs to draw — this is a
    * non-blocking (pointer-events:none) pill that bridges the gap. It is
@@ -607,7 +607,7 @@ function instrument({ surface, container, viewer }) {
     const dot = document.createElement("span");
     dot.className = "pano-nav-hint-dot";
     navHintEl.appendChild(dot);
-    navHintEl.appendChild(document.createTextNode("Finding your way…"));
+    navHintEl.appendChild(document.createTextNode("Loading the arrows…"));
     // Mount on <body>, NOT the Mapillary viewer container: the SDK's own CSS
     // (`.mapillary-viewer div { box-sizing:content-box }` and the container's
     // flex/grid layout) stretches children, which made the pill render full

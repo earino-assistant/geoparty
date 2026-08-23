@@ -216,7 +216,7 @@ function renderLobby(state, showScreen) {
     wrap.appendChild(chip);
   });
   const base = ids.length < 2
-    ? "Every team plays on their own phone — scan the host's QR to join"
+    ? "Every team plays on their own phone — scan the QR on the host's phone to join"
     : `${ids.length} teams ready — waiting for the host to start`;
   // G3 (C5): the night tally rides the nextRoom chain into game ≥ 2's lobby —
   // one muted line, folded into the existing status (§3.3). Team names ride it,
@@ -240,7 +240,7 @@ function codeFromUrl() {
  *             panel is privileged and nothing is stretched thin
  *   4 teams — quad
  * Every panel is border-lit in its team color with a name chip and a
- * status line ("exploring" / "on the map" / "LOCKED IN #2"), so the
+ * status line ("exploring" / "picking a spot" / "LOCKED IN #2"), so the
  * audience can track four stories at once without squinting.
  */
 
@@ -452,7 +452,7 @@ function applyTeamFeed(p, state, round, feed, result, tid) {
 
   if (stage === "map") {
     showPanelMap(p);
-    panelStatus(p, "on the map 📍");
+    panelStatus(p, "picking a spot 📍");
     const v = feed && feed.view;
     if (v && typeof v.lat === "number" && typeof v.zoom === "number") {
       const key = `${v.lat.toFixed(4)},${v.lng.toFixed(4)},${v.zoom}`;
@@ -465,7 +465,7 @@ function applyTeamFeed(p, state, round, feed, result, tid) {
     // Blind Duel (G2, spec §3.2): the TV must never contradict the card or the
     // hidden-information constitution — rival live pins are invisible this round.
     // Force the "no pin" path so a marker planted before the twist was known
-    // also gets cleared. The map view + "on the map 📍" status still update.
+    // also gets cleared. The map view + "picking a spot 📍" status still update.
     const blind = twistHidesRivalPins(round.twist && round.twist.id);
     const pin = blind ? null : (feed && feed.pin);
     if (pin && typeof pin.lat === "number") {
