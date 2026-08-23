@@ -176,9 +176,9 @@ test("reactive toast: toastPlain restores an ordinary, non-interactive toast", (
 test("a decliner is asked for explicit one-time consent, in the plan's words", () => {
   reportUi.openReportSheet({ surface: "player" });
   assert.equal(partOf("report-title").textContent,
-    "Send a one-time diagnostic report?");
+    "Send one report about this image?");
   const body = partOf("report-body").textContent;
-  assert.ok(body.includes("You’ve said no to analytics"));
+  assert.ok(body.includes("You said no to sharing play stats"));
   assert.ok(body.includes("one report, not ongoing tracking"));
   assert.ok(body.includes("Never your location, guesses, or names"));
   assert.equal(partOf("report-send").textContent, "Send one report");
@@ -277,7 +277,7 @@ test("a blocked/failed send reports the failure honestly and collects nothing",
     await tick();
     await tick();
     assert.equal(partOf("report-title").textContent, "Not sent");
-    assert.ok(partOf("report-body").textContent.includes("No data was collected"));
+    assert.ok(partOf("report-body").textContent.includes("Nothing left your phone"));
     assert.equal(env.sinks.oneShot.length, 0);
   });
 

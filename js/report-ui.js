@@ -77,12 +77,12 @@ const COPY = {
       "failed to load, how long it took, and your browser type. Never your " +
       "location, guesses, or names.",
     send: "Send report",
-    cancel: "Cancel",
+    cancel: "No thanks",
   },
   oneTime: {
-    title: "Send a one-time diagnostic report?",
-    body: "You’ve said no to analytics — we’ve respected that and collected " +
-      "nothing. To debug this image problem we’d need to send one anonymous " +
+    title: "Send one report about this image?",
+    body: "You said no to sharing play stats — we’ve respected that and collected " +
+      "nothing. To fix this image problem we’d need to send one anonymous " +
       "report: what failed, timings, and your browser type. Never your " +
       "location, guesses, or names. This is one report, not ongoing " +
       "tracking — your “no” stays in place.",
@@ -90,7 +90,7 @@ const COPY = {
     cancel: "No thanks",
   },
   failed: "Couldn’t send the report — you may be offline or blocking " +
-    "analytics. No data was collected.",
+    "analytics. Nothing left your phone.",
 };
 
 function ensureSheet() {

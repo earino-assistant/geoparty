@@ -162,7 +162,7 @@ function ensureBanner() {
   banner.id = "consentBanner";
   banner.className = "consent-banner";
   banner.setAttribute("role", "dialog");
-  banner.setAttribute("aria-label", "Analytics consent");
+  banner.setAttribute("aria-label", "Share anonymous play stats?");
 
   // Copy per review §6.5, merged with the disclosure the field-observability
   // work requires. §6.5's draft names only "scores, distances, and modes",
@@ -177,9 +177,9 @@ function ensureBanner() {
   text.append(
     lead,
     " Scores, distances and modes, plus technical diagnostics and an ",
-    "anonymised replay of the screens you see, so we can fix broken ",
-    "imagery. Never your guesses, your names, anything you type, or the ",
-    "street view itself. EU-hosted, change anytime.",
+    "anonymised replay of the menus and score screens (the street view ",
+    "and maps are blanked out), so we can fix broken imagery. Never your ",
+    "guesses, your names, or anything you type. EU-hosted, change anytime.",
   );
   const status = document.createElement("span");
   status.className = "consent-status";
@@ -260,7 +260,7 @@ export function openBanner() {
   const status = el.querySelector(".consent-status");
   const consent = getConsent(window.localStorage);
   status.textContent = consent
-    ? ` Currently: ${consent === CONSENT_ACCEPTED ? "on" : "off"}.`
+    ? ` Sharing is ${consent === CONSENT_ACCEPTED ? "on" : "off"}.`
     : "";
   el.querySelector(".consent-report")
     .classList.toggle("hidden", consent === null);
