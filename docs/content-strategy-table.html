@@ -1,0 +1,300 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>GeoParty — Content Strategy Table</title>
+<style>
+body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;color:#1a1a1a;background:#fff}
+h1{font-size:22px;margin-bottom:4px}
+h2{font-size:16px;margin:28px 0 8px;color:#333;border-bottom:2px solid #eee;padding-bottom:4px}
+p.sub{color:#666;font-size:13px;margin-top:0}
+table{border-collapse:collapse;width:100%;margin-bottom:8px;font-size:13px}
+th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top}
+th{background:#f5f5f5;font-weight:600}
+tr:nth-child(even) td{background:#fafafa}
+td.keep{color:#2e7d32}
+td.chg{color:#b71c1c}
+.summary{background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:12px 16px;font-size:13px;margin-top:20px}
+</style></head><body>
+<h1>GeoParty — Complete User-String Content Strategy</h1>
+<p class="sub">Every user-visible string, current → proposed. Governing principle: the cleanest word that gives the best affordance for casual users who play a few minutes a week. "Share" is the social verb. <strong>keep</strong> = no change. <strong>[test]</strong> = test-locked, sync in the same change.</p>
+<h2>1. Landing (index.html)</h2>
+<table><thead><tr><th style='width:50%'>Current</th><th style='width:50%'>Proposed</th></tr></thead><tbody>
+<tr><td>GeoParty (tab title)</td><td class='keep'>keep</td></tr>
+<tr><td>Jackbox-style geoguessing party game. Guess where in the world you are — phones in… (meta)</td><td class='keep'>keep</td></tr>
+<tr><td>GeoParty (og:site_name)</td><td class='keep'>keep</td></tr>
+<tr><td>GeoParty — the geoguessing party game (og:title)</td><td class='keep'>keep</td></tr>
+<tr><td>Guess where in the world you are. Phones in, pins down. Free in the browser — no app… (og:desc)</td><td class='keep'>keep</td></tr>
+<tr><td>GeoParty (hero H1)</td><td class='keep'>keep</td></tr>
+<tr><td>Guess where in the world you are. Phones in, pins down. (tagline)</td><td class='keep'>keep</td></tr>
+<tr><td>Start a party (primary CTA)</td><td class='keep'>keep</td></tr>
+<tr><td>Have a code? Join (secondary CTA)</td><td class='keep'>keep</td></tr>
+<tr><td>Everyone on their own phone (chooser 1)</td><td class='keep'>keep</td></tr>
+<tr><td>Same spot, same clock — rival pins in plain sight. (subline)</td><td class='keep'>keep</td></tr>
+<tr><td>One phone + the TV (chooser 2)</td><td class='keep'>keep</td></tr>
+<tr><td>One phone drives, everyone shouts directions. (subline)</td><td class='keep'>keep</td></tr>
+<tr><td>← Back</td><td class='keep'>keep</td></tr>
+<tr><td>CODE (join placeholder)</td><td class='keep'>keep</td></tr>
+<tr><td>Join</td><td class='keep'>keep</td></tr>
+<tr><td>Daily Challenge — five mystery places, the same for everyone today. No party needed.</td><td class='keep'>keep (title case is correct; daily.html tag fixed below)</td></tr>
+<tr><td>How it works (aria)</td><td class='keep'>keep</td></tr>
+<tr><td>One phone starts a party (step 1)</td><td class='keep'>keep</td></tr>
+<tr><td>Friends join — QR or link (step 2)</td><td class='keep'>keep</td></tr>
+<tr><td>Add a TV. Optional. (step 3)</td><td class='chg'><strong>Add a TV — optional<strong></td></tr>
+<tr><td>How to play (footer)</td><td class='keep'>keep</td></tr>
+<tr><td>Add a TV (footer link)</td><td class='chg'><strong>TV screen<strong></td></tr>
+<tr><td>Privacy (footer)</td><td class='keep'>keep</td></tr>
+<tr><td>GitHub (footer)</td><td class='keep'>keep</td></tr>
+<tr><td>© 2026 Eduardo Ariño de la Rubia · A game by Eduardo Ariño de la Rubia</td><td class='chg'><strong>© 2026 · A game by Eduardo Ariño de la Rubia<strong></td></tr>
+</tbody></table>
+<h2>2. Daily Challenge (daily.html + daily-ui.js)</h2>
+<table><thead><tr><th style='width:50%'>Current</th><th style='width:50%'>Proposed</th></tr></thead><tbody>
+<tr><td>GeoParty — Daily Challenge (tab)</td><td class='keep'>keep</td></tr>
+<tr><td>Five mystery places, the same for everyone today. One run per day… (meta)</td><td class='keep'>keep</td></tr>
+<tr><td>GeoParty · daily challenge (intro H1 + tag)</td><td class='chg'><strong>GeoParty · Daily Challenge<strong></td></tr>
+<tr><td>Today · #— (stat card + placeholder)</td><td class='chg'><strong>Today · #—<strong> (placeholder class; keep)</td></tr>
+<tr><td>Five mystery places — the same five for everyone today. / One run per day. Closer + faster = more points.</td><td class='keep'>keep</td></tr>
+<tr><td>⚡ Hard mode — no moving, 30 seconds / Try hard mode</td><td class='keep'>keep</td></tr>
+<tr><td>← GeoParty (back link)</td><td class='chg'><strong>← Home<strong></td></tr>
+<tr><td>Play today&#x27;s Daily (intro CTA)</td><td class='keep'>keep</td></tr>
+<tr><td>Round 1/5 · 1:00 (HUD skeleton)</td><td class='keep'>keep</td></tr>
+<tr><td>Make guess (round primary — opens the map)</td><td class='chg'><strong>Guess on the map<strong></td></tr>
+<tr><td>Tap the map to drop your pin</td><td class='keep'>keep</td></tr>
+<tr><td>Back to street</td><td class='keep'>keep</td></tr>
+<tr><td>Lock it in</td><td class='keep'>keep</td></tr>
+<tr><td>Round 1 · — · — · Total so far · — (reveal skeletons)</td><td class='keep'>keep (placeholder class)</td></tr>
+<tr><td>Next round</td><td class='keep'>keep</td></tr>
+<tr><td>Daily done! (done headline skeleton)</td><td class='keep'>keep (JS overwrites)</td></tr>
+<tr><td>Your score · —</td><td class='keep'>keep</td></tr>
+<tr><td>New personal best! 🏆</td><td class='keep'>keep</td></tr>
+<tr><td>Share your result (done share, non-duel default)</td><td class='keep'>keep (model)</td></tr>
+<tr><td>Your five places (recap title)</td><td class='keep'>keep</td></tr>
+<tr><td>Fresh five tomorrow — or start a party with friends.</td><td class='keep'>keep</td></tr>
+<tr><td>How to play · © line</td><td class='chg'><strong>© 2026 · A game by Eduardo Ariño de la Rubia<strong></td></tr>
+<tr><td>This challenge was built on an older Daily — playing without the ghost. (boot toast)</td><td class='chg'><strong>This challenge was built on an older Daily — playing today&#x27;s five solo instead.<strong></td></tr>
+<tr><td>Couldn&#x27;t load today&#x27;s places — try again.</td><td class='keep'>keep (apostrophe normalized)</td></tr>
+<tr><td>Round ${n}/5 ⚡ (HUD)</td><td class='keep'>keep</td></tr>
+<tr><td>Lock it in / Lock in (armed-state drift)</td><td class='chg'><strong>Lock it in<strong> (both states) <strong>[test]<strong></td></tr>
+<tr><td>Time! Your pin was locked in. / Time! No pin — no points this round.</td><td class='keep'>keep</td></tr>
+<tr><td>Round ${n} of 5 (reveal heading)</td><td class='keep'>keep (spoken form)</td></tr>
+<tr><td>You +12,340 · 👻 +11,500 — you take the round / 👻 takes the round / you and the ghost tied</td><td class='chg'><strong>…the ghost takes the round<strong> (emoji not a subject)</td></tr>
+<tr><td>See my score / Next round</td><td class='keep'>keep</td></tr>
+<tr><td>This challenge was built on an older Daily — showing your result.</td><td class='keep'>keep</td></tr>
+<tr><td>You played Daily #142* ✓ / Daily #142* done!</td><td class='chg'><strong>Daily #142 — you did it! 🎉<strong> (fresh); gloss the `*` as hard mode</td></tr>
+<tr><td>Missed a day — your streak survived. 🔥 5 / 🔥 5 — day streak</td><td class='keep'>keep (format normalized)</td></tr>
+<tr><td>🎯 3rd ace this month</td><td class='chg'><strong>🎯 3rd ACE this month<strong></td></tr>
+<tr><td><strong>Challenge them back<strong> (duel done primary — the share trigger)</td><td class='chg'><strong>Share your run back<strong></td></tr>
+<tr><td>That was another day&#x27;s five… / One run per day keeps scores honest…</td><td class='keep'>keep</td></tr>
+<tr><td>You beat the ghost! 🏆 / The ghost got you 👻 / You and the ghost tied.</td><td class='keep'>keep (period normalized)</td></tr>
+<tr><td>12,340 apiece / 12,340 to 11,900 — by 440</td><td class='chg'><strong>…by 440 pts<strong></td></tr>
+<tr><td>This run has no saved pins — sharing a plain card, no ghost challenge.</td><td class='chg'><strong>This run has no saved pins — sharing your score card without the challenge link.<strong></td></tr>
+<tr><td>⚔️ CHALLENGE — Daily #142* ⚡ (intro eyebrow)</td><td class='keep'>keep (gloss the `*`)</td></tr>
+<tr><td>A friend sent you their run. Their ghost pin appears at every reveal — same five places, same rules.</td><td class='keep'>keep (model string)</td></tr>
+<tr><td>Take the challenge</td><td class='keep'>keep</td></tr>
+<tr><td>Play Hard Mode ⚡ / Play Today&#x27;s Daily</td><td class='chg'><strong>Play hard mode ⚡<strong> / keep</td></tr>
+<tr><td>This challenge needs a newer GeoParty… (toast)</td><td class='chg'><strong>…— reload this page, then open the link again.<strong></td></tr>
+<tr><td>Loading your challenge…</td><td class='keep'>keep</td></tr>
+</tbody></table>
+<h2>3. Ghost Duel share (share.js, share-ui.js)</h2>
+<table><thead><tr><th style='width:50%'>Current</th><th style='width:50%'>Proposed</th></tr></thead><tbody>
+<tr><td>We were 3.2 km from Kyoto… beat us: url (party card)</td><td class='keep'>keep</td></tr>
+<tr><td>🎯 Your ACE pin — 0.4 km / Your closest pin — …</td><td class='keep'>keep</td></tr>
+<tr><td>Nailed it / Right region / Right continent / Lost (medal captions)</td><td class='keep'>keep</td></tr>
+<tr><td>GeoParty Daily #37 — I beat the ghost by 1,840 🏆 (card lead)</td><td class='keep'>keep (add &quot;pts&quot; to margin)</td></tr>
+<tr><td><strong>⚔️ Send your run back: url<strong> (duel card line 3)</td><td class='chg'><strong>⚔️ Share your run back: url<strong> <strong>[test]<strong></td></tr>
+<tr><td>⚔️ Beat my ghost: url (fresh-run card)</td><td class='keep'>keep</td></tr>
+<tr><td>Beat me: url (plain card)</td><td class='keep'>keep</td></tr>
+<tr><td>I beat the ghost by 1,840 🏆 / The ghost got me by 620 👻</td><td class='keep'>keep (add &quot;pts&quot; to margin)</td></tr>
+<tr><td><strong>You and the ghost tied 🤝<strong> (card tie line)</td><td class='chg'><strong>The ghost and I tied 🤝<strong> <strong>[test]<strong></td></tr>
+<tr><td><strong>Result copied — paste it anywhere 📋<strong> (toast)</td><td class='chg'><strong>Challenge link copied — share it with your friend 📋<strong> (duel); keep for plain</td></tr>
+<tr><td>Round 2 · Kyoto, Japan · 3 km · 1,240 pts / no guess (recap)</td><td class='chg'><strong>Round 2 of 5<strong>; <strong>no pin<strong></td></tr>
+</tbody></table>
+<h2>4. Player + modifiers (player.html, player-ui.js, hints, modifier, supersure, twist)</h2>
+<table><thead><tr><th style='width:50%'>Current</th><th style='width:50%'>Proposed</th></tr></thead><tbody>
+<tr><td>reconnecting…</td><td class='chg'><strong>Reconnecting — hang tight…<strong></td></tr>
+<tr><td>Your team name / The Atlas Cats</td><td class='keep'>keep</td></tr>
+<tr><td>🎲 Surprise me</td><td class='keep'>keep</td></tr>
+<tr><td>Have a code? / CODE / Join</td><td class='keep'>keep</td></tr>
+<tr><td>Start a new game →</td><td class='chg'><strong>Start the party<strong></td></tr>
+<tr><td>Room · ······</td><td class='chg'><strong>Room code<strong></td></tr>
+<tr><td>Send invite link</td><td class='chg'><strong>Share the invite link<strong></td></tr>
+<tr><td>📺 Add a TV — optional / Scan with any phone or tablet, then cast or AirPlay it…</td><td class='keep'>keep</td></tr>
+<tr><td>Send the TV link</td><td class='chg'><strong>Share the TV link<strong></td></tr>
+<tr><td>Teams</td><td class='keep'>keep</td></tr>
+<tr><td>Leave (JS swaps to Abandon for host)</td><td class='chg'><strong>Leave<strong> (host: <strong>Close the room<strong>)</td></tr>
+<tr><td>Start game</td><td class='chg'><strong>Start the game<strong></td></tr>
+<tr><td>Give up</td><td class='chg'><strong>Give up this round<strong></td></tr>
+<tr><td>Make guess</td><td class='chg'><strong>Guess on the map<strong></td></tr>
+<tr><td>map hint / Back to street / Lock it in</td><td class='keep'>keep</td></tr>
+<tr><td>LOCKED IN</td><td class='keep'>keep (ceremony)</td></tr>
+<tr><td>Eyes on the TV 📺</td><td class='keep'>keep</td></tr>
+<tr><td>Who&#x27;s in</td><td class='chg'><strong>Who&#x27;s locked in<strong></td></tr>
+<tr><td>✋ Hold</td><td class='keep'>keep</td></tr>
+<tr><td>Game over!</td><td class='keep'>keep (canonical)</td></tr>
+<tr><td>Leave the game</td><td class='chg'><strong>Leave<strong></td></tr>
+<tr><td>Share</td><td class='chg'><strong>Share your result<strong></td></tr>
+<tr><td>Set up the next game</td><td class='keep'>keep</td></tr>
+<tr><td>Auto-lock pins</td><td class='chg'><strong>Lock in dropped pins<strong></td></tr>
+<tr><td>Open the room</td><td class='chg'><strong>Start the party<strong></td></tr>
+<tr><td>Some images wouldn&#x27;t load — we skipped ahead.</td><td class='keep'>keep</td></tr>
+<tr><td>Couldn&#x27;t load the imagery… / Retry</td><td class='chg'><strong>Couldn&#x27;t load the street view.<strong> / keep</td></tr>
+<tr><td>👑 Your game now / Start a new game / Same teams, fresh scores…</td><td class='keep'>keep</td></tr>
+<tr><td>Give your team a name first(.)</td><td class='keep'>keep (one literal, punctuation normalized)</td></tr>
+<tr><td>Could not create game — see console</td><td class='chg'><strong>Couldn&#x27;t start the party — check your connection and try again.<strong></td></tr>
+<tr><td>That&#x27;s not a room code. / Room not found — check the code. / That game already started. / Room is full (4 teams max). / Could not join — try again.</td><td class='keep'>keep (model family); &quot;That game already started.&quot; → <strong>…— ask for a new code when the next one begins.<strong></td></tr>
+<tr><td>That room is a couch game — this page is head-to-head.</td><td class='chg'><strong>That code is for a one-phone party — nothing to join from your phone.<strong></td></tr>
+<tr><td>The room was closed. / Room not found.</td><td class='keep'>keep</td></tr>
+<tr><td>Couldn&#x27;t follow into the next game.</td><td class='chg'><strong>…ask the winner for the new code.<strong></td></tr>
+<tr><td>You&#x27;re no longer in this room.</td><td class='keep'>keep (add next step)</td></tr>
+<tr><td>${Team} locked in!</td><td class='keep'>keep</td></tr>
+<tr><td>&quot; (you)&quot; / &quot; 👑&quot; (lobby roster)</td><td class='chg'><strong>&quot; (you)&quot;<strong> / <strong>&quot; · host&quot;<strong></td></tr>
+<tr><td>ready (roster tag)</td><td class='chg'><strong>drop<strong> (unconditional noise)</td></tr>
+<tr><td>Abandon / Leave</td><td class='chg'><strong>Close the room<strong> / <strong>Leave<strong></td></tr>
+<tr><td>Start solo, or wait for rivals… / n teams in… / Waiting for {host}… / · TV ✓</td><td class='keep'>keep</td></tr>
+<tr><td>Join my GeoParty head-to-head — room CODE / Invite link copied / Send this link: url</td><td class='chg'><strong>Join my GeoParty — room {CODE}<strong> / <strong>Invite link copied<strong> / keep</td></tr>
+<tr><td>Location pool exhausted!</td><td class='chg'><strong>We&#x27;re out of new places — final scores!<strong></td></tr>
+<tr><td>Could not start the round</td><td class='chg'><strong>Couldn&#x27;t start the round — try again.<strong></td></tr>
+<tr><td>Imagery didn&#x27;t load — guess from the map.</td><td class='chg'><strong>Street view didn&#x27;t load — guess from the map.<strong></td></tr>
+<tr><td>Round 3/5 vs Round 3 of 5</td><td class='keep'>keep (HUD compact / heading spoken)</td></tr>
+<tr><td>2/4 in (locked HUD chip)</td><td class='chg'><strong>2/4 locked in<strong></td></tr>
+<tr><td>Drop your pin / Raise the stakes?</td><td class='keep'>keep</td></tr>
+<tr><td>Your next tap plants the decoy — then tap again for your real pin.</td><td class='keep'>keep</td></tr>
+<tr><td>You gave up — SUPER SURE burned. / Time! No pin — SUPER SURE burned.</td><td class='chg'><strong>…your SUPER SURE bet is gone.<strong></td></tr>
+<tr><td>Time! Your pin was locked in.</td><td class='keep'>keep</td></tr>
+<tr><td>✓ in (#2) / #2 to lock in (locked screen)</td><td class='chg'><strong>✓ locked in 2nd<strong> / <strong>You locked in 2nd<strong></td></tr>
+<tr><td>Eyes on the TV 📺 / Results land right here when everyone&#x27;s in / Everyone&#x27;s in! / Reveal in 3…</td><td class='keep'>keep</td></tr>
+<tr><td>∞ (no-limit timer)</td><td class='chg'><strong>No timer<strong></td></tr>
+<tr><td>— (unnamed place at reveal)</td><td class='chg'><strong>Somewhere mysterious<strong></td></tr>
+<tr><td>ACE stamp / 👑 board prefix / (you)</td><td class='keep'>keep</td></tr>
+<tr><td>Finish game / Next round / {host} wraps up… / …starts the next round…</td><td class='keep'>keep</td></tr>
+<tr><td>Holding — advance whenever you&#x27;re ready</td><td class='chg'><strong>Holding — tap Next round whenever you&#x27;re ready.<strong></td></tr>
+<tr><td>🏆 You won! / winLine / Game over! / Winner runs the table… / {winner} won — their phone is the host now…</td><td class='keep'>keep (WIN_LINES rewritten below)</td></tr>
+<tr><td>Could not create the next game / That room is gone</td><td class='chg'><strong>Couldn&#x27;t set up the next game — try again.<strong> / keep</td></tr>
+<tr><td>Where are you? / Look around 👀… / How points work / FINAL SHOWDOWN</td><td class='keep'>keep</td></tr>
+<tr><td>Then Make Guess. (hint)</td><td class='chg'><strong>Then tap Guess on the map.<strong></td></tr>
+<tr><td>This phone is the big screen / No TV attached — the reveal lands right here.</td><td class='keep'>keep / <strong>No TV connected — the reveal lands right here.<strong></td></tr>
+<tr><td>Closer = more points. Faster = bonus. / Rivals see your pin move — bluff away.</td><td class='keep'>keep</td></tr>
+<tr><td>Lock it in / Lock in (×3 modes)</td><td class='chg'><strong>Lock it in<strong> (all) <strong>[test]<strong></td></tr>
+<tr><td>🔥 Lock in ×2 / or 0 (armed)</td><td class='chg'><strong>🔥 Lock it in ×2<strong> / <strong>or 0<strong> <strong>[test]<strong></td></tr>
+<tr><td>≈ +3,240 (estimate sublabel)</td><td class='keep'>keep</td></tr>
+<tr><td>Got it</td><td class='keep'>keep</td></tr>
+<tr><td>Raise the stakes? / 🔥 Double or nothing · 🎭 Decoy pin</td><td class='keep'>keep</td></tr>
+<tr><td>Are you SUPER SURE? Tap for double or nothing 🔥 / Feeling sneaky? Tap to plant a decoy pin 🎭</td><td class='keep'>keep</td></tr>
+<tr><td>SUPER SURE / Double or nothing, once per game. Closest pin this round: your points ×2…</td><td class='keep'>keep</td></tr>
+<tr><td>Once armed, the bet is on — no backing out this round.</td><td class='chg'><strong>Once placed, the bet is on — no backing out this round.<strong></td></tr>
+<tr><td>Arm the bet</td><td class='chg'><strong>Place the bet 🔥<strong></td></tr>
+<tr><td>Not now</td><td class='keep'>keep</td></tr>
+<tr><td>🎭 Decoy / Plant a fake pin for rivals to see. Your real pin goes dark. / Once per game. / Plant the decoy</td><td class='chg'><strong>…rivals stop seeing your real pin.<strong></td></tr>
+<tr><td>SUPER SURE ×2 / SUPER SURE — 0 (reveal badges)</td><td class='chg'><strong>SUPER SURE ×2<strong> / <strong>SUPER SURE ×0<strong> <strong>[test]<strong></td></tr>
+<tr><td>⚡ BLITZ / 20-second clock · round ×1.5 / ⚡BLITZ / ×1.5 ⚡ (twist)</td><td class='chg'><strong>⚡ BLITZ<strong> / keep / <strong>⚡ BLITZ<strong> / <strong>⚡ ×1.5<strong> <strong>[test]<strong></td></tr>
+<tr><td>🧊 FROZEN / No moving — read the frame / 🧊FROZEN / 🧊</td><td class='chg'><strong>🧊 FROZEN<strong> / <strong>No moving — read the scene<strong> / <strong>🧊 FROZEN<strong> / <strong>🧊 FROZEN<strong> <strong>[test]<strong></td></tr>
+<tr><td>🔒 BLIND DUEL / Rival pins are hidden / 🔒BLIND / 🔒</td><td class='chg'><strong>🔒 BLIND ROUND<strong> / keep / <strong>🔒 BLIND ROUND<strong> / <strong>🔒 BLIND ROUND<strong> <strong>[test]<strong></td></tr>
+<tr><td>🌍 LONG HAUL / Gentler curve — go bold / 🌍LONGHAUL / 🌍</td><td class='chg'><strong>🌍 LONG HAUL<strong> / <strong>Far-off pins score kinder — go bold<strong> / <strong>🌍 LONG HAUL<strong> / <strong>🌍 LONG HAUL<strong> <strong>[test]<strong></td></tr>
+</tbody></table>
+<h2>5. Host / landing / TV-link (host.html, host-ui.js, landing-ui.js, tvlink.js, team-names.js)</h2>
+<table><thead><tr><th style='width:50%'>Current</th><th style='width:50%'>Proposed</th></tr></thead><tbody>
+<tr><td>reconnecting…</td><td class='chg'><strong>Reconnecting — hang tight…<strong></td></tr>
+<tr><td>Game in progress / Room CODE — resume as host? / Resume</td><td class='keep'>keep</td></tr>
+<tr><td>Difficulty: Casual / World tour / Expert</td><td class='keep'>keep</td></tr>
+<tr><td>Rounds/Teams + numerals</td><td class='keep'>keep</td></tr>
+<tr><td>🎲 Surprise me</td><td class='keep'>keep</td></tr>
+<tr><td>More options / Seconds per round / 60/120/180/No limit</td><td class='keep'>keep</td></tr>
+<tr><td>Movement: Allowed / No moving</td><td class='keep'>keep</td></tr>
+<tr><td>Twists: Off / Occasional / Chaos</td><td class='keep'>keep</td></tr>
+<tr><td>Past games</td><td class='keep'>keep</td></tr>
+<tr><td>New game</td><td class='chg'><strong>Start the party<strong></td></tr>
+<tr><td>Room code · ······ · No TV? No problem — the reveal shows right here.</td><td class='keep'>keep</td></tr>
+<tr><td>📺 Put it on a TV / Scan with any spare phone or tablet, then cast it to the TV.</td><td class='chg'><strong>📺 Add a TV — optional<strong> / align device wording</td></tr>
+<tr><td>Send the TV link</td><td class='chg'><strong>Share the TV link<strong></td></tr>
+<tr><td>Abandon</td><td class='chg'><strong>Close the room<strong></td></tr>
+<tr><td>Start round</td><td class='chg'><strong>Start the game<strong></td></tr>
+<tr><td>Make guess</td><td class='chg'><strong>Guess on the map<strong></td></tr>
+<tr><td>map hint + Lock it in</td><td class='keep'>keep</td></tr>
+<tr><td>✋ Hold</td><td class='keep'>keep</td></tr>
+<tr><td>Next round</td><td class='keep'>keep</td></tr>
+<tr><td>Final standings</td><td class='chg'><strong>Game over!<strong></td></tr>
+<tr><td>© line</td><td class='chg'><strong>© 2026 · A game by Eduardo Ariño de la Rubia<strong></td></tr>
+<tr><td>Share</td><td class='chg'><strong>Share the result<strong></td></tr>
+<tr><td>New game (game-over)</td><td class='chg'><strong>Play again<strong></td></tr>
+<tr><td>Could not create game — see console</td><td class='chg'><strong>Couldn&#x27;t start the party — check your connection and try again.<strong></td></tr>
+<tr><td>Location pool exhausted!</td><td class='chg'><strong>We&#x27;re out of new places — final scores!<strong></td></tr>
+<tr><td>Round 3/5 vs Round 3 of 5</td><td class='keep'>keep (HUD compact / heading spoken)</td></tr>
+<tr><td>FINAL SHOWDOWN vs Final Showdown</td><td class='keep'>keep (ceremony caps)</td></tr>
+<tr><td>∞</td><td class='chg'><strong>No timer<strong></td></tr>
+<tr><td>Time&#x27;s up!</td><td class='keep'>keep</td></tr>
+<tr><td>…drop your pin (2/4)</td><td class='chg'><strong>…drop your pin (2 of 4)<strong></td></tr>
+<tr><td>Raise the stakes? (couch sheet)</td><td class='keep'>keep</td></tr>
+<tr><td>LOCKED IN stamp / Pass the phone — ${name} is up!</td><td class='keep'>keep</td></tr>
+<tr><td>Holding — advance whenever you&#x27;re ready</td><td class='chg'><strong>Holding — tap Next round whenever you&#x27;re ready.<strong></td></tr>
+<tr><td>SUPER SURE ×2 / SUPER SURE — 0 / Answer</td><td class='chg'><strong>SUPER SURE ×2<strong> / <strong>SUPER SURE ×0<strong> / keep <strong>[test]<strong></td></tr>
+<tr><td>— (unnamed place)</td><td class='chg'><strong>Somewhere mysterious<strong></td></tr>
+<tr><td>👑 prefixes (showdown + board)</td><td class='keep'>keep (round-winner)</td></tr>
+<tr><td>Finish / Next round</td><td class='keep'>keep</td></tr>
+<tr><td>Saved to your past games ✓ / That room is gone</td><td class='keep'>keep</td></tr>
+<tr><td>Finding your room… / Room not found — check the code. / Codes are 6 letters — check the TV or the invite.</td><td class='keep'>keep (model error copy)</td></tr>
+<tr><td>TV typing fallback / Join on your phone: {site} — code {code}</td><td class='keep'>keep</td></tr>
+<tr><td>Scan the host&#x27;s QR to join</td><td class='chg'><strong>Scan the QR on the host&#x27;s phone to join<strong></td></tr>
+<tr><td>GEO_PUNS (102 puns)</td><td class='keep'>keep (4 edgy entries flagged for owner decision)</td></tr>
+</tbody></table>
+<h2>6. TV screens / fx / night / reveal (screen.html, screen-ui.js, screen-h2h.js, couchscreen.js, fx.js, night.js, revealmap.js, autoadvance.js)</h2>
+<table><thead><tr><th style='width:50%'>Current</th><th style='width:50%'>Proposed</th></tr></thead><tbody>
+<tr><td>🔊/🔇 + Sound on — tap to mute / Sound off — tap to unmute</td><td class='keep'>keep</td></tr>
+<tr><td>WIN_LINES: take the room / run the table / The room belongs to / own the map / that&#x27;s the game</td><td class='chg'><strong>locked it down<strong> / <strong>read the map<strong> / keep / keep / keep</td></tr>
+<tr><td>The room was closed. / Room not found — check the code.</td><td class='keep'>keep</td></tr>
+<tr><td>Round 3 / 5 · HUD, FINAL SHOWDOWN (— every team plays!), {name} is guessing · 2/4</td><td class='chg'><strong>Round 3/5<strong>; keep showdown; <strong>2/4 locked in<strong></td></tr>
+<tr><td>place-name pop / distance · caption / points</td><td class='keep'>keep</td></tr>
+<tr><td>🎯 ACE — 0.4 km</td><td class='keep'>keep</td></tr>
+<tr><td>This round / Totals</td><td class='keep'>keep (Totals everywhere)</td></tr>
+<tr><td>👑 ${name} (closest-team crown)</td><td class='keep'>keep (round-winner)</td></tr>
+<tr><td>answered in 23s (⚡+140) / 🔥 SUPER SURE ×2 / — 0</td><td class='keep'>keep / keep / <strong>SUPER SURE ×0<strong> <strong>[test]<strong></td></tr>
+<tr><td>count-ups, standings, podium</td><td class='keep'>keep</td></tr>
+<tr><td>👑 ${winner} won — their phone runs the next game</td><td class='keep'>keep</td></tr>
+<tr><td>${name} 👑 (lobby host chip)</td><td class='chg'><strong>${name} · host<strong></td></tr>
+<tr><td>…scan the host&#x27;s QR to join / n teams ready… / tally · status</td><td class='chg'><strong>…scan the QR on the host&#x27;s phone to join<strong> / keep / keep</td></tr>
+<tr><td>exploring / LOCKED IN / locked in / 2 / 4 locked in / #2 in / on the map 📍</td><td class='keep'>keep / keep / keep / keep / <strong>locked in 2nd<strong> / <strong>picking a spot 📍<strong></td></tr>
+<tr><td>3-2-1, place pop, boards</td><td class='keep'>keep</td></tr>
+<tr><td>TV connected ✓ / Offline — you can play on this phone alone. / No TV? No problem — the reveal shows right here.</td><td class='keep'>keep</td></tr>
+<tr><td>👑 ${name} wins!</td><td class='keep'>keep</td></tr>
+<tr><td>${name} ×2 / 👑 {parts} — first to 3 takes the night</td><td class='keep'>keep</td></tr>
+<tr><td>👑 {parts} — Game 4?</td><td class='chg'><strong>…Game 4 next?<strong></td></tr>
+<tr><td>👑 CHAMPION OF THE NIGHT — ${name}</td><td class='keep'>keep (ceremony)</td></tr>
+<tr><td>SUPER SURE labels / 🎭 decoy chip (reveal map)</td><td class='chg'><strong>SUPER SURE ×0<strong> <strong>[test]<strong> / keep</td></tr>
+<tr><td>👻 3 km (ghost chip)</td><td class='keep'>keep (verify non-duel never renders)</td></tr>
+<tr><td>Guess / Answer (couch pin tooltips)</td><td class='chg'><strong>Your guess<strong> / keep</td></tr>
+<tr><td>Final scores in 5… / Next round in 5… / Wrapping up… / Starting the next round…</td><td class='keep'>keep / keep / <strong>Final scores…<strong> / keep</td></tr>
+<tr><td>GeoParty — Screen (tab)</td><td class='chg'><strong>GeoParty — TV<strong></td></tr>
+<tr><td>Enter the room code from the host&#x27;s phone</td><td class='keep'>keep</td></tr>
+<tr><td>KWPFRT (code placeholder)</td><td class='chg'><strong>CODE<strong></td></tr>
+<tr><td>Waiting for the host…</td><td class='keep'>keep</td></tr>
+<tr><td>Guessing… / waiting for a pin…</td><td class='keep'>keep (case normalized)</td></tr>
+<tr><td>head-to-head (H1 mode tag)</td><td class='chg'><strong>everyone on their own phone<strong></td></tr>
+<tr><td>Leaderboard</td><td class='chg'><strong>Totals<strong></td></tr>
+<tr><td>ALL TEAMS LOCKED IN · 3</td><td class='keep'>keep (ceremony)</td></tr>
+<tr><td>Game over! / Start a new game on the host&#x27;s phone — this screen follows. / Enter a code</td><td class='keep'>keep</td></tr>
+<tr><td>© line</td><td class='chg'><strong>© 2026 · A game by Eduardo Ariño de la Rubia<strong></td></tr>
+</tbody></table>
+<h2>7. Consent / report / core (consent.js, report-ui.js, viewer-ui.js, game.js)</h2>
+<table><thead><tr><th style='width:50%'>Current</th><th style='width:50%'>Proposed</th></tr></thead><tbody>
+<tr><td>Analytics consent (dialog aria-label)</td><td class='chg'><strong>Share anonymous play stats?<strong></td></tr>
+<tr><td>🌍 Share anonymous play stats? (banner headline)</td><td class='keep'>keep</td></tr>
+<tr><td>Scores, distances and modes, plus technical diagnostics and an anonymised replay of the screens you see, so we can fix broken imagery. Never your guesses, your names, anything you type, or the street view itself. EU-hosted, change anytime.</td><td class='chg'><strong>…plus technical diagnostics and an anonymised replay of the menus and score screens (the street view and maps are blanked out), so we can fix broken imagery. Never your guesses, your names, or anything you type. EU-hosted, change anytime.<strong></td></tr>
+<tr><td>No thanks / Sounds good</td><td class='keep'>keep (first-ask); &quot;Sounds good&quot; under reopened settings → <strong>Sharing is on/off<strong> context</td></tr>
+<tr><td>📷 Image not working? Report it</td><td class='keep'>keep</td></tr>
+<tr><td>Read the full privacy policy on GitHub ↗</td><td class='keep'>keep</td></tr>
+<tr><td>Currently: on. / Currently: off.</td><td class='chg'><strong>Sharing is on.<strong> / <strong>Sharing is off.<strong></td></tr>
+<tr><td>Report / Report an image problem / body / Send report / Cancel</td><td class='keep'>keep / keep / keep / keep / <strong>No thanks<strong></td></tr>
+<tr><td>Send a one-time diagnostic report?</td><td class='chg'><strong>Send one report about this image?<strong></td></tr>
+<tr><td>You&#x27;ve said no to analytics — … to debug this image problem…</td><td class='chg'><strong>You said no to sharing play stats<strong> / <strong>To fix this image problem<strong></td></tr>
+<tr><td>Send one report / No thanks</td><td class='keep'>keep</td></tr>
+<tr><td>Couldn&#x27;t send the report — you may be offline or blocking analytics. No data was collected.</td><td class='chg'><strong>…Nothing left your phone.<strong></td></tr>
+<tr><td>Thanks — sent. / ref-code line / Not sent / Close</td><td class='keep'>keep / <strong>…if you get in touch on GitHub.<strong> / keep / keep</td></tr>
+<tr><td>Finding your way… (arrows pill)</td><td class='chg'><strong>Loading the arrows…<strong></td></tr>
+<tr><td>GP-4K7QMV (support ref code)</td><td class='keep'>keep</td></tr>
+<tr><td>23s / 1m 04s / 3.2 km / 1:37 (formatters)</td><td class='keep'>keep</td></tr>
+<tr><td>SUPER SURE — no pin · 0 / no pin · +0 / 250 km · SUPER SURE — 0 / SUPER SURE ×2 · 3,120 / ⚡23s +140</td><td class='chg'><strong>no pin · SUPER SURE ×0<strong> / <strong>no pin · +0<strong> / <strong>SUPER SURE ×0<strong> / keep / keep <strong>[test]<strong></td></tr>
+<tr><td>+3,120 pts · 812 km · Nailed it · ⚡+140 fast (+ SUPER SURE variants)</td><td class='keep'>keep (add 🔥 to TV rows for consistency)</td></tr>
+<tr><td>+3,120 → 9,480 (board rows)</td><td class='keep'>keep</td></tr>
+<tr><td>Everyone (default solo team name)</td><td class='keep'>keep</td></tr>
+</tbody></table>
+<h2>Summary</h2>
+<table><thead><tr><th style='width:50%'>Current</th><th style='width:50%'>Proposed</th></tr></thead><tbody>
+</tbody></table>
+<div class="summary"><strong>Summary:</strong> ~670 strings audited across all 6 HTML pages + 42 JS modules. ~435 keep, ~235 change (3 P0, 12 P1 clusters, ~70 P2). ~10 test-locked. No new analytics. P0 change-set: "Share your run back" button + card line, "Challenge link copied — share it" toast, tie-line person-flip.</div>
+</body></html>
