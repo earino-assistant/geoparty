@@ -94,14 +94,14 @@ export function formatSeconds(ms) {
 // SUPER SURE bets show their fate here: a burned bet reads differently
 // from a plain forfeit, a loss shows the zero, a win shows the ×2.
 export function resultRowText(r) {
-  if (!r.guess) return r.superSure ? "SUPER SURE — no pin · 0" : "no pin · +0";
+  if (!r.guess) return r.superSure ? "no pin · SUPER SURE ×0" : "no pin · +0";
   const dist = formatDistance(r.distanceKm);
   if (r.superSure && r.superSureOutcome === "lost") {
-    return `${dist} · SUPER SURE — 0`;
+    return `${dist} · 🔥 SUPER SURE ×0`;
   }
   const won = r.superSure && r.superSureOutcome === "won";
   const total = `+${adjustedPoints(r).toLocaleString()}`;
-  const tail = won ? `SUPER SURE ×2 · ${total}` : total;
+  const tail = won ? `🔥 SUPER SURE ×2 · ${total}` : total;
   if (typeof r.elapsedMs === "number" && typeof r.timeBonus === "number") {
     return `${dist} · ⚡${formatSeconds(r.elapsedMs)}` +
       ` +${r.timeBonus.toLocaleString()} · ${tail}`;
@@ -122,14 +122,14 @@ export function resultRowText(r) {
 
 // "+3,120 pts · 812 km · ⚡+140 fast" — one line for the whole personal
 // result, SUPER SURE verdict appended when the round carried a bet. G2/G4:
-// an optional `twistTag` (e.g. "×1.5 ⚡", precomputed via twist.js so game.js
+// an optional `twistTag` (e.g. "⚡ ×1.5", precomputed via twist.js so game.js
 // stays free of a twist.js import cycle) and `medalCaption` ("ACE!" / "Nailed
 // it") extend the line — both absent ⇒ the pre-G2 output, byte-for-byte.
 export function revealResultLine(result) {
   if (!result || !result.guess) {
     // A burned bet is not a plain forfeit: it spent something.
     return result && result.superSure
-      ? "+0 pts · no pin · 🔥 SUPER SURE — 0"
+      ? "+0 pts · no pin · 🔥 SUPER SURE ×0"
       : "+0 pts · no pin";
   }
   const parts = [`+${adjustedPoints(result).toLocaleString()} pts`];
@@ -142,7 +142,7 @@ export function revealResultLine(result) {
   if (result.superSure) {
     parts.push(result.superSureOutcome === "won"
       ? "🔥 SUPER SURE ×2"
-      : "🔥 SUPER SURE — 0");
+      : "🔥 SUPER SURE ×0");
   }
   return parts.join(" · ");
 }

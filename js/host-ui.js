@@ -1453,7 +1453,7 @@ function renderHostRevealMap() {
         dashArray: "4 6", interactive: false,
       }).addTo(hostRevealMap)
         .bindTooltip(
-          p.superSureOutcome === "won" ? "SUPER SURE ×2" : "SUPER SURE — 0",
+          p.superSureOutcome === "won" ? "SUPER SURE ×2" : "SUPER SURE ×0",
           { permanent: true, direction: "bottom", className: "ss-tooltip" });
     }
   }

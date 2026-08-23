@@ -171,9 +171,9 @@ test("superSureLabel: the spec's verbatim badges, empty for non-bets", () => {
   assert.equal(
     superSureLabel({ superSure: true, superSureOutcome: "won" }), "SUPER SURE ×2");
   assert.equal(
-    superSureLabel({ superSure: true, superSureOutcome: "lost" }), "SUPER SURE — 0");
+    superSureLabel({ superSure: true, superSureOutcome: "lost" }), "SUPER SURE ×0");
   assert.equal(
-    superSureLabel({ superSure: true, superSureOutcome: "burned" }), "SUPER SURE — 0");
+    superSureLabel({ superSure: true, superSureOutcome: "burned" }), "SUPER SURE ×0");
   assert.equal(superSureLabel({ points: 100 }), "");
   assert.equal(superSureLabel(null), "");
 });

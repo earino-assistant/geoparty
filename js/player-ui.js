@@ -1557,11 +1557,11 @@ function lockIn(auto = false, voluntary = false) {
   }
   if (voluntary) {
     toast(betting
-      ? "You gave up — SUPER SURE burned."
+      ? "You gave up — your SUPER SURE bet is gone."
       : "You gave up — no points this round.");
   } else if (auto && !guess) {
     toast(betting
-      ? "Time! No pin — SUPER SURE burned."
+      ? "Time! No pin — your SUPER SURE bet is gone."
       : "Time! No pin — no points this round.");
   } else if (auto) {
     toast("Time! Your pin was locked in.");

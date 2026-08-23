@@ -292,11 +292,11 @@ test("resultRowText: SUPER SURE rows show the verdict at reveal", () => {
     guess: {}, distanceKm: 250, points: 4200,
     superSure: true, superSureOutcome: "lost",
   });
-  assert.equal(lost, "250 km · SUPER SURE — 0");
+  assert.equal(lost, "250 km · 🔥 SUPER SURE ×0");
   // Burned (bet, no pin) must read differently from a plain forfeit.
   const burned = resultRowText({ guess: null, superSure: true, superSureOutcome: "burned" });
   const forfeit = resultRowText({ guess: null });
-  assert.equal(burned, "SUPER SURE — no pin · 0");
+  assert.equal(burned, "no pin · SUPER SURE ×0");
   assert.equal(forfeit, "no pin · +0");
   assert.notEqual(burned, forfeit);
 });
@@ -427,7 +427,7 @@ test("revealResultLine: a lost bet scores zero and says so", () => {
     superSure: true, superSureOutcome: "lost",
   });
   assert.ok(line.startsWith("+0 pts"), line);
-  assert.ok(line.includes("🔥 SUPER SURE — 0"), line);
+  assert.ok(line.includes("🔥 SUPER SURE ×0"), line);
 });
 
 test("revealResultLine: a burned bet is not a plain forfeit", () => {

@@ -87,9 +87,9 @@ export function superSureSettlement(teams, results) {
 }
 
 // The reveal badge, verbatim from the spec: "SUPER SURE ×2" on a win,
-// "SUPER SURE — 0" on a loss or burn (the row/no-pin context distinguishes
+// "SUPER SURE ×0" on a loss or burn (the row/no-pin context distinguishes
 // a burned bet from a plain forfeit). Empty for non-bets.
 export function superSureLabel(result) {
   if (!result || !result.superSure) return "";
-  return result.superSureOutcome === "won" ? "SUPER SURE ×2" : "SUPER SURE — 0";
+  return result.superSureOutcome === "won" ? "SUPER SURE ×2" : "SUPER SURE ×0";
 }

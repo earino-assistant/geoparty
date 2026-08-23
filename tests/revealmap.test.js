@@ -179,11 +179,11 @@ test("phoneRevealScene: per-pin triplet [line, circle, halo?], fit first, truth 
     { op: "circle", at: T, style: { radius: 10, color: "#111", weight: 3, fillColor: "#ffcf3f", fillOpacity: 1 } });
 });
 
-test("phoneRevealScene: a lost bet uses the '— 0' label", () => {
+test("phoneRevealScene: a lost bet uses the '×0' label", () => {
   const pins = [pin("t1", 1, 2, { superSure: true, superSureOutcome: "lost" })];
   const scene = phoneRevealScene({ truth: T, pins, decoys: [], teams: TEAMS });
   const halo = scene.ops.find((o) => o.tooltip);
-  assert.equal(halo.tooltip.html, "SUPER SURE — 0");
+  assert.equal(halo.tooltip.html, "SUPER SURE ×0");
 });
 
 test("phoneRevealScene: decoys come after the pins, before the truth", () => {

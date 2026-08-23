@@ -156,9 +156,9 @@ export const MODIFIER_SHEETS = Object.freeze({
       "Double or nothing, once per game. Closest pin this round: your " +
       "points ×2. Anyone closer: you score 0.",
       // §A2.3: arming commits — the one place that rule is stated.
-      "Once armed, the bet is on — no backing out this round.",
+      "Once placed, the bet is on — no backing out this round.",
     ]),
-    armLabel: "Arm the bet",
+    armLabel: "Place the bet 🔥",
     cancelLabel: "Not now",
   }),
   decoy: Object.freeze({

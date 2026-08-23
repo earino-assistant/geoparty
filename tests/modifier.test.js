@@ -209,10 +209,10 @@ test("MODIFIER_SHEETS.super.lines is the moved copy verbatim + the §A2.3 commit
   assert.deepEqual(MODIFIER_SHEETS.super.lines, [
     "Double or nothing, once per game. Closest pin this round: your " +
     "points ×2. Anyone closer: you score 0.",
-    "Once armed, the bet is on — no backing out this round.",
+    "Once placed, the bet is on — no backing out this round.",
   ]);
   assert.equal(MODIFIER_SHEETS.super.title, "SUPER SURE");
-  assert.equal(MODIFIER_SHEETS.super.armLabel, "Arm the bet");
+  assert.equal(MODIFIER_SHEETS.super.armLabel, "Place the bet 🔥");
   assert.equal(MODIFIER_SHEETS.super.cancelLabel, "Not now");
   assert.equal(MODIFIER_SHEETS.decoy.armLabel, "Plant the decoy");
 });
@@ -222,7 +222,7 @@ test("sheetActions: both available → two co-equal arm rows (registry order) + 
     available: ["super", "decoy"], deployState: modifierInitialState(),
   });
   assert.deepEqual(rows, [
-    { kind: "arm", id: "super", label: "Arm the bet" },
+    { kind: "arm", id: "super", label: "Place the bet 🔥" },
     { kind: "arm", id: "decoy", label: "Plant the decoy" },
     { kind: "cancel", label: "Not now" },
   ]);

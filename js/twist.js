@@ -20,10 +20,10 @@ export const OCCASIONAL_P = 0.35;
 // The launch deck (data-only). `modes` gates by game mode; `hud` rides the
 // round label; `revealTag` joins the reveal result line.
 export const TWIST_DECK = Object.freeze([
-  { id: "blitz", card: "⚡ BLITZ", rule: "20-second clock · round ×1.5", hud: "⚡BLITZ", revealTag: "×1.5 ⚡", modes: ["couch", "h2h"] },
-  { id: "frozen", card: "🧊 FROZEN", rule: "No moving — read the frame", hud: "🧊FROZEN", revealTag: "🧊", modes: ["couch", "h2h"] },
-  { id: "blind", card: "🔒 BLIND DUEL", rule: "Rival pins are hidden", hud: "🔒BLIND", revealTag: "🔒", modes: ["h2h"] },
-  { id: "longhaul", card: "🌍 LONG HAUL", rule: "Gentler curve — go bold", hud: "🌍LONGHAUL", revealTag: "🌍", modes: ["couch", "h2h"] },
+  { id: "blitz", card: "⚡ BLITZ", rule: "20-second clock · round ×1.5", hud: "⚡ BLITZ", revealTag: "⚡ ×1.5", modes: ["couch", "h2h"] },
+  { id: "frozen", card: "🧊 FROZEN", rule: "No moving — read the scene", hud: "🧊 FROZEN", revealTag: "🧊 FROZEN", modes: ["couch", "h2h"] },
+  { id: "blind", card: "🔒 BLIND ROUND", rule: "Rival pins are hidden", hud: "🔒 BLIND ROUND", revealTag: "🔒 BLIND ROUND", modes: ["h2h"] },
+  { id: "longhaul", card: "🌍 LONG HAUL", rule: "Far-off pins score kinder — go bold", hud: "🌍 LONG HAUL", revealTag: "🌍 LONG HAUL", modes: ["couch", "h2h"] },
 ]);
 
 export function twistById(id) {

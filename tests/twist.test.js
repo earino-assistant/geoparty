@@ -185,7 +185,7 @@ test("deck card copy is consistent and Long Haul makes no expert-spot claim", ()
   const lh = TWIST_DECK.find((t) => t.id === "longhaul");
   assert.doesNotMatch(lh.rule.toLowerCase(), /expert/,
     "Long Haul must not claim an expert spot (sampler deferred)");
-  assert.match(lh.rule.toLowerCase(), /gentler curve/);
+  assert.match(lh.rule.toLowerCase(), /score kinder/);
 });
 
 /* ---------------- twistCardForRound (R2 — the TV/host interstitial gate) ---------------- */
@@ -208,7 +208,7 @@ test("twistCardForRound: Blind Duel gets its full-screen card on the h2h TV", ()
   const shown = twistCardForRound({ number: 2, twist: { id: "blind" } }, null);
   assert.ok(shown, "Blind Duel must not be HUD-only on the TV");
   assert.equal(shown.id, "blind");
-  assert.equal(shown.card, "🔒 BLIND DUEL");
+  assert.equal(shown.card, "🔒 BLIND ROUND");
   assert.equal(shown.rule, "Rival pins are hidden");
 });
 

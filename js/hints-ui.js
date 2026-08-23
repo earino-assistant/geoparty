@@ -11,7 +11,7 @@ let scrim = null;
 // Render a hint card. Bottom sheet by default (never blocks the pano/map
 // underneath); `center: true` adds a scrim for interstitials (showdown).
 // `actions` overrides the single "Got it" dismiss with named buttons — the
-// SUPER SURE sheet's "Arm the bet" / "Not now" (review §6.1). Every action
+// SUPER SURE sheet's "Place the bet 🔥" / "Not now" (review §6.1). Every action
 // dismisses first: the §4.1 rule is at most ONE sheet on screen at a time,
 // and showHintCard opening always evicts whatever was there before.
 export function showHintCard({ title, lines, center, actions }) {
