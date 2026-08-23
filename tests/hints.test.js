@@ -168,7 +168,7 @@ test("lockButtonLabel: the estimate rides on the button as a sublabel", () => {
 
 test("lockButtonLabel: each surface keeps its own verb", () => {
   const est = { points: 5100, distancePoints: 4800, bonus: 300 };
-  assert.equal(lockButtonLabel(LOCK_LABELS.couch, est, false).main, "Confirm guess");
+  assert.equal(lockButtonLabel(LOCK_LABELS.couch, est, false).main, "Lock it in");
   assert.equal(lockButtonLabel(LOCK_LABELS.daily, est, false).main, "Lock it in");
 });
 
@@ -193,7 +193,7 @@ test("lockButtonLabel: an armed SUPER SURE shows the real stakes — ×2 or 0", 
 
 test("lockButtonLabel: armed with no pin still reads as the bet (gate text yields to the bet)", () => {
   assert.equal(lockButtonLabel(LOCK_LABELS.couch, null, true).text,
-    "🔥 Confirm ×2 — or 0");
+    "🔥 Lock in ×2 — or 0");
 });
 
 test("lockButtonLabel: defaults to the h2h verbs when none are given", () => {

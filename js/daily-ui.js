@@ -551,7 +551,7 @@ function renderReveal(guess) {
     const you = r.points;
     const gp = ghostRes.points;
     const verdict = you > gp ? "you take the round"
-      : gp > you ? "👻 takes the round" : "dead heat";
+      : gp > you ? "👻 takes the round" : "you and the ghost tied";
     $("dRevealDuel").textContent =
       `You +${you.toLocaleString()} · 👻 +${gp.toLocaleString()} — ${verdict}`;
     $("dRevealDuel").classList.remove("hidden");
@@ -822,7 +822,7 @@ function renderDone(result, alreadyPlayed, extra = {}) {
   renderDuelDone(extra.verdict, result);
   // C4: on a duel run the primary share IS the return challenge — label it so
   // (spec §3.5.4). A non-duel run keeps its HTML default ("Share result").
-  if (extra.verdict) $("btnDShare").textContent = "Send your verdict";
+  if (extra.verdict) $("btnDShare").textContent = "Challenge them back";
 
   // Exhibition footnote (an exhibition that ends in an ad for the ritual).
   if (isExhibition) {
@@ -853,8 +853,8 @@ function renderDuelDone(verdict, result) {
   if (!verdict) { box.classList.add("hidden"); return; }
   const head = document.createElement("div");
   head.className = "done-duel-head";
-  head.textContent = verdict.outcome === "won" ? "You won the duel! 🏆"
-    : verdict.outcome === "lost" ? "The ghost got you 👻" : "Dead heat.";
+  head.textContent = verdict.outcome === "won" ? "You beat the ghost! 🏆"
+    : verdict.outcome === "lost" ? "The ghost got you 👻" : "You and the ghost tied.";
   const margin = document.createElement("div");
   margin.className = "done-duel-margin";
   margin.textContent = verdict.outcome === "tie"
@@ -1004,7 +1004,7 @@ function wireShare(result, verdict) {
     });
     shareResult(text, "daily", toast, { challenge: !!payload });
     if (!hasPins) {
-      toast("This run has no saved pins — sharing a plain card, no ghost duel.");
+      toast("This run has no saved pins — sharing a plain card, no ghost challenge.");
     }
   };
 }
@@ -1140,7 +1140,7 @@ if (bootRoute === "instant-verdict") {
   // re-checks the same lock, and this button is disabled meanwhile too.
   showScreen("d-intro");
   $("btnDailyStart").disabled = true;
-  $("btnDailyStart").textContent = "Loading your duel…";
+  $("btnDailyStart").textContent = "Loading your challenge…";
   resolveSavedRun(savedForRun);
 } else if (bootRoute === "done") {
   // Already played this board today, no usable duel — the plain done screen.

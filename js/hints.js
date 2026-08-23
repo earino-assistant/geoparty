@@ -134,7 +134,7 @@ export function lockNowEstimate(distanceKm, elapsedMs, roundSeconds) {
  * decision (§1.4). Each surface passes its own verbs. */
 export const LOCK_LABELS = Object.freeze({
   h2h: Object.freeze({ idle: "Lock it in", armed: "Lock in" }),
-  couch: Object.freeze({ idle: "Confirm guess", armed: "Confirm" }),
+  couch: Object.freeze({ idle: "Lock it in", armed: "Lock in" }),
   daily: Object.freeze({ idle: "Lock it in", armed: "Lock in" }),
 });
 

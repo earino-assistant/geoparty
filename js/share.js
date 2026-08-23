@@ -134,7 +134,7 @@ export function dailyShareText({
     first = `GeoParty Daily #${dayNumber}${star} ${flair.join(" ")}` +
       ` · ${score.toLocaleString()} pts`;
   }
-  const last = verdict ? `⚔️ Your move: ${url}`
+  const last = verdict ? `⚔️ Send your run back: ${url}`
     : challenge ? `⚔️ Beat my ghost: ${url}`
       : `Beat me: ${url}`;
   return `${first}\n${emojiRow(rounds)}\n${last}`;
@@ -143,7 +143,7 @@ export function dailyShareText({
 function verdictLead(v) {
   if (v.outcome === "won") return `I beat the ghost by ${(v.margin || 0).toLocaleString()} 🏆`;
   if (v.outcome === "lost") return `The ghost got me by ${(v.margin || 0).toLocaleString()} 👻`;
-  return "Dead heat with the ghost 🤝";
+  return "You and the ghost tied 🤝";
 }
 
 // The challenge/return-challenge link: UTM tag AND the ghost fragment coexist —
