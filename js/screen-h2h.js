@@ -25,6 +25,14 @@ import { renderRevealScene } from "./revealmap-ui.js";
 
 const $ = (id) => document.getElementById(id);
 
+// "1st", "2nd", "3rd" — the lock-in order badge. Handles the 11–13 teens
+// exception (mirrors js/daily-ui.js ordinal).
+function ordinal(n) {
+  const v = Math.abs(n) % 100;
+  const s = ["th", "st", "nd", "rd"];
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
 export const H2H_SCREEN_IDS = ["s-h2h-lobby", "s-h2h-live", "s-h2h-reveal"];
 
 /* ================================================================
@@ -203,7 +211,7 @@ function renderLobby(state, showScreen) {
     const chip = document.createElement("div");
     chip.className = "team-chip";
     chip.textContent =
-      state.teams[id].name + (id === state.hostTeam ? " 👑" : "");
+      state.teams[id].name + (id === state.hostTeam ? " · host" : "");
     chip.style.color = teamHex(state.teams, id);
     wrap.appendChild(chip);
   });
@@ -421,7 +429,7 @@ function applyTeamFeed(p, state, round, feed, result, tid) {
     if (!p.locked) {
       p.locked = true;
       const rank = submitRank(round, tid);
-      p.rankEl.textContent = rank ? `#${rank} in` : "";
+      p.rankEl.textContent = rank ? `locked in ${ordinal(rank)}` : "";
       p.lockEl.classList.remove("hidden");
       p.root.classList.add("locked");
       panelStatus(p, "locked in");

@@ -183,8 +183,8 @@ test("lockButtonLabel: no pin yet — the map-gate text (P0.2), no stray separat
 test("lockButtonLabel: an armed SUPER SURE shows the real stakes — ×2 or 0", () => {
   const parts = lockButtonLabel(
     LOCK_LABELS.h2h, { points: 3200, distancePoints: 3000, bonus: 200 }, true);
-  assert.equal(parts.text, "🔥 Lock in ×2 — or 0"); // §6.1, verbatim
-  assert.equal(parts.main, "🔥 Lock in ×2");
+  assert.equal(parts.text, "🔥 Lock it in ×2 — or 0"); // §6.1, verbatim
+  assert.equal(parts.main, "🔥 Lock it in ×2");
   assert.equal(parts.sub, "or 0");
   // The armed label must not also quote a single-value estimate: the whole
   // point is that the number on screen is the bet's number.
@@ -193,7 +193,7 @@ test("lockButtonLabel: an armed SUPER SURE shows the real stakes — ×2 or 0", 
 
 test("lockButtonLabel: armed with no pin still reads as the bet (gate text yields to the bet)", () => {
   assert.equal(lockButtonLabel(LOCK_LABELS.couch, null, true).text,
-    "🔥 Lock in ×2 — or 0");
+    "🔥 Lock it in ×2 — or 0");
 });
 
 test("lockButtonLabel: defaults to the h2h verbs when none are given", () => {
@@ -224,13 +224,13 @@ test("panoHintCard: movement-allowed copy points at the arrows, two lines", () =
   const moving = panoHintCard(true);
   assert.equal(moving.lines.length, 2, "stays within the two-line budget");
   assert.match(moving.lines.join(" "), /arrow/i, "teaches the movie/movement arrows");
-  assert.match(moving.lines.join(" "), /Make Guess/);
+  assert.match(moving.lines.join(" "), /Guess on the map/);
 });
 
 test("panoHintCard(false) is the pre-#7 copy, byte-for-byte", () => {
   assert.deepEqual(panoHintCard(false).lines, [
     "Look around 👀 — figure out where you are.",
-    "Then Make Guess.",
+    "Then tap Guess on the map.",
   ]);
   // A no-movement round must not tell the player to walk the street.
   assert.ok(!/arrow|walk/i.test(panoHintCard(false).lines.join(" ")));

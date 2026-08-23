@@ -747,7 +747,7 @@ function renderLobby() {
     name.textContent =
       room.teams[id].name +
       (id === myTeam ? " (you)" : "") +
-      (id === room.hostTeam ? " 👑" : "");
+      (id === room.hostTeam ? " · host" : "");
     name.style.color = teamHex(room.teams, id);
     const tag = document.createElement("span");
     tag.textContent = "ready";
@@ -758,7 +758,7 @@ function renderLobby() {
 
   const host = isHost();
   $("btnPStart").classList.toggle("hidden", !host);
-  $("btnPLeave").textContent = host ? "Abandon" : "Leave";
+  $("btnPLeave").textContent = host ? "Close the room" : "Leave";
   // §2.4: ONE status line. The TV state used to be a second stacked muted
   // line above this one; it folds in as a suffix instead.
   const base = host
@@ -1058,7 +1058,7 @@ function applyRoundTwist(twistId) {
 function updateLockedHud() {
   const n = submittedCount(room.round);
   const total = teamIds(room.teams).length;
-  $("pHudLocked").textContent = n > 0 ? `${n}/${total} in` : "";
+  $("pHudLocked").textContent = n > 0 ? `${n}/${total} locked in` : "";
 }
 
 function makeViewer() {
@@ -1598,6 +1598,14 @@ function hideGiveUp() {
   $("btnPGiveUpMap").classList.add("hidden");
 }
 
+// "1st", "2nd", "3rd" — the lock-in order badge. Handles the 11–13 teens
+// exception (mirrors js/daily-ui.js ordinal).
+function ordinal(n) {
+  const v = Math.abs(n) % 100;
+  const s = ["th", "st", "nd", "rd"];
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
 function renderLockedRoster() {
   const list = $("pLockedList");
   list.innerHTML = "";
@@ -1608,7 +1616,7 @@ function renderLockedRoster() {
     name.style.color = teamHex(room.teams, id);
     const status = document.createElement("span");
     const r = room.round.results && room.round.results[id];
-    status.textContent = r ? `✓ in (#${submitRank(room.round, id)})` : "…thinking";
+    status.textContent = r ? `✓ locked in ${ordinal(submitRank(room.round, id))}` : "…thinking";
     status.style.color = r ? "var(--good)" : "var(--muted)";
     li.append(name, status);
     list.appendChild(li);
@@ -1618,7 +1626,7 @@ function renderLockedRoster() {
 function renderLockedScreen() {
   if (shownScreen !== "p-locked") showScreen("p-locked");
   const rank = submitRank(room.round, myTeam);
-  $("pLockedRank").textContent = rank ? `#${rank} to lock in` : "";
+  $("pLockedRank").textContent = rank ? `You locked in ${ordinal(rank)}` : "";
   // With no TV attached (remote play), this phone IS the show.
   $("pLockedSub").textContent = screenAttached(room, Date.now())
     ? "Eyes on the TV 📺"

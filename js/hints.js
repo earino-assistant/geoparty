@@ -48,7 +48,7 @@ export const HINT_CARDS = Object.freeze({
     title: "Where are you?",
     lines: Object.freeze([
       "Look around 👀 — figure out where you are.",
-      "Then Make Guess.",
+      "Then tap Guess on the map.",
     ]),
   },
   reveal: {
@@ -90,11 +90,11 @@ export function panoHintCard(moveAllowed) {
     lines: moveAllowed
       ? [
         "Look around 👀 — tap the arrows to walk the street.",
-        "Then Make Guess.",
+        "Then tap Guess on the map.",
       ]
       : [
         "Look around 👀 — figure out where you are.",
-        "Then Make Guess.",
+        "Then tap Guess on the map.",
       ],
   };
 }
@@ -133,9 +133,9 @@ export function lockNowEstimate(distanceKm, elapsedMs, roundSeconds) {
  * stakes (×2 or nothing), which is what makes it legible at the moment of
  * decision (§1.4). Each surface passes its own verbs. */
 export const LOCK_LABELS = Object.freeze({
-  h2h: Object.freeze({ idle: "Lock it in", armed: "Lock in" }),
-  couch: Object.freeze({ idle: "Lock it in", armed: "Lock in" }),
-  daily: Object.freeze({ idle: "Lock it in", armed: "Lock in" }),
+  h2h: Object.freeze({ idle: "Lock it in", armed: "Lock it in" }),
+  couch: Object.freeze({ idle: "Lock it in", armed: "Lock it in" }),
+  daily: Object.freeze({ idle: "Lock it in", armed: "Lock it in" }),
 });
 
 // P0.2: the primary CTA used to show its verb ("Lock it in") even while
