@@ -29,7 +29,7 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <div id="connPill" class="conn-pill hidden">reconnecting…</div>
+  <div id="connPill" class="conn-pill hidden">Reconnecting — hang tight…</div>
   <!-- Masked wholesale: team-name toasts flow through here ("Blue locked
        in!") — replay masking (review P1-2). -->
   <div id="toast" class="toast" data-ph-mask></div>
@@ -126,7 +126,7 @@
     </div>
     <div class="action-bar">
       <!-- Wait-for-players mode: out of time with no pin? Bow out cleanly. -->
-      <button id="btnPGiveUpStreet" class="btn-ghost hidden" type="button">Give up</button>
+      <button id="btnPGiveUpStreet" class="btn-ghost hidden" type="button">Give up this round</button>
       <button id="btnOpenMap" class="btn-primary">Guess on the map</button>
     </div>
   </section>
@@ -143,7 +143,7 @@
          in the empty context-pill slot above (js/modifier-ui.js), which opens
          the one sheet explaining it (§A2: the bar chip is retired). -->
     <div class="action-bar">
-      <button id="btnPGiveUpMap" class="btn-ghost hidden" type="button">Give up</button>
+      <button id="btnPGiveUpMap" class="btn-ghost hidden" type="button">Give up this round</button>
       <button id="btnBackToStreet" class="btn-ghost">Back to street</button>
       <button id="btnLockIn" class="btn-primary" disabled>Lock it in</button>
     </div>
@@ -199,7 +199,7 @@
       <button id="btnPHome" class="exit-link">Leave</button>
       <p class="game-over-ownership">
         <a id="pHowto" href="howto.html">How to play</a> ·
-        © 2026 Eduardo Ariño de la Rubia · A game by Eduardo Ariño de la Rubia
+        © 2026 · A game by Eduardo Ariño de la Rubia
       </p>
     </div>
     <div class="action-bar">

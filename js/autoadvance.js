@@ -85,7 +85,7 @@ export function countdownText(status, target) {
       : `Next round in ${s}…`;
   }
   if (status.state === "due") {
-    return target === "gameOver" ? "Wrapping up…" : "Starting the next round…";
+    return target === "gameOver" ? "Final scores…" : "Starting the next round…";
   }
   return null; // held / lapsed: callers fall back to their waiting copy
 }

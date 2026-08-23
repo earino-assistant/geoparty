@@ -529,7 +529,7 @@ function renderReveal(guess) {
   const idx = run.rounds.length - 1;
   $("dRevealHeading").textContent =
     `Round ${run.rounds.length} of ${DAILY_ROUNDS}`;
-  $("dRevealPlace").textContent = current.name || "—";
+  $("dRevealPlace").textContent = current.name || "Somewhere mysterious";
 
   // G4: medal caption on the result line; the ACE stamp on a sub-1km pin.
   const medal = medalForDistance(r.distanceKm);
@@ -551,7 +551,7 @@ function renderReveal(guess) {
     const you = r.points;
     const gp = ghostRes.points;
     const verdict = you > gp ? "you take the round"
-      : gp > you ? "👻 takes the round" : "you and the ghost tied";
+      : gp > you ? "the ghost takes the round" : "you and the ghost tied";
     $("dRevealDuel").textContent =
       `You +${you.toLocaleString()} · 👻 +${gp.toLocaleString()} — ${verdict}`;
     $("dRevealDuel").classList.remove("hidden");
@@ -759,12 +759,14 @@ async function instantVerdict(saved) {
 
 function renderDone(result, alreadyPlayed, extra = {}) {
   showScreen("d-done");
-  const star = result.hard ? "*" : "";
+  // Hard mode keeps its "*" marker; a ⚡ rides next to it as the visible gloss
+  // (the intro day badge carries the title/aria "Hard Mode" where it's born).
+  const star = result.hard ? "*⚡" : "";
   const doneEl = $("d-done");
   const titleEl = $("dDoneTitle");
   titleEl.textContent = alreadyPlayed
     ? `You played Daily #${runDayNum}${star} ✓`
-    : `Daily #${runDayNum}${star} done!`;
+    : `Daily #${runDayNum}${star} — you did it! 🎉`;
   $("dDoneScore").textContent = result.score.toLocaleString();
   $("dDoneEmoji").textContent = emojiRow(result.rounds);
 
@@ -859,7 +861,7 @@ function renderDuelDone(verdict, result) {
   margin.className = "done-duel-margin";
   margin.textContent = verdict.outcome === "tie"
     ? `${verdict.yourTotal.toLocaleString()} apiece`
-    : `${verdict.yourTotal.toLocaleString()} to ${verdict.ghostTotal.toLocaleString()} — by ${verdict.margin.toLocaleString()}`;
+    : `${verdict.yourTotal.toLocaleString()} to ${verdict.ghostTotal.toLocaleString()} — by ${verdict.margin.toLocaleString()} pts`;
   const strip = document.createElement("div");
   strip.className = "done-duel-strip";
   const yours = document.createElement("div");
@@ -1082,7 +1084,15 @@ function renderIntro() {
   recLine.textContent = parts.join(" · ");
 
   $("dHardIntro").classList.add("hidden");   // hard is offered on the done screen
-  $("dDailyNum").textContent = `#${runDayNum}${mode === "hard" ? "*" : ""}`;
+  const numEl = $("dDailyNum");
+  numEl.textContent = `#${runDayNum}${mode === "hard" ? "*" : ""}`;
+  if (mode === "hard") {                       // gloss the "*" where it's born
+    numEl.title = "Hard Mode";
+    numEl.setAttribute("aria-label", `Daily #${runDayNum}, Hard Mode`);
+  } else {
+    numEl.removeAttribute("title");
+    numEl.removeAttribute("aria-label");
+  }
   $("dDailyDate").textContent = new Date().toLocaleDateString(undefined, {
     weekday: "long", month: "long", day: "numeric",
   });

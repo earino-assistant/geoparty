@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GeoParty — Screen</title>
+  <title>GeoParty — TV</title>
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
   <link rel="icon" href="assets/favicon-48.png" type="image/png" sizes="48x48" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
@@ -27,7 +27,7 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <div id="connPill" class="conn-pill hidden">reconnecting…</div>
+  <div id="connPill" class="conn-pill hidden">Reconnecting — hang tight…</div>
 
   <!-- Waiting: room code entry -->
   <section id="s-entry" class="phase-screen">
@@ -35,7 +35,7 @@
       <h1 class="tv-title"><span class="geo">Geo</span>Party</h1>
       <p class="tv-sub">Enter the room code from the host's phone</p>
       <input id="roomInput" data-ph-mask maxlength="6" autocomplete="off" autocapitalize="characters"
-             spellcheck="false" placeholder="KWPFRT" />
+             spellcheck="false" placeholder="CODE" />
       <div id="entryErr" class="err"></div>
     </div>
   </section>
@@ -113,7 +113,7 @@
       <div id="h2hPlace" class="reveal-place" data-ph-mask></div>
       <div class="reveal-stats">
         <div id="h2hRoundBoard" data-ph-mask class="reveal-board tv-showdown" data-caption="This round"></div>
-        <div id="h2hTotals" data-ph-mask class="reveal-board captioned" data-caption="Leaderboard"></div>
+        <div id="h2hTotals" data-ph-mask class="reveal-board captioned" data-caption="Totals"></div>
       </div>
       <div id="h2hAdvanceNote" class="tv-advance-note"></div>
     </div>
@@ -139,7 +139,7 @@
            demoted to a text button inside it. -->
       <p class="tv-newgame-line">Start a new game on the host's phone — this
         screen follows.<button id="btnNewEntry" class="tv-newgame" type="button">Enter a code</button></p>
-      <p class="game-over-ownership">© 2026 Eduardo Ariño de la Rubia · A game by Eduardo Ariño de la Rubia</p>
+      <p class="game-over-ownership">© 2026 · A game by Eduardo Ariño de la Rubia</p>
     </div>
   </section>
 

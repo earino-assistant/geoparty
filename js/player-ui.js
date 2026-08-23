@@ -1689,7 +1689,7 @@ function tick() {
   const timerEl = $("pHudTimer");
   const mapTimerEl = $("pGuessTimer"); // timer stays visible on the map too
   if (!endsAt) {
-    timerEl.textContent = "∞";
+    timerEl.textContent = "No timer";
     mapTimerEl.textContent = "";
     timerEl.classList.remove("low");
     mapTimerEl.classList.remove("low");
@@ -1808,7 +1808,7 @@ function renderReveal() {
   const last = round.number >= room.settings.roundCount;
   $("pRevealHeading").textContent =
     `Round ${round.number} of ${room.settings.roundCount}`;
-  $("pRevealPlace").textContent = (round.truth && round.truth.name) || "—";
+  $("pRevealPlace").textContent = (round.truth && round.truth.name) || "Somewhere mysterious";
   const mine = myResult();
   // S1: fold my result into my team's closest-guess moment for the share
   // card. Idempotent, so the re-renders this function gets are harmless.
@@ -1925,7 +1925,7 @@ function holdAdvance() {
     seconds_left: advanceSecondsLeft(status.msLeft),
   });
   renderAdvanceState();
-  toast("Holding — advance whenever you're ready");
+  toast("Holding — tap Next round whenever you're ready.");
 }
 
 // The all-pins reveal, phone-sized: every guess, a line to the truth, the

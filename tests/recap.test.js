@@ -157,11 +157,11 @@ test("recapCaption: a forfeit reads 'no guess'", () => {
   assert.equal(recapCaption(card), "Round 1 of 5 · Kyoto, Japan · no guess");
 });
 
-test("recapCaption: a missing name falls back to an em-dash placeholder", () => {
+test("recapCaption: a missing name falls back to a friendly placeholder", () => {
   const [card] = recapCards({
     places: [{ lat: 1, lng: 2 }], rounds: [round(null, null, 0)], ghostRounds: [],
   });
-  assert.equal(recapCaption(card), "Round 1 of 5 · — · no guess");
+  assert.equal(recapCaption(card), "Round 1 of 5 · Somewhere mysterious · no guess");
 });
 
 /* ---------------- recapEagerCount ---------------- */

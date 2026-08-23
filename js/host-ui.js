@@ -807,7 +807,7 @@ function startTimer() {
     if (!room || !room.round) return;
     const endsAt = room.round.endsAt;
     if (!endsAt) {
-      $("hudTimer").textContent = "∞";
+      $("hudTimer").textContent = "No timer";
       $("hudTimer").classList.remove("low");
       return;
     }
@@ -1387,7 +1387,7 @@ function holdAdvance() {
     seconds_left: advanceSecondsLeft(status.msLeft),
   });
   renderAdvanceState();
-  toast("Holding — advance whenever you're ready");
+  toast("Holding — tap Next round whenever you're ready.");
 }
 
 /* S7 couch without a TV: with no live screen the host phone IS the shared
@@ -1514,7 +1514,7 @@ function enterReveal() {
     ? "Final Showdown"
     : `Round ${number} of ${room.settings.roundCount}`;
   $("revealPlace").textContent =
-    (room.round.truth && room.round.truth.name) || "—";
+    (room.round.truth && room.round.truth.name) || "Somewhere mysterious";
 
   /* §6.4, shared with the h2h phone: the three stat cards and their two
    * injected sub-lines collapse into ONE result line, and the totals list

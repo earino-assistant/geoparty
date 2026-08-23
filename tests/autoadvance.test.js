@@ -128,7 +128,7 @@ test("countdownText: counting copy names the destination", () => {
 test("countdownText: due shows the starting beat, held/lapsed show nothing", () => {
   const due = { state: "due", msLeft: 0 };
   assert.equal(countdownText(due, "round"), "Starting the next round…");
-  assert.equal(countdownText(due, "gameOver"), "Wrapping up…");
+  assert.equal(countdownText(due, "gameOver"), "Final scores…");
   assert.equal(countdownText({ state: "held", msLeft: 0 }, "round"), null);
   assert.equal(countdownText({ state: "lapsed", msLeft: 0 }, "round"), null);
 });

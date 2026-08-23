@@ -129,7 +129,7 @@ export function soundSpec(name) {
 /* ================================================================
  * "Your Color Takes the Room" win celebration — the headline copy. Five
  * plural-verb lines (a team name reads as a plural subject: "Team Awesome
- * take the room") plus one that already names the room. A seeded pick
+ * locked it down") plus one that already names the room. A seeded pick
  * keeps a given game's headline stable across re-renders without needing
  * Math.random. Champion nights get their own fixed "🏆 You won!" headline
  * instead (celebrationSpec below) — winLine is only ever the ordinary-win
@@ -137,8 +137,8 @@ export function soundSpec(name) {
  * ================================================================ */
 
 export const WIN_LINES = Object.freeze([
-  "take the room",
-  "run the table",
+  "locked it down",
+  "read the map",
   "The room belongs to",
   "own the map",
   "that's the game",
@@ -149,7 +149,7 @@ export function winLine(seed, subject) {
   const line = WIN_LINES[idx];
   if (idx === 2) return `${line} ${subject}`;      // "The room belongs to X"
   if (idx === 4) return `${subject} — ${line}`;    // "X — that's the game"
-  return `${subject} ${line}`;                     // "X take the room" etc.
+  return `${subject} ${line}`;                     // "X locked it down" etc.
 }
 
 /* ================================================================

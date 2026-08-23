@@ -141,8 +141,8 @@ export function dailyShareText({
 }
 
 function verdictLead(v) {
-  if (v.outcome === "won") return `I beat the ghost by ${(v.margin || 0).toLocaleString()} 🏆`;
-  if (v.outcome === "lost") return `The ghost got me by ${(v.margin || 0).toLocaleString()} 👻`;
+  if (v.outcome === "won") return `I beat the ghost by ${(v.margin || 0).toLocaleString()} pts 🏆`;
+  if (v.outcome === "lost") return `The ghost got me by ${(v.margin || 0).toLocaleString()} pts 👻`;
   return "The ghost and I tied 🤝";
 }
 

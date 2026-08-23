@@ -206,13 +206,13 @@ test("dailyShareText: verdict card leads with the duel result (G5)", () => {
     dayNumber: 37, verdict: { outcome: "won", margin: 1840 },
     rounds: [{ distanceKm: 1 }], url: "https://x.test/#g=Z",
   });
-  assert.equal(won.split("\n")[0], "GeoParty Daily #37 — I beat the ghost by 1,840 🏆");
+  assert.equal(won.split("\n")[0], "GeoParty Daily #37 — I beat the ghost by 1,840 pts 🏆");
   assert.equal(won.split("\n")[2], "⚔️ Share your run back: https://x.test/#g=Z");
   const lost = dailyShareText({
     dayNumber: 37, verdict: { outcome: "lost", margin: 90 },
     rounds: [], url: "https://x.test/",
   });
-  assert.match(lost.split("\n")[0], /The ghost got me by 90 👻/);
+  assert.match(lost.split("\n")[0], /The ghost got me by 90 pts 👻/);
   const tie = dailyShareText({
     dayNumber: 37, verdict: { outcome: "tie", margin: 0 },
     rounds: [], url: "https://x.test/",
