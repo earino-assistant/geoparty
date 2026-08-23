@@ -74,7 +74,7 @@ import { toastWithReport, toastPlain } from "./report-ui.js";
 import { dailyRevealScene } from "./revealmap.js";
 import { renderRevealScene } from "./revealmap-ui.js";
 import {
-  recapCards, recapCardScene, recapCaption,
+  recapCards, recapCardScene, recapCaption, recapEagerCount,
 } from "./recap.js";
 
 /* ================================================================
@@ -955,6 +955,11 @@ async function renderRecap(result, alreadyPlayed) {
     };
 
     if (typeof IntersectionObserver === "function") {
+      // Eagerly render the leading cards (insertion order = visual order) so a
+      // second card's real map peeks in and makes the swipe affordance obvious;
+      // the rest stay lazy. This never fires engagement — only a scroll does.
+      const eager = recapEagerCount(pending.size);
+      for (const el of [...pending.keys()].slice(0, eager)) initCard(el);
       recapObserver = new IntersectionObserver((entries) => {
         for (const e of entries) {
           if (e.isIntersecting) { initCard(e.target); recapObserver.unobserve(e.target); }

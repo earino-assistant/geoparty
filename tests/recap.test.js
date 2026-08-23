@@ -8,6 +8,7 @@ import {
   recapCards,
   recapCardScene,
   recapCaption,
+  recapEagerCount,
 } from "../js/recap.js";
 import { haversineKm, formatDistance } from "../js/game.js";
 import { dailyRevealScene } from "../js/revealmap.js";
@@ -161,6 +162,23 @@ test("recapCaption: a missing name falls back to an em-dash placeholder", () => 
     places: [{ lat: 1, lng: 2 }], rounds: [round(null, null, 0)], ghostRounds: [],
   });
   assert.equal(recapCaption(card), "Round 1 · — · no guess");
+});
+
+/* ---------------- recapEagerCount ---------------- */
+
+test("recapEagerCount: caps at 2, is non-negative, robust to NaN", () => {
+  assert.equal(recapEagerCount(0), 0);
+  assert.equal(recapEagerCount(1), 1);
+  assert.equal(recapEagerCount(2), 2);
+  assert.equal(recapEagerCount(3), 2);
+  assert.equal(recapEagerCount(5), 2);
+  // Robustness: NaN / non-numeric / negative all clamp to 0.
+  assert.equal(recapEagerCount(NaN), 0);
+  assert.equal(recapEagerCount(undefined), 0);
+  assert.equal(recapEagerCount("nope"), 0);
+  assert.equal(recapEagerCount(-4), 0);
+  // Fractional counts floor before the cap.
+  assert.equal(recapEagerCount(1.9), 1);
 });
 
 /* ---------------- recapCardScene ---------------- */

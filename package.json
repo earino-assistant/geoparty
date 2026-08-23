@@ -1,6 +1,6 @@
 {
   "name": "geoparty",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Jackbox-style geoguessing party game — static, no-build, Firebase RTDB sync.",
   "type": "module",

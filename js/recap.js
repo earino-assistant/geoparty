@@ -76,6 +76,14 @@ export function recapCards({ places, rounds, ghostRounds } = {}) {
   return cards;
 }
 
+// How many of the leading recap cards should be initialised eagerly (their
+// map rendered up front) rather than lazily on scroll, so a second card
+// visibly peeks in and signals there's more to swipe.
+export function recapEagerCount(cardCount) {
+  const n = Math.max(0, Math.floor(Number(cardCount) || 0));
+  return Math.min(2, n);
+}
+
 // A recap card's map scene — a pure passthrough to the shared daily reveal
 // scene (guess pin + line, the delayed 👻 beat when it's a duel, the truth
 // pin). Reusing dailyRevealScene keeps the recap card pixel-identical to the
