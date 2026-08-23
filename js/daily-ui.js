@@ -824,7 +824,7 @@ function renderDone(result, alreadyPlayed, extra = {}) {
   renderDuelDone(extra.verdict, result);
   // C4: on a duel run the primary share IS the return challenge — label it so
   // (spec §3.5.4). A non-duel run keeps its HTML default ("Share result").
-  if (extra.verdict) $("btnDShare").textContent = "Share your run back";
+  if (extra.verdict) $("btnDShare").textContent = "Share your run";
 
   // Exhibition footnote (an exhibition that ends in an ad for the ritual).
   if (isExhibition) {

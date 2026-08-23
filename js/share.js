@@ -134,7 +134,7 @@ export function dailyShareText({
     first = `GeoParty Daily #${dayNumber}${star} ${flair.join(" ")}` +
       ` · ${score.toLocaleString()} pts`;
   }
-  const last = verdict ? `⚔️ Share your run back: ${url}`
+  const last = verdict ? `⚔️ Share your run: ${url}`
     : challenge ? `⚔️ Beat my ghost: ${url}`
       : `Beat me: ${url}`;
   return `${first}\n${emojiRow(rounds)}\n${last}`;
