@@ -378,7 +378,7 @@ function renderRound(state) {
 
   $("tvRoundNo").textContent =
     `Round ${round.number || 1}` +
-    (state.settings ? ` / ${state.settings.roundCount}` : "") +
+    (state.settings ? `/${state.settings.roundCount}` : "") +
     (round.twist ? ` · ${twistHudTag(round.twist.id)}` : "");   // G2
   // C1: the twist ritual is a full-screen card flip on the TV (the same overlay
   // family as the 3-2-1 and Showdown card), not a HUD tag alone — once per
@@ -541,7 +541,7 @@ function renderGuessing(state) {
   $("tvGuessRound").textContent = round.showdown
     ? "FINAL SHOWDOWN"
     : `Round ${round.number || 1}` +
-      (state.settings ? ` / ${state.settings.roundCount}` : "") +
+      (state.settings ? `/${state.settings.roundCount}` : "") +
       (round.twist ? ` · ${twistHudTag(round.twist.id)}` : "");   // G2
 
   // Whose turn is it? Solo rounds name the team; showdown turns count down

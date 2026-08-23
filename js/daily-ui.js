@@ -279,7 +279,7 @@ async function startChallenge() {
         run = newDailyRun(runKey, false);
         sampler = new PoolSampler(pool, dailySeed(runKey));
         track("ghost_link_invalid", { reason: "pool" });
-        toast("This challenge was built on an older Daily — playing without the ghost.");
+        toast("This challenge was built on an older Daily — playing today's five solo instead.");
       }
     }
     if (!isExhibition) {
@@ -1009,7 +1009,7 @@ function wireShare(result, verdict) {
     });
     shareResult(text, "daily", toast, { challenge: !!payload });
     if (!hasPins) {
-      toast("This run has no saved pins — sharing a plain card, no ghost challenge.");
+      toast("This run has no saved pins — sharing your score card without the challenge link.");
     }
   };
 }

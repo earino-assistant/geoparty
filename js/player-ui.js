@@ -478,7 +478,7 @@ async function createRoom() {
     enterRoom(code, "t1");
   } catch (e) {
     console.error(scrubErrorMessage(e));
-    toast("Could not create game — see console");
+    toast("Couldn't start the party — check your connection and try again.");
   } finally {
     $("btnOpenRoom").disabled = false;
   }
@@ -496,14 +496,14 @@ async function joinRoom() {
     const state = await readRoom(code);
     if (!state) { err.textContent = "Room not found — check the code."; return; }
     if (state.mode !== "h2h") {
-      err.textContent = "That room is a couch game — this page is head-to-head.";
+      err.textContent = "That code is for a one-phone party — nothing to join from your phone.";
       return;
     }
     // Refresh / phone re-entry: this device already owns a team here.
     const mine = teamForDevice(state.teams, deviceId);
     if (mine) { enterRoom(code, mine); return; }
     if (state.phase !== "lobby") {
-      err.textContent = "That game already started.";
+      err.textContent = "That game already started — ask for a new code when the next one begins.";
       return;
     }
     // Claim the first free slot atomically; retry on the next if raced.
@@ -784,7 +784,7 @@ async function shareInvite() {
     try {
       await navigator.share({
         title: "GeoParty",
-        text: `Join my GeoParty head-to-head — room ${roomCode}`,
+        text: `Join my GeoParty — room ${roomCode}`,
         url,
       });
       track("invite_shared", { mode: "h2h", method: "share" });
@@ -849,7 +849,7 @@ async function startRound(advance) {
         showImageryDegraded(() => startRound(advance));
         return;
       }
-      toast("Location pool exhausted!", { surface: "player" });
+      toast("We're out of new places — final scores!", { surface: "player" });
       const winner = h2hWinner(room.teams, roomCode);
       push({ phase: "gameOver", hostTeam: winner });
       track("game_completed", {
@@ -2175,7 +2175,7 @@ async function createNextGame() {
   } catch (e) {
     console.error(scrubErrorMessage(e));
     switchingRooms = false;
-    toast("Could not create the next game");
+    toast("Couldn't set up the next game — try again.");
   } finally {
     $("btnOpenRoom").disabled = false;
   }

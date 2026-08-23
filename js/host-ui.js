@@ -480,7 +480,7 @@ async function newGame() {
     enterLobby();
   } catch (e) {
     console.error(scrubErrorMessage(e));
-    toast("Could not create game — see console");
+    toast("Couldn't start the party — check your connection and try again.");
   } finally {
     $("btnNewGame").disabled = false;
   }
@@ -672,7 +672,7 @@ async function startRound(advance) {
       showImageryDegraded(() => startRound(advance));
       return;
     }
-    toast("Location pool exhausted!", { surface: "host" });
+    toast("We're out of new places — final scores!", { surface: "host" });
     room.phase = "reveal"; // allow reveal -> gameOver transition
     finishGame();
     return;
