@@ -134,7 +134,7 @@ export function dailyShareText({
     first = `GeoParty Daily #${dayNumber}${star} ${flair.join(" ")}` +
       ` · ${score.toLocaleString()} pts`;
   }
-  const last = verdict ? `⚔️ Send your run back: ${url}`
+  const last = verdict ? `⚔️ Share your run back: ${url}`
     : challenge ? `⚔️ Beat my ghost: ${url}`
       : `Beat me: ${url}`;
   return `${first}\n${emojiRow(rounds)}\n${last}`;
@@ -143,7 +143,17 @@ export function dailyShareText({
 function verdictLead(v) {
   if (v.outcome === "won") return `I beat the ghost by ${(v.margin || 0).toLocaleString()} 🏆`;
   if (v.outcome === "lost") return `The ghost got me by ${(v.margin || 0).toLocaleString()} 👻`;
-  return "You and the ghost tied 🤝";
+  return "The ghost and I tied 🤝";
+}
+
+// The clipboard-fallback toast text (share-ui.js). A challenge/duel share
+// carries { challenge: true } (daily-ui passes it when a ghost link rides the
+// card); name what landed on the clipboard so the sender knows it's a link to
+// send, not just a result to paste.
+export function shareToastText(extra) {
+  return extra && extra.challenge
+    ? "Challenge link copied — share it with your friend 📋"
+    : "Result copied — paste it anywhere 📋";
 }
 
 // The challenge/return-challenge link: UTM tag AND the ghost fragment coexist —

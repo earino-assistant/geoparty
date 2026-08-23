@@ -14,6 +14,7 @@ import {
   dailyShareText,
   dailyChallengeUrl,
   winBragText,
+  shareToastText,
 } from "../js/share.js";
 import { parseGhostFragment, encodeGhost } from "../js/ghost.js";
 
@@ -206,7 +207,7 @@ test("dailyShareText: verdict card leads with the duel result (G5)", () => {
     rounds: [{ distanceKm: 1 }], url: "https://x.test/#g=Z",
   });
   assert.equal(won.split("\n")[0], "GeoParty Daily #37 — I beat the ghost by 1,840 🏆");
-  assert.equal(won.split("\n")[2], "⚔️ Send your run back: https://x.test/#g=Z");
+  assert.equal(won.split("\n")[2], "⚔️ Share your run back: https://x.test/#g=Z");
   const lost = dailyShareText({
     dayNumber: 37, verdict: { outcome: "lost", margin: 90 },
     rounds: [], url: "https://x.test/",
@@ -216,7 +217,17 @@ test("dailyShareText: verdict card leads with the duel result (G5)", () => {
     dayNumber: 37, verdict: { outcome: "tie", margin: 0 },
     rounds: [], url: "https://x.test/",
   });
-  assert.match(tie.split("\n")[0], /You and the ghost tied/);
+  assert.match(tie.split("\n")[0], /The ghost and I tied/);
+});
+
+test("shareToastText: names the challenge link when one rides the card", () => {
+  assert.equal(shareToastText({ challenge: true }),
+    "Challenge link copied — share it with your friend 📋");
+});
+
+test("shareToastText: a plain share keeps the generic result toast", () => {
+  assert.equal(shareToastText({}), "Result copied — paste it anywhere 📋");
+  assert.equal(shareToastText(undefined), "Result copied — paste it anywhere 📋");
 });
 
 test("dailyChallengeUrl: UTM query and ghost fragment coexist", () => {

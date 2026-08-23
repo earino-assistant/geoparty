@@ -6,6 +6,7 @@
 // share.js and the TV link by tvlink.js (both pure, tested).
 
 import { track } from "./consent.js";
+import { shareToastText } from "./share.js";
 
 // text: the finished card (link included). mode: "couch" | "h2h" | "daily"
 // — rides on the result_shared event. toast: the calling page's toast fn.
@@ -25,7 +26,7 @@ export async function shareResult(text, mode, toast, extra) {
   }
   try {
     await navigator.clipboard.writeText(text);
-    toast("Result copied — paste it anywhere 📋");
+    toast(shareToastText(extra));
     track("result_shared", { ...props, method: "copy" });
   } catch {
     toast(text); // clipboard blocked: at least show what to send
