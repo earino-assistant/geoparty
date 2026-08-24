@@ -30,6 +30,10 @@ import {
 import { revealDecoys } from "./decoy.js";
 import { teamHex, phoneRevealScene } from "./revealmap.js";
 import { renderRevealScene } from "./revealmap-ui.js";
+import { createRecapCarousel } from "./recap-ui.js";
+import {
+  recordPartyRound, partyRecapCards, partyRecapCaption, partyRecapCardScene,
+} from "./partyrecap.js";
 import {
   MODIFIERS, availableModifiers, modifierInitialState, modifierFold,
   shouldCalloutModifier, calloutSpec, MODIFIER_SHEETS, sheetActions,
@@ -305,6 +309,14 @@ let stungFor = null;        // S4: round number the reveal sting played for
 let acedFor = null;         // G4: round number the ACE stamp fired for
 let fanfarePlayed = false;  // S4: game-over fanfare, once per room
 let winCelebrated = false;  // win celebration: confetti + buzz, once per room
+// Party game-over "Where were the places" recap (docs/party-recap-spec.md):
+// a memory-only per-device accumulator folded at each reveal, drawn once at
+// game-over. roundHistory is per-room; recapBuiltFor latches the render on
+// room.createdAt so echoes/handoff re-renders never rebuild it.
+let roundHistory = [];
+let recapHandle = null;
+let recapBuiltFor = null;
+let recapEngagedTracked = false;
 
 const isHost = () => !!room && room.hostTeam === myTeam;
 const myResult = () =>
@@ -554,6 +566,11 @@ function enterRoom(code, teamId) {
   acedFor = null;
   fanfarePlayed = false;
   winCelebrated = false;
+  roundHistory = [];
+  recapBuiltFor = null;
+  recapEngagedTracked = false;
+  recapHandle?.destroy();
+  recapHandle = null;
   localStage = "explore";
   deployState = modifierInitialState();
   switchingRooms = false;
@@ -641,6 +658,14 @@ async function leaveOrAbandon() {
 
 function onState(state) {
   room = state;
+
+  // Fold the revealed round into the recap accumulator here (not in
+  // renderReveal — its pre-reveal revealAt hold branch early-returns and must
+  // not skip the fold). Idempotent per round.number, so the per-echo re-call
+  // is free.
+  if (state.phase === "reveal") {
+    roundHistory = recordPartyRound(roundHistory, state.round, { mode: "h2h" });
+  }
 
   // Follow the winner's next game from the game-over screen.
   if (state.phase === "gameOver" && typeof state.nextRoom === "string" &&
@@ -2068,6 +2093,32 @@ function renderGameOver() {
     ? "Winner runs the table: your phone is the host now. Set up the next game and everyone follows automatically."
     : `${winnerName} won — their phone is the host now. Stay here; you'll follow into their next game automatically.`;
   renderNightTally(bumped, iWon);
+  // "Where were the places" recap — latched on room.createdAt exactly like the
+  // confetti, so state echoes and the stompsHandoff re-render path never
+  // rebuild it. A device with no witnessed reveals folds an empty history and
+  // the carousel hides itself.
+  if (recapBuiltFor !== room.createdAt) {
+    recapBuiltFor = room.createdAt;
+    recapHandle?.destroy();
+    const cards = partyRecapCards(roundHistory);
+    recapHandle = createRecapCarousel({
+      box: $("pRecap"), carousel: $("pRecapCarousel"), cards,
+      sceneFor: (c) => partyRecapCardScene(c, room.teams),
+      captionFor: partyRecapCaption,
+      onEngage: () => trackRecapEngaged(cards.length),
+    });
+  }
+}
+
+// One party_recap_engaged per game-over, latched on the first carousel scroll.
+// Aggregates only: room, mode, surface, the card count, and source "swipe".
+function trackRecapEngaged(roundsShown) {
+  if (recapEngagedTracked) return;
+  recapEngagedTracked = true;
+  track("party_recap_engaged", {
+    room: roomCode, mode: "h2h", surface: "player",
+    rounds_shown: roundsShown, source: "swipe",
+  });
 }
 
 // G3: the night tally + champion ceremony on the h2h game-over screen, and the

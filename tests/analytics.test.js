@@ -339,6 +339,22 @@ test("sanitizeEvent: daily_recap_engaged — aggregates only, no place/coordinat
     { day_number: 2, source: "swipe", vs_ghost: false, hard: true });
 });
 
+test("sanitizeEvent: party_recap_engaged — aggregates only, no place/coordinate/team", () => {
+  const out = sanitizeEvent("party_recap_engaged", {
+    room: "ABCDEF", mode: "h2h", surface: "player", rounds_shown: 5, source: "swipe",
+    // None of these may ever ride the recap event:
+    lat: 35.01, lng: 135.77, place_name: "Kyoto, Japan", team: "Cats", winner_team: "t2",
+  });
+  assert.deepEqual(out.props,
+    { room: "ABCDEF", mode: "h2h", surface: "player", rounds_shown: 5, source: "swipe" });
+  // rounds_shown is a strict int; the host surface carries the same shape.
+  const host = sanitizeEvent("party_recap_engaged", {
+    room: "ZZZZZZ", mode: "couch", surface: "host", rounds_shown: 3.9, source: "swipe",
+  });
+  assert.deepEqual(host.props,
+    { room: "ZZZZZZ", mode: "couch", surface: "host", rounds_shown: 4, source: "swipe" });
+});
+
 test("sanitizeEvent: night_champion — mode + games", () => {
   const out = sanitizeEvent("night_champion", { mode: "h2h", games: 4, winner_name: "Cats" });
   assert.deepEqual(out.props, { mode: "h2h", games: 4 });

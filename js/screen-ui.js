@@ -50,6 +50,9 @@ import {
   TEAM_HEX, teamHex, escapeHtml, tvSoloRevealScene, tvCascadeRevealScene,
 } from "./revealmap.js";
 import { renderRevealScene } from "./revealmap-ui.js";
+import {
+  recordPartyRound, partyRecapCards, partyRecapCaption, partyRecapCardScene,
+} from "./partyrecap.js";
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = [
@@ -83,6 +86,16 @@ let countdownInterval = null;
 let revealHandle = null;
 let revealShownForRound = null;
 let confettiDone = false;
+
+// Party game-over "Where were the places" recap, TV variant (party-recap-spec
+// §5): the TV has no touch input, so it keeps the same memory-only
+// accumulator but auto-cycles a single card instead of a swipe carousel.
+let roundHistory = [];
+let tvRecapFor = null;       // room.createdAt the recap was built for
+let tvRecapHandle = null;    // the current card's renderRevealScene handle
+let tvRecapTimer = null;     // the auto-cycle interval
+let tvRecapCards = [];       // cards for the current game-over
+let tvRecapIndex = 0;        // which card is showing
 
 let liveMap = null;      // guessing-phase world map (kept across rounds)
 let liveMarker = null;   // the host's in-progress pin, mirrored live
@@ -164,6 +177,7 @@ function followRoom(code) {
   confettiDone = false;
   twistCardShownFor = null;   // C1: a fresh room can reuse round numbers
   shownRoundNumber = null;
+  resetTvRecap();
   $("roomInput").value = code;
   joinVia = "follow";
   joinRoom(code);
@@ -181,6 +195,7 @@ function leaveRoom(message) {
   confettiDone = false;
   twistCardShownFor = null;   // C1
   shownRoundNumber = null;
+  resetTvRecap();
   followedCodes = new Set();
   try { history.replaceState(null, "", location.pathname); } catch { /* file:// */ }
   showScreen("s-entry");
@@ -212,6 +227,19 @@ function stopHeartbeat() {
  * ================================================================ */
 
 function render(state) {
+  // TV recap: fold every reveal (both modes — couch solo truth exists only at
+  // reveal, h2h truth exists earlier but the phase gate keeps them uniform),
+  // and tear the auto-cycle down whenever we leave the game-over screen (couch
+  // gameOver → lobby is a legal transition). A TV that joined mid-game simply
+  // accumulates from where it arrived; hide-if-empty.
+  if (state.phase === "reveal" && state.round) {
+    roundHistory = recordPartyRound(roundHistory, state.round, {
+      mode: state.mode === "h2h" ? "h2h" : "couch",
+      activeTeam: state.activeTeam,
+    });
+  }
+  if (state.phase !== "gameOver") stopTvRecap();
+
   // Head-to-head rooms carry mode: "h2h" and render through their own
   // module — except game over, which reuses the couch podium + confetti
   // with the crown-handoff note added. Couch rooms are untouched by this
@@ -909,6 +937,63 @@ function renderGameOver(state) {
     const tier = champion(night) ? "champion" : "win";
     spawnConfetti($("confetti"), { seed: `${roomCode}:${winnerId}`, tier });
   }
+  renderTvRecap(state);
+}
+
+/* ================================================================
+ * TV recap (party-recap-spec §5): one auto-cycling card. The TV has no touch
+ * input, so a swipe carousel is dead UI here — instead a single card is drawn
+ * and, when there's more than one, a timer swaps in the next every 7s. No
+ * event (D7): the recap is passive; there's no user action to measure.
+ * ================================================================ */
+
+const TV_RECAP_CYCLE_MS = 7000;
+
+// Draw the card at tvRecapIndex into #tvRecapMap + #tvRecapCaption.
+function drawTvRecapCard(teams) {
+  tvRecapHandle?.destroy();
+  const card = tvRecapCards[tvRecapIndex];
+  tvRecapHandle = renderRevealScene(
+    $("tvRecapMap"), partyRecapCardScene(card, teams));
+  $("tvRecapCaption").textContent = partyRecapCaption(card);
+}
+
+function renderTvRecap(state) {
+  // Latched on room.createdAt: state echoes re-run render() but never rebuild.
+  if (tvRecapFor === state.createdAt) return;
+  tvRecapFor = state.createdAt;
+  stopTvRecap();
+  tvRecapCards = partyRecapCards(roundHistory);
+  const box = $("tvRecap");
+  if (!tvRecapCards.length) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  tvRecapIndex = 0;
+  drawTvRecapCard(state.teams);
+  if (tvRecapCards.length > 1) {
+    tvRecapTimer = setInterval(() => {
+      tvRecapIndex = (tvRecapIndex + 1) % tvRecapCards.length;
+      drawTvRecapCard(state.teams);
+    }, TV_RECAP_CYCLE_MS);
+  }
+}
+
+// Tear down the live card + cycle timer, hide the box. The accumulator and the
+// createdAt latch survive (a gameOver → lobby → gameOver of the SAME room must
+// not rebuild); resetTvRecap() clears those on a room change.
+function stopTvRecap() {
+  if (tvRecapTimer) { clearInterval(tvRecapTimer); tvRecapTimer = null; }
+  if (tvRecapHandle) { try { tvRecapHandle.destroy(); } catch { /* gone */ } tvRecapHandle = null; }
+  const box = $("tvRecap");
+  if (box) box.classList.add("hidden");
+}
+
+// Full reset on a room change (follow/leave): drop the accumulator + latch too.
+function resetTvRecap() {
+  stopTvRecap();
+  roundHistory = [];
+  tvRecapFor = null;
+  tvRecapCards = [];
+  tvRecapIndex = 0;
 }
 
 // G3 Crown Night on the TV: the tally, or a full-screen champion at first-to-3.

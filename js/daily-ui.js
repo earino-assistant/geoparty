@@ -73,9 +73,8 @@ import { createViewer, loadRoundImage } from "./viewer-ui.js";
 import { toastWithReport, toastPlain } from "./report-ui.js";
 import { dailyRevealScene } from "./revealmap.js";
 import { renderRevealScene } from "./revealmap-ui.js";
-import {
-  recapCards, recapCardScene, recapCaption, recapEagerCount,
-} from "./recap.js";
+import { createRecapCarousel } from "./recap-ui.js";
+import { recapCards, recapCardScene, recapCaption } from "./recap.js";
 
 /* ================================================================
  * Ghost fragment: parse, then STRIP immediately (§3.5.6 braces layer). This
@@ -213,11 +212,9 @@ let viewer = null;
 let guessMap = null;
 let guessMarker = null;
 let revealHandle = null;
-// Recap (done-screen "Your five places"): live reveal handles, the lazy-init
-// observer, and the one-shot engagement latch.
-let recapHandles = [];
-let recapObserver = null;
-let recapEngaged = false;
+// Recap (done-screen "Your five places"): the shared carousel handle (built
+// by js/recap-ui.js — the one carousel builder for Daily + party game-over).
+let recapHandle = null;
 let tickInterval = null;
 let lastTickSecond = null;
 
@@ -883,30 +880,19 @@ function renderDuelDone(verdict, result) {
  * ================================================================ */
 
 // One daily_recap_engaged per render, latched on the first real engagement
-// (a carousel card scrolled = "swipe").
-function engageRecap(source) {
-  if (recapEngaged) return;
-  recapEngaged = true;
+// (a carousel card scrolled = "swipe"). The latch itself lives inside the
+// createRecapCarousel handle; this only fires the event.
+function engageRecap() {
   track("daily_recap_engaged", {
-    day_number: runDayNum, source, vs_ghost: isDuel, hard: mode === "hard",
+    day_number: runDayNum, source: "swipe", vs_ghost: isDuel, hard: mode === "hard",
   });
 }
-function onRecapScroll() { engageRecap("swipe"); }
 
-// Tear down any live recap: reveal maps, the observer, the carousel DOM, the
-// scroll latch. Safe to call repeatedly (renderRecap re-entry, a hard-mode
-// restart). Never throws.
+// Tear down any live recap carousel. Safe to call repeatedly (renderRecap
+// re-entry, a hard-mode restart). Never throws.
 function destroyRecap() {
-  if (recapObserver) { recapObserver.disconnect(); recapObserver = null; }
-  for (const h of recapHandles) { try { h?.destroy(); } catch { /* gone */ } }
-  recapHandles = [];
-  const carousel = $("dRecapCarousel");
-  if (carousel) {
-    carousel.removeEventListener("scroll", onRecapScroll);
-    carousel.textContent = "";
-  }
-  $("dDoneRecap").classList.add("hidden");
-  recapEngaged = false;
+  try { recapHandle?.destroy(); } catch { /* gone */ }
+  recapHandle = null;
 }
 
 async function renderRecap(result, alreadyPlayed) {
@@ -929,51 +915,15 @@ async function renderRecap(result, alreadyPlayed) {
     const cards = recapCards({
       places, rounds: result.rounds, ghostRounds: ghostRoundResults,
     });
-    if (!cards.length) { box.classList.add("hidden"); return; }
-
     // Carousel: one card per round, maps lazy-initialised as they scroll in.
-    const carousel = $("dRecapCarousel");
+    // createRecapCarousel hides the box itself on zero cards.
     const reduced = prefersReducedMotion();
-    const pending = new Map();     // card element -> { card, mapEl }
-    for (const card of cards) {
-      const el = document.createElement("div");
-      el.className = "recap-card";
-      el.dataset.round = String(card.round);
-      const mapEl = document.createElement("div");
-      mapEl.className = "recap-card-map";
-      const cap = document.createElement("div");
-      cap.className = "recap-caption";
-      cap.textContent = recapCaption(card);
-      el.append(mapEl, cap);
-      carousel.appendChild(el);
-      pending.set(el, { card, mapEl });
-    }
-
-    const initCard = (el) => {
-      const p = pending.get(el);
-      if (!p) return;
-      pending.delete(el);
-      recapHandles.push(renderRevealScene(p.mapEl, recapCardScene(p.card, reduced)));
-    };
-
-    if (typeof IntersectionObserver === "function") {
-      // Eagerly render the leading cards (insertion order = visual order) so a
-      // second card's real map peeks in and makes the swipe affordance obvious;
-      // the rest stay lazy. This never fires engagement — only a scroll does.
-      const eager = recapEagerCount(pending.size);
-      for (const el of [...pending.keys()].slice(0, eager)) initCard(el);
-      recapObserver = new IntersectionObserver((entries) => {
-        for (const e of entries) {
-          if (e.isIntersecting) { initCard(e.target); recapObserver.unobserve(e.target); }
-        }
-      }, { root: carousel, threshold: 0.25 });
-      for (const el of pending.keys()) recapObserver.observe(el);
-    } else {
-      for (const el of [...pending.keys()]) initCard(el);
-    }
-
-    carousel.addEventListener("scroll", onRecapScroll, { passive: true });
-    box.classList.remove("hidden");
+    recapHandle = createRecapCarousel({
+      box, carousel: $("dRecapCarousel"), cards,
+      sceneFor: (c) => recapCardScene(c, reduced),
+      captionFor: recapCaption,
+      onEngage: engageRecap,
+    });
   } catch (e) {
     console.error(scrubErrorMessage(e));
     try { destroyRecap(); } catch { /* nothing left to lose */ }
