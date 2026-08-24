@@ -467,10 +467,45 @@ function instrument({ surface, container, viewer }) {
       // a tick for whatever round/state is now live.
       if (edgeRecovery !== state) return;
       scheduleTick(
-        () => finishEdgeRecoveryAttempt(state, attemptNumber, trigger, t0, roundNumber, failed),
+        () => refreshLastImageThen(state,
+          () => finishEdgeRecoveryAttempt(state, attemptNumber, trigger, t0, roundNumber, failed)),
         edgeRecoveryDelays().recheck,
       );
     });
+  }
+
+  // Phase 3 correction (docs/issue-2-phase2-fix.md §12): re-acquire the viewer's
+  // CURRENT image after setFilter() BEFORE the recheck reads its edge counts.
+  // Phase 2 re-read the `lastImage` latched at load time, but in the field
+  // setFilter()'s clear() cuts that image out of the trajectory and the caching
+  // pass repopulates a DIFFERENT current-image object — so the old ref reads
+  // `spatial:null` forever and attempt 2 never leaves the "uncached" branch
+  // (every field edge_recovery was trigger=uncached / result=no_change, 0/108
+  // recovered). The public getImage() resolves stateService.currentImage$ — the
+  // live current image (confirmed against the mapillary-js 4.1.2 bundle:
+  // `getImage(){return new Promise((res,rej)=>{this._navigator.stateService
+  // .currentImage$.pipe(take(1)).subscribe(res,rej)})}`) — so refreshing
+  // `lastImage` from it makes the recheck observe the POST-recovery edges.
+  // Robust to both SDK behaviors: if setFilter mutates the image in place,
+  // getImage() returns that same (now-fresh) object; if it replaces the image,
+  // getImage() returns the new one. An SDK build without getImage (or a reject)
+  // falls back to the latched ref and stays synchronous. The `lastImage`
+  // assignment is still id/coordinate-free (only extractEdgeCounts reads it) and
+  // is gated on the state still being live so a late resolve can't repopulate a
+  // latch endRound() just cleared.
+  function refreshLastImageThen(state, fn) {
+    if (typeof viewer.getImage !== "function") { fn(); return; }
+    let p;
+    try { p = viewer.getImage(); } catch { fn(); return; }
+    Promise.resolve(p).then(
+      (image) => {
+        if (edgeRecovery === state && image && typeof image === "object") {
+          lastImage = image;
+        }
+        fn();
+      },
+      () => { fn(); },
+    );
   }
 
   function finishEdgeRecoveryAttempt(state, attemptNumber, trigger, t0, roundNumber, setFilterFailed) {
