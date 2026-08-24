@@ -1502,6 +1502,80 @@ test("boundary: a still-blocked API keeps resolving setFilter with 0 edges — "
     iv.destroy();
   });
 
+// The FIELD-ACCURATE SDK model (Phase 3 fix, docs §12): the real setFilter()
+// does NOT mutate the image latched at load — its clear() cuts that image out
+// of the trajectory and the caching pass repopulates a DIFFERENT current-image
+// object, reachable only via the public getImage(). So the load-time object
+// (`imgOld`) stays uncached FOREVER, while getImage() returns a fresh object
+// whose edges advance each recovery pass. Without the Phase 3 refresh the
+// recheck re-reads the stale `imgOld` (spatial:null), so attempt 2 re-issues
+// the same futile `uncached` trigger and never recovers — the exact 0/108
+// field signature this test would catch as a regression.
+function replacingSetFilter(raw, imgOld) {
+  let calls = 0;
+  let current = imgOld; // at load getImage() agrees with the image event
+  raw.getImage = () => Promise.resolve(current);
+  raw.setFilter = () => {
+    calls += 1;
+    raw.calls = raw.calls || [];
+    raw.calls.push("setFilter");
+    // setFilter REPLACES the current image with a new object; imgOld is left
+    // untouched (still uncached) to prove the recheck must not read it.
+    current = calls === 1
+      ? { id: imgOld.id, spatialEdges: { cached: true, edges: [] } }            // cached-zero
+      : { id: imgOld.id, spatialEdges: { cached: true, edges: [{}, {}, {}, {}] } }; // recovered
+    return Promise.resolve();
+  };
+  return () => calls;
+}
+
+test("edge_recovery: recovers on attempt 2 when setFilter REPLACES the image object " +
+  "(Phase 3 stale-ref fix — getImage() re-acquires the fresh current image)", async () => {
+    const iv = makeHostViewer();
+    const raw = iv.viewer;
+    const imgOld = { id: "replaced-1", spatialEdges: { cached: false, edges: [] } };
+    const callCount = replacingSetFilter(raw, imgOld);
+
+    iv.beginRound(7);
+    await iv.moveTo("replaced-1", "anchor");
+    iv.viewer.emit("image", { image: imgOld });   // latches the STALE object
+
+    iv.__edgeRecoveryTickForTests();          // grace tick → attempt 1 (uncached)
+    await flush();
+    iv.__edgeRecoveryTickForTests();          // recheck → refresh via getImage(), then classify
+    await flush();                            // getImage().then → finish runs
+    const ev1 = lastEvent("edge_recovery");
+    assert.equal(ev1.props.attempt, 1);
+    assert.equal(ev1.props.trigger, "uncached");
+    assert.equal(ev1.props.result, "no_change",
+      "attempt 1 sees the fresh cached-ZERO status (not the stale null), still no_change");
+    assert.equal(ev1.props.spatial_after, 0,
+      "spatial_after is the POST-setFilter count read off the fresh image, not the stale null");
+
+    iv.__edgeRecoveryTickForTests();          // backoff tick → attempt 2 (ZERO, not uncached)
+    await flush();
+    iv.__edgeRecoveryTickForTests();          // recheck → refresh via getImage(), then classify
+    await flush();
+    const ev2 = lastEvent("edge_recovery");
+    assert.equal(ev2.props.attempt, 2);
+    assert.equal(ev2.props.trigger, "zero",
+      "attempt 2 reaches the real-fetch ZERO branch — the field bug re-issued uncached here");
+    assert.equal(ev2.props.result, "recovered");
+    assert.equal(ev2.props.spatial_after, 4);
+    assert.equal(callCount(), 2, "at most two setFilter() calls, ever");
+
+    // imgOld is still uncached — proving recovery read the FRESH image, not it.
+    assert.equal(imgOld.spatialEdges.cached, false,
+      "the load-time latched object was never mutated; the fix reads getImage()");
+
+    iv.endRound();
+    const pano = lastEvent("pano_session");
+    assert.equal(pano.props.edge_recoveries, 2);
+    assert.equal(pano.props.anchor_spatial_edges, 4,
+      "a successful recovery backfills anchor_spatial_edges even when the image was replaced");
+    iv.destroy();
+  });
+
 test("endRound cancels pending recovery — a tick after endRound is a no-op", async () => {
   const iv = makeHostViewer();
   const raw = iv.viewer;

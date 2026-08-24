@@ -424,3 +424,53 @@ Ship gate as always: `npm test` green, `npm run check` clean.
   cap means this reads as two `edge_recovery` events ending in `"no_change"`
   and a round that stays arrow-less, rather than a retry storm. This is the
   honest floor of a client-side recovery for a server-side failure mode.
+
+## 12. Phase 3 correction — the recheck read a stale image ref (2026-08-24)
+
+> **Field evidence (PostHog EU 252836, 14 d):** EVERY `edge_recovery` event
+> was `trigger=uncached` / `result=no_change`, zero `trigger=zero`, zero
+> `recovered` (0/108). The two-step machine advanced to attempt 2 correctly
+> but re-issued the SAME futile `uncached` trigger instead of reaching the
+> real-fetch `zero` branch — so nothing ever recovered on real devices.
+
+This does **not** rewrite the shipped Phase 2 design above; the pure state
+machine in `imagery.js` (`decideEdgeRecovery`, the two-step trigger, the
+cap-of-2) is correct and unchanged. The defect was entirely in the glue's
+**read**:
+
+- Phase 2 latched the live `Image` object at load (`lastImage = ev.image`)
+  and had `finishEdgeRecoveryAttempt` re-read edges off that same object
+  after `setFilter()` settled, on the comment-documented assumption that "a
+  recovered status renders with no further image event" (in-place mutation).
+- The field disproves that assumption. `Viewer.setFilter$` runs
+  `StateService.clear()`, which `cut()`/`remove()`s trajectory entries; the
+  caching pass then repopulates a **different** current-image object. The
+  object latched at load is cut from the trajectory and its `spatialEdges`
+  status never re-emits — it reads `null` (uncached) forever. So the recheck,
+  and therefore the next tick's `decideEdgeRecovery`, kept seeing `spatial:
+  null` → the `uncached` branch, on both attempts. The `zero` branch was
+  unreachable.
+
+**Fix (glue only, `js/viewer-ui.js`):** before the post-`setFilter()`
+recheck reads edge counts, re-acquire the viewer's CURRENT image via the
+public `viewer.getImage()` and refresh `lastImage` from it. Confirmed against
+the pinned mapillary-js 4.1.2 bundle — `getImage()` resolves
+`this._navigator.stateService.currentImage$.pipe(take(1))`, i.e. the live
+current image, a different object from the one cut at `clear()` time. The
+refresh is robust to **both** SDK behaviors: if a build mutates the image in
+place, `getImage()` returns that same (now-fresh) object; if it replaces the
+image, `getImage()` returns the new one. A build without `getImage` (or a
+reject) falls back to the latched ref and stays synchronous, so the Phase 2
+in-place-mutation tests are untouched. The refreshed `lastImage` is still
+never serialized (only `extractEdgeCounts` reads it), stays id/coordinate-free,
+and is cleared in `endRound()`/`destroy()` exactly as before; the assignment is
+gated on the recovery state still being live so a late resolve can't repopulate
+a latch `endRound()` just cleared.
+
+Event semantics are unchanged — same `edge_recovery` schema and `trigger`/
+`result` meanings. The only difference the field will see is that
+`trigger=zero` / `result=recovered` can now actually occur. A new
+`tests/viewer-ui.test.js` case models the real SDK (a `getImage()` that
+returns a fresh replaced object each pass while the load-time object stays
+uncached) and asserts attempt 2 reaches `zero` → `recovered`; it is
+red-capable against the Phase 2 code.
