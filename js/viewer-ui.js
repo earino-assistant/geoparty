@@ -900,6 +900,10 @@ function instrument({ surface, container, viewer }) {
     setMoveAllowed(allowed) {
       iv.moveEnabled = allowed === true;
       desiredMove = allowed === true;
+      // Frozen/Hard: movement is off, so actively dismiss the
+      // "Loading the arrows…" pill rather than leave an already-armed hint
+      // to time out against arrows that will never appear.
+      if (allowed !== true) cancelNavHint();
       applyMove();
     },
 

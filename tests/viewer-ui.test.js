@@ -1182,6 +1182,45 @@ test("nav hint: never shown while Frozen (setMoveAllowed(false))", async () => {
   iv.destroy();
 });
 
+// The Frozen flip can land AFTER the anchor has already armed the hint (the
+// anchor resolves before the setMoveAllowed(false) applies, or the hint armed
+// on a prior move-enabled round). Without an active dismissal the pill would
+// hang the full NAV_HINT_MAX_MS against arrows that never appear. setMoveAllowed
+// (false) must cancel it immediately.
+test("nav hint: a Frozen setMoveAllowed(false) dismisses an already-armed hint immediately (not on timeout)",
+  async () => {
+    const cid = "navhint-frozen-dismiss";
+    const iv = makeCoverViewer(cid);
+    // Move-enabled anchor arms the pill (no arrows on screen yet).
+    await iv.moveTo("123456789012345", "anchor");
+    assert.ok(navHintOf(cid).classList.contains("show"),
+      "the pill is armed and showing after the move-enabled anchor load");
+    // Now the Frozen flip lands: movement off must dismiss the pill right away.
+    iv.setMoveAllowed(false);
+    assert.ok(!navHintOf(cid).classList.contains("show"),
+      "setMoveAllowed(false) dismisses the armed hint immediately — not left to time out");
+    // And no pending tick can re-show it: a later poll is a silent no-op.
+    iv.__navHintTickForTests();
+    assert.ok(!navHintOf(cid).classList.contains("show"),
+      "the hint stays dismissed after the Frozen flip");
+    iv.destroy();
+  });
+
+// Regression: a move-ENABLED round must keep its armed hint. setMoveAllowed
+// (true) activates the components and must NOT cancel the pill — it fades only
+// when arrows appear or the bounded timeout fires.
+test("nav hint: setMoveAllowed(true) does NOT cancel an armed hint (a move-enabled round keeps it)",
+  async () => {
+    const cid = "navhint-move-enabled-keeps";
+    const iv = makeCoverViewer(cid);
+    await iv.moveTo("123456789012345", "anchor");
+    assert.ok(navHintOf(cid).classList.contains("show"));
+    iv.setMoveAllowed(true);
+    assert.ok(navHintOf(cid).classList.contains("show"),
+      "re-enabling movement must not dismiss the hint — it waits for arrows or the timeout");
+    iv.destroy();
+  });
+
 /* ================================================================
  * #5 — movement-lever hardening: a transient activation failure must
  * recover on a later render/retry, never strand the controls for the round
