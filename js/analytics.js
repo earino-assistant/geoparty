@@ -380,6 +380,17 @@ export const EVENT_SCHEMA = Object.freeze({
   daily_recap_engaged: {
     day_number: "int", source: "string", vs_ghost: "bool", hard: "bool",
   },
+  // Party game-over "Where were the places" recap (docs/party-recap-spec.md).
+  // Fired at most ONCE per game-over render, when the recap is actually
+  // engaged — a carousel card scrolled. surface: "host" | "player" (the TV
+  // recap is passive — no interaction to measure, no event). Aggregates only:
+  // no place name, coordinate, or team name rides; rounds_shown is how many
+  // cards the carousel held (≤ settings.roundCount when a device missed
+  // rounds). Engagement rate = party_recap_engaged ÷ game_completed.
+  party_recap_engaged: {
+    room: "string", mode: "string", surface: "string",
+    rounds_shown: "int", source: "string",
+  },
   // G3 Crown Night (§7.1). Fired by the phase-writing device at a champion.
   // games is how many games the night took to reach first-to-3.
   night_champion: { mode: "string", games: "int" },

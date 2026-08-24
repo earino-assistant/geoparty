@@ -54,6 +54,11 @@ into it, so a future scoreboard row cannot slip through unmasked.
 - `#revealBoard` — the merged reveal board (round delta → running total),
   which replaced `#revealTotals`; carries team names
 - `#finalTotals`, `#hostCrown` — scoreboard, winner line
+- `#hRecap` — the party game-over "Where were the places" recap: masked
+  wholesale, because the per-round carousel captions carry place names
+  (`partyrecap.partyRecapCaption`). The carousel card maps inside it (built
+  in `js/recap-ui.js`) are `.leaflet-container`, already blocked by
+  `blockSelector` — see §3
 - `#hChampion`, `#hNightTally`, `#hNightHook` — G3 Crown Night champion /
   tally / "Game N?" hook carry team names
 - `#hostShowdownResults` — injected at runtime; masked in `host-ui.js`
@@ -77,6 +82,11 @@ one.
 - `#pLobbyTeams`, `#pLockedList`, `#pRevealBoard`, `#pFinalTotals`,
   `#pLockedRank`, `#pHandoffNote` — team names. `#pRevealBoard` is the
   merged board that replaced `#pRoundResults` + `#pRevealTotals`
+- `#pRecap` — the party game-over "Where were the places" recap: masked
+  wholesale, because the per-round carousel captions carry place names
+  (`partyrecap.partyRecapCaption`). The carousel card maps inside it (built
+  in `js/recap-ui.js`) are `.leaflet-container`, already blocked by
+  `blockSelector` — see §3
 - `#pChampion`, `#pNightTally`, `#pNightHook` — G3 Crown Night champion /
   tally / "Game N?" hook carry team names
 - `#pGameOverTitle` — the win celebration's headline: a non-champion win
@@ -105,6 +115,10 @@ one.
   champion carry team names
 - `#h2hLobbyNote` — the h2h lobby status line now folds in the Crown Night
   tally (team names) in game ≥ 2 (spec §3.3, C5)
+- `#tvRecap` — the party game-over "Where were the places" recap: masked
+  wholesale, because the auto-cycling card's caption carries a place name
+  (`partyrecap.partyRecapCaption`). Its card map `#tvRecapMap` is a
+  `.leaflet-container`, already blocked by `blockSelector` — see §3
 - `#tvPlace`, `#h2hPlace` — the round's answer
 - `#tvShowdown`, the guess-screen team caption — injected at runtime;
   masked in `screen-ui.js`
@@ -160,6 +174,14 @@ They are rendered by `js/revealmap-ui.js` and are `.leaflet-container`, so they
 fall under `blockSelector` with no per-id entry — a tile there is still a
 coordinate. The recap's city-name captions sit *outside* the maps and are
 covered by the wholesale `#dDoneRecap` mask (§2).
+
+The party game-over recap (`docs/party-recap-spec.md`) adds the same kind of
+map surfaces, and they mask identically with no per-id entry: the **phone
+carousel card** maps (host + player, built in `js/recap-ui.js` — the shared
+carousel builder Daily also uses now) and the TV's single auto-cycling
+`#tvRecapMap` are all `.leaflet-container` under `blockSelector`. Their
+place-name captions sit outside the maps and are covered by the wholesale
+`#hRecap` / `#pRecap` / `#tvRecap` masks (§2).
 
 The reveal maps changed size (36 vh → 52 vh) and gained a `touch-action`
 rule in the de-clutter pass, neither of which affects `blockSelector`: the

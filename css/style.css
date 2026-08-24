@@ -1551,6 +1551,12 @@ body:has(.action-bar) .consent-banner {
   color: var(--muted);
 }
 
+/* Party game-over recap, TV variant: no touch input on a TV, so one card
+   auto-cycles instead of a swipe carousel. vh-sized like the podium. */
+.tv-recap { max-width: 72vh; margin: 2vh auto 0; }
+.tv-recap .recap-card-map { height: 28vh; border-radius: 12px; }
+.tv-recap .recap-caption { font-size: 2.2vh; text-align: center; }
+
 /* G2 Twists: the ritual-interstitial card flip (center overlay + scrim). */
 .twist-card-overlay {
   position: fixed;

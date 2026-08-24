@@ -88,6 +88,10 @@ import {
   countdownText,
   holdAdvancePatch,
 } from "./autoadvance.js";
+import { createRecapCarousel } from "./recap-ui.js";
+import {
+  recordPartyRound, partyRecapCards, partyRecapCaption, partyRecapCardScene,
+} from "./partyrecap.js";
 import { countdownTick, celebrationSpec } from "./fx.js";
 import { initSound, playSound, buzz, stampFlash, spawnConfetti } from "./fx-ui.js";
 import { loadPool, PoolSampler, normalizeDifficulty } from "./pool.js";
@@ -454,6 +458,7 @@ async function newGame() {
     sampler = new PoolSampler(pool, roomCode, 0, room.settings.difficulty);
     currentTruth = null;
     gameBest = null;
+    resetRecap();
     writeRoom(roomCode, room).catch((e) =>
       console.warn("Firebase write failed (continuing locally):", scrubErrorMessage(e)));
     if (prevRoomCode && prevRoomCode !== roomCode) {
@@ -1399,6 +1404,14 @@ function holdAdvance() {
 let hostRevealMap = null;
 let hostRevealMapFor = null; // "<room>:<round>" the map was built for
 
+// Party game-over "Where were the places" recap (docs/party-recap-spec.md):
+// a memory-only per-device accumulator folded at each reveal, drawn once at
+// game-over. Per-room; hostRecapFor latches the render on room.createdAt.
+let roundHistory = [];
+let hostRecapHandle = null;
+let hostRecapFor = null;
+let hostRecapEngagedTracked = false;
+
 function destroyHostRevealMap() {
   if (hostRevealMap) {
     try { hostRevealMap.remove(); } catch { /* already gone */ }
@@ -1414,6 +1427,14 @@ function updateRevealSurface() {
   else destroyHostRevealMap();
 }
 
+// R1 (party-recap-spec §6.4) — DEFERRED, not landed with the recap. The spec
+// proposed converging this onto `phoneRevealScene` + `renderRevealScene`, but
+// that scene is the PERSONAL h2h phone map: it draws no per-pin tooltip and no
+// "Answer" label. This couch host map is the shared phone-as-screen surface
+// and deliberately labels each pin with its team name and the truth with
+// "Answer" (below), like the TV cascade does. Converging would silently drop
+// both labels from a shared surface — the "visual surprise" §6.4 flags as the
+// severance trigger. Left hand-rolled; the recap ships without it.
 function renderHostRevealMap() {
   const round = room.round;
   if (!round.truth) return;
@@ -1578,6 +1599,39 @@ function enterReveal() {
   $("btnNextRound").textContent =
     number >= room.settings.roundCount ? "Finish" : "Next round";
   startAdvanceTicker();
+
+  // Fold this reveal into the recap accumulator (solo → one pin, showdown →
+  // all pins, via couchRevealPins). The truth is already written into
+  // room.round by this point; the pool-exhaustion finish fakes a truthless
+  // reveal and the fold no-ops. Idempotent on re-entry.
+  roundHistory = recordPartyRound(roundHistory, room.round,
+    { mode: "couch", activeTeam: room.activeTeam });
+}
+
+// The party game-over recap render, latched on room.createdAt so re-renders
+// (resume-into-gameOver, echoes) never rebuild it. Empty history hides the
+// box. Shared by finishGame() and the resume gameOver path.
+function renderHostRecap() {
+  if (hostRecapFor === room.createdAt) return;
+  hostRecapFor = room.createdAt;
+  hostRecapHandle?.destroy();
+  const cards = partyRecapCards(roundHistory);
+  hostRecapHandle = createRecapCarousel({
+    box: $("hRecap"), carousel: $("hRecapCarousel"), cards,
+    sceneFor: (c) => partyRecapCardScene(c, room.teams),
+    captionFor: partyRecapCaption,
+    onEngage: () => trackHostRecapEngaged(cards.length),
+  });
+}
+
+// One party_recap_engaged per game-over, latched on the first carousel scroll.
+function trackHostRecapEngaged(roundsShown) {
+  if (hostRecapEngagedTracked) return;
+  hostRecapEngagedTracked = true;
+  track("party_recap_engaged", {
+    room: roomCode, mode: "couch", surface: "host",
+    rounds_shown: roundsShown, source: "swipe",
+  });
 }
 
 function renderTotals(listEl) {
@@ -1673,6 +1727,7 @@ function finishGame(advance) {
   });
   updateCrown(); // S7: no TV podium — this phone crowns the winner
   renderTotals($("finalTotals"));
+  renderHostRecap();
   renderNightTally(bumped);
   // §2.9: it is localStorage — there is no reason to make a human press a
   // database button. The game saves itself and says so in one quiet line,
@@ -1761,7 +1816,17 @@ function newGameFromOver() {
   roomCode = null;
   currentTruth = null;
   gameBest = null;
+  resetRecap();
   enterSetup();
+}
+
+// Reset the per-room recap accumulator + latches (a new game / next game).
+function resetRecap() {
+  roundHistory = [];
+  hostRecapFor = null;
+  hostRecapEngagedTracked = false;
+  hostRecapHandle?.destroy();
+  hostRecapHandle = null;
 }
 
 /* ================================================================
@@ -1867,6 +1932,9 @@ async function resumeGame(code, state) {
       showScreen("h-gameover");
       updateCrown(); // S7 — re-checked when the first heartbeat lands
       renderTotals($("finalTotals"));
+      // Resume-into-gameOver: the accumulator is empty (this device didn't
+      // witness the reveals), so the recap hides itself — the honest outcome.
+      renderHostRecap();
       // R2: a host refresh between games must not lose the night. RTDB holds
       // only the pre-bump seeded night (finishGame writes no tally), so
       // recompute this game's crown deterministically with gameNight() — the
