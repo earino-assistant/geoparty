@@ -13,3 +13,8 @@ tools/.pool-health-cache.json
 # Never commit environment secrets. The tools read keys from the process env
 # (e.g. POSTHOG_PERSONAL_API_KEY), never from a file in the tree.
 .env
+
+# Flag Reveal working drafts (not repo files)
+.handoff-*.md
+.pm-*.md
+docs/flag-unveil-opus-design.md
