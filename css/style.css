@@ -299,6 +299,20 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
   justify-content: center;
   gap: 10px;
 }
+/* Secondary actions (TV screen / How to play) as quiet buttons above the footer. */
+.ld-second {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+.ld-second .btn-ghost {
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.95rem;
+}
 .ld-footer a { color: var(--muted); }
 .ld-footer a:hover { color: var(--fg); }
 
