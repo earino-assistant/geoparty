@@ -308,10 +308,17 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
   flex-wrap: wrap;
 }
 .ld-second .btn-ghost {
-  padding: 8px 16px;
+  padding: 10px 18px;
+  min-height: 44px; /* comfortable phone target */
   border: 1px solid var(--line);
   border-radius: 999px;
   font-size: 0.95rem;
+  background: var(--panel-2); /* solid raised face so it reads as a button */
+  color: var(--fg);
+}
+.ld-second .btn-ghost:hover, .ld-second .btn-ghost:focus-visible {
+  color: var(--fg);
+  background: var(--raised);
 }
 .ld-footer a { color: var(--muted); }
 .ld-footer a:hover { color: var(--fg); }
