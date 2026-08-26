@@ -22,7 +22,7 @@ test("joinTarget: couch rooms route to the shared display", () => {
   // A couch room's only joinable surface is the TV — its lobby QR has
   // always pointed there, and a couch code typed at the front door is most
   // likely being typed on the TV's own browser.
-  assert.equal(joinTarget("couch"), "screen.html");
+  assert.equal(joinTarget("couch"), "tv.html");
 });
 
 test("joinTarget: unknown/missing modes default to the phones page", () => {
@@ -35,7 +35,7 @@ test("joinTarget: unknown/missing modes default to the phones page", () => {
 
 test("joinHref: carries the room code through", () => {
   assert.equal(joinHref("h2h", "KWPFRT"), "player.html?room=KWPFRT");
-  assert.equal(joinHref("couch", "ABCDEF"), "screen.html?room=ABCDEF");
+  assert.equal(joinHref("couch", "ABCDEF"), "tv.html?room=ABCDEF");
 });
 
 test("PARTY_CHOICES: both experiences start somewhere real", () => {

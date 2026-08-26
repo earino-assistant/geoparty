@@ -12,7 +12,7 @@
 // own browser — lands there too. Unknown/missing modes default to the
 // phones experience, which recovers gracefully from any mismatch.
 export function joinTarget(mode) {
-  return mode === "couch" ? "screen.html" : "player.html";
+  return mode === "couch" ? "tv.html" : "player.html";
 }
 
 export function joinHref(mode, code) {

@@ -22,7 +22,7 @@ export const TV_VIAS = Object.freeze(["qr", "link"]);
 // the current page's href (player.html / host.html resolve to their own
 // directory); via tags the handover path and is omitted when unknown.
 export function screenLink(baseHref, code, via) {
-  const url = new URL("screen.html", baseHref);
+  const url = new URL("tv.html", baseHref);
   url.search = `?room=${code}` + (TV_VIAS.includes(via) ? `&via=${via}` : "");
   return url.href;
 }

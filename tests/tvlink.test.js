@@ -18,15 +18,15 @@ const PAGES_BASE = "https://earino-assistant.github.io/geoparty/player.html";
 
 /* ---------------- screenLink ---------------- */
 
-test("screenLink: resolves screen.html next to the current page", () => {
+test("screenLink: resolves tv.html next to the current page", () => {
   assert.equal(
     screenLink(PAGES_BASE, "KWPFRT", "qr"),
-    "https://earino-assistant.github.io/geoparty/screen.html?room=KWPFRT&via=qr"
+    "https://earino-assistant.github.io/geoparty/tv.html?room=KWPFRT&via=qr"
   );
   // host.html and a root-served deployment resolve the same way.
   assert.equal(
     screenLink("https://example.com/host.html", "ABCDEF", "link"),
-    "https://example.com/screen.html?room=ABCDEF&via=link"
+    "https://example.com/tv.html?room=ABCDEF&via=link"
   );
 });
 
@@ -34,7 +34,7 @@ test("screenLink: unknown via is omitted, not passed through", () => {
   for (const via of [undefined, null, "", "typed", "evil=1"]) {
     assert.equal(
       screenLink("https://example.com/player.html", "KWPFRT", via),
-      "https://example.com/screen.html?room=KWPFRT"
+      "https://example.com/tv.html?room=KWPFRT"
     );
   }
 });
@@ -43,7 +43,7 @@ test("screenLink: drops the current page's own query string", () => {
   // A lobby URL already carries ?room= — it must not leak into the link.
   assert.equal(
     screenLink(`${PAGES_BASE}?room=KWPFRT&create=1`, "KWPFRT", "qr"),
-    "https://earino-assistant.github.io/geoparty/screen.html?room=KWPFRT&via=qr"
+    "https://earino-assistant.github.io/geoparty/tv.html?room=KWPFRT&via=qr"
   );
 });
 

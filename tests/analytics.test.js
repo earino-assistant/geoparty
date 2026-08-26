@@ -226,7 +226,7 @@ test("sanitizeEvent: tv_link_shared keeps mode/method, strips the link", () => {
   // The Add a TV affordance: which path was used, never the URL itself.
   const out = sanitizeEvent("tv_link_shared", {
     mode: "couch", method: "share",
-    url: "https://example.com/screen.html?room=KWPFRT", // never sent
+    url: "https://example.com/tv.html?room=KWPFRT", // never sent
     room_code: "KWPFRT",
   });
   assert.deepEqual(out, {
@@ -238,7 +238,7 @@ test("sanitizeEvent: tv_link_shared keeps mode/method, strips the link", () => {
 test("sanitizeEvent: screen_joined carries the attribution via, nothing extra", () => {
   const out = sanitizeEvent("screen_joined", {
     room: "KWPFRT", mode: "h2h", via: "qr",
-    url: "https://example.com/screen.html?room=KWPFRT&via=qr", // never sent
+    url: "https://example.com/tv.html?room=KWPFRT&via=qr", // never sent
   });
   assert.deepEqual(out, {
     event: "screen_joined",

@@ -25,7 +25,7 @@ test("qrEncode: null when the text exceeds version 5", () => {
 });
 
 test("qrEncode: deterministic", () => {
-  const url = "https://example.github.io/geoparty/screen.html?room=KWPFRT";
+  const url = "https://example.github.io/geoparty/tv.html?room=KWPFRT";
   assert.deepEqual(qrEncode(url), qrEncode(url));
 });
 
