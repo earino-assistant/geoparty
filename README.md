@@ -9,10 +9,10 @@ awarded by distance.
 The entire system is static JavaScript synced through Firebase Realtime
 Database. No server code, no build step, no cost.
 
-> **Proprietary software — not open source.** GeoParty is owned by Eduardo Ariño
-> de la Rubia and is licensed under the proprietary [GeoParty License](LICENSE).
-> You may not use, copy, modify, distribute, host, or create derivative works
-> from it without a separate written license.
+> **Open source (MIT).** GeoParty is owned by Eduardo Ariño
+> de la Rubia and is licensed under the [MIT License](LICENSE).
+> Use, copy, modify, distribute, and even commercialize it freely, provided
+> you retain the copyright notice and this permission notice.
 
 There are two modes. **Couch mode** (the original): one operator phone
 drives, the couch watches the TV. **Head-to-head**: every team plays on its
@@ -169,11 +169,10 @@ runbook.
 
 ## Deployment (GitHub Pages)
 
-1. These steps document how the **owner** publishes GeoParty; under the
-   proprietary license they are not an invitation to host your own copy. The
+1. These steps document how the **owner** publishes GeoParty; under the MIT
+   license anyone is free to fork and host their own copy. The
    owner pushes this directory to the `main` branch of the `geoparty`
-   repository (the code is visible, but use and hosting require a written
-   license).
+   repository (the code is open source; fork, use, and host freely).
 2. Repo Settings → Pages → Source = **GitHub Actions**
    (`.github/workflows/pages.yml` runs the checks, stamps `release.json`
    with the deployed commit, and deploys — nothing is committed per
