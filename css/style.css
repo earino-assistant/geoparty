@@ -310,7 +310,9 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
 .ld-second .btn-ghost {
   padding: 10px 18px;
   min-height: 44px; /* comfortable phone target */
-  border: 1px solid var(--line);
+  display: inline-flex; /* center the label vertically (the base blockifies but doesn't center) */
+  align-items: center;
+  border: 1px solid var(--panel-2); /* GeoParty's established border token (--line is FlagParty-only) */
   border-radius: 999px;
   font-size: 0.95rem;
   background: var(--panel-2); /* solid raised face so it reads as a button */
