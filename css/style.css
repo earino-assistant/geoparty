@@ -25,6 +25,11 @@
   --team-3: #FF6EC7;
   --team-4: #7DFF8A;
   --disabled-fg: #8A8A96;
+  /* hairlines: light-on-dark borders read as crafted edges, not boxes
+     (values shared with FlagParty for family consistency) */
+  --line:        rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.15);
+  --line-bold:   rgba(255, 255, 255, 0.25); /* ~3:1 edge on --raised: pressable faces */
   --font-display: "Space Grotesk", system-ui, sans-serif;
 
   /* Height reserved for the bottom action bar (guess button / controls),
@@ -307,20 +312,29 @@ button:disabled { opacity: 1; background: var(--raised); color: var(--disabled-f
   margin-top: 18px;
   flex-wrap: wrap;
 }
-.ld-second .btn-ghost {
-  padding: 10px 18px;
-  min-height: 44px; /* comfortable phone target */
-  display: inline-flex; /* center the label vertically (the base blockifies but doesn't center) */
+.ld-second .btn-quiet {
+  padding: 11px 20px;
+  min-height: 44px;                /* comfortable phone target */
+  display: inline-flex;            /* centers the label vertically */
   align-items: center;
-  border: 1px solid var(--panel-2); /* GeoParty's established border token (--line is FlagParty-only) */
-  border-radius: 999px;
-  font-size: 0.95rem;
-  background: var(--panel-2); /* solid raised face so it reads as a button */
+  border: 1px solid var(--line-bold);
+  border-radius: 12px;             /* rejoin the action-rect family (base buttons: 12px) */
+  font-size: 1rem;
+  font-weight: 600;
+  background: var(--raised);       /* solid face, one full step above the page */
   color: var(--fg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07); /* machined top edge */
+  transition: background 120ms ease, border-color 120ms ease;
 }
-.ld-second .btn-ghost:hover, .ld-second .btn-ghost:focus-visible {
+.ld-second .btn-quiet:hover, .ld-second .btn-quiet:focus-visible {
   color: var(--fg);
-  background: var(--raised);
+  background: #383845;                       /* one notch above --raised */
+  border-color: rgba(255, 207, 63, 0.6);     /* gold ember — same hover language as .ld-daily */
+}
+.ld-second .btn-quiet:active {
+  transform: translateY(1px);
+  background: var(--panel-2);                /* darker face = pressed in */
+  box-shadow: none;
 }
 .ld-footer a { color: var(--muted); }
 .ld-footer a:hover { color: var(--fg); }
