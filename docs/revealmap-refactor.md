@@ -185,8 +185,10 @@ the XSS-relevant escaping drops from 3 copies to 1.
 
 ## 6. Replay masking + analytics
 
-- **Masking**: no new DOM outside `.leaflet-container`. All four containers stay
-  under `blockSelector`. Add a line to `docs/replay-mask-checklist.md` §maps
+- **Masking**: no new DOM outside `.leaflet-container`. Since the
+  2026-08-28 owner decision maps are replay-visible, so nothing here needs
+  `blockSelector`; any new reveal label that carries a team name or room
+  code still needs `data-ph-mask`. Add a line to `docs/replay-mask-checklist.md` §maps
   noting the four reveal maps are now rendered by `js/revealmap-ui.js` and any
   new reveal label must be added as a scene op, then re-run the doc's
   verify-on-a-real-recording step.

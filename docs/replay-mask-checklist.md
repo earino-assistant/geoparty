@@ -330,8 +330,10 @@ recording in PostHog and confirm:
 - [ ] The reveal place name (now the big accent headline) is asterisks.
 - [ ] The merged reveal board's team names are asterisks; the result line
       beneath the place name shows numbers only.
-- [ ] The panorama area is a blank/black box, not street imagery.
-- [ ] The guess map and reveal map are placeholder boxes, not tiles.
+- [ ] The panorama area shows street imagery (owner decision 2026-08-28:
+      gameplay is recorded), and it is NOT a blank/black box.
+- [ ] The guess map and reveal map render real tiles and the player's pin;
+      the pin tooltips (team names) are asterisks.
 - [ ] The network tab shows `graph.mapillary.com/<id>`-shaped entries with
       **no** `?access_token=…`, and **no** `tile.openstreetmap.org` rows.
 - [ ] No request/response headers or bodies are present.
