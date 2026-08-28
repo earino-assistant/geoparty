@@ -173,7 +173,7 @@ function ensureBanner() {
   // not (see PRIVACY.md).
   //
   // REVISED 2026-08-28 by owner decision
-  // (/opt/data/notes/replay-privacy-decision-2026-08-28.md, GeoParty only).
+  // (docs/decisions/2026-08-28-replay-privacy.md, GeoParty only).
   // The old wording promised the street view and maps "are blanked out" and
   // that we never see "your guesses". Both stopped being true when gameplay
   // was unmasked in replay (`blockSelector` / `captureCanvas` in

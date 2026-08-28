@@ -617,7 +617,7 @@ de-clutter shape is preserved: map, place headline, one result line, one
 total row).
 
 Maps are replay-visible since the 2026-08-28 owner decision
-(`/opt/data/notes/replay-privacy-decision-2026-08-28.md`) — the ghost
+(`docs/decisions/2026-08-28-replay-privacy.md`) — the ghost
 marker is game content on the recipient's own screen, like any reveal.
 The Ghost Duel privacy boundary (CLAUDE.md) is unaffected: it governs the
 URL-fragment *payload* (no server/PostHog/replay transport of the payload

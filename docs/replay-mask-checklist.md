@@ -18,7 +18,7 @@ Plus `maskAllInputs: true`, which covers every `<input>` unconditionally, and
 panorama rather than leaving it a blank box (§3).
 
 > **Owner decision, 2026-08-28 — gameplay is no longer masked.**
-> `/opt/data/notes/replay-privacy-decision-2026-08-28.md` (GeoParty only;
+> `docs/decisions/2026-08-28-replay-privacy.md` (GeoParty only;
 > Flag Party is unchanged). A guess, and where a player navigated, are
 > gameplay — not personal information — and blanking them made imagery bugs
 > undebuggable. So the guess map, the reveal map and the street-view pano are

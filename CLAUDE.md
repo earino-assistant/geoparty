@@ -63,7 +63,7 @@ change:
   follow-up.** Any new screen that renders a team name, a room code or a
   place name needs `data-ph-mask`. Maps no longer need `blockSelector`
   coverage: per the owner decision of 2026-08-28
-  (`/opt/data/notes/replay-privacy-decision-2026-08-28.md`, GeoParty only),
+  (docs/decisions/2026-08-28-replay-privacy.md, GeoParty only),
   gameplay — the guess map, the reveal map and the pano — is deliberately
   VISIBLE in recordings so imagery bugs stay debuggable. Keep
   `.leaflet-tooltip` masked (pin labels carry team names), and use

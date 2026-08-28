@@ -66,8 +66,8 @@ export const POSTHOG_INIT_OPTIONS = {
     // Team names + room codes in the UI, plus Leaflet's tooltips (which
     // carry team-name pin labels on the reveal maps).
     maskTextSelector: "[data-ph-mask], .leaflet-tooltip",
-    // Owner decision 2026-08-28 (/opt/data/notes/replay-privacy-decision-
-    // 2026-08-28.md, GeoParty only): a guess and where a player navigated are
+    // Owner decision 2026-08-28 (docs/decisions/2026-08-28-replay-privacy.md):
+    // a guess and where a player navigated are
     // GAMEPLAY, not personal information, and blanking them made imagery bugs
     // undebuggable. So `.leaflet-container` is no longer blocked — the guess
     // map and the reveal map are visible in recordings, tiles and all. This

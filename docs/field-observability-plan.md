@@ -602,7 +602,7 @@ one, and all of it only ever after explicit analytics consent.
   it needs console + network + UI state, which replay provides.
 
   > **SUPERSEDED 2026-08-28 by owner decision**
-  > (`/opt/data/notes/replay-privacy-decision-2026-08-28.md`, GeoParty only).
+  > (docs/decisions/2026-08-28-replay-privacy.md, GeoParty only).
   > The premise above — "debugging does not need the pixels" — did not
   > survive contact with the field: the iOS black-pano investigation was
   > blocked precisely because the pixels were missing. The pano canvas and
