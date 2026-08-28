@@ -532,22 +532,26 @@ Gate: `npm test` all green, `npm run check`.
 
 ## 7. Pre-build verification checklist (against the real pinned bundle)
 
-The arrow-reposition lesson (inferred third-party class names were wrong)
-applies with force here — four SDK facts this design leans on must be
-confirmed against the actual unpkg `mapillary-js@4.1.2` build, not memory:
+**CTO verification, 2026-08-28: V1–V3 are now CONFIRMED against the served
+bundle (`cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.js`, fetched
+and grepped). The design's load-bearing facts hold:**
 
-- **V1** — context type: does the render canvas hold `webgl2` or `webgl`?
-  (Determines `getContext` probe order; both are tried regardless.)
-- **V2** — canvas count and DOM order in the container: is
-  `querySelector("canvas")` guaranteed to hit the WebGL canvas? If not, the
-  probe/rebind must select the canvas whose `getContext` returns a live
-  context.
-- **V3** — `preserveDrawingBuffer`: confirm `false` (locks in the §2.1
-  sample policy; if it is somehow `true`, the sample can be promoted from
-  corroboration to primary and the design gets *simpler*).
-- **V4** — `viewer.remove()` behavior on a context-lost viewer (throw
-  path is wrapped either way, but a leak here would matter to the rebuild
-  budget rationale).
+- **V1 ✓** — the renderer context acquisition tries `webgl2` first, then
+  `webgl`, then `experimental-webgl` (bundle: `["webgl2","webgl","experimental-webgl"]`
+  fallback chain; `getContext("webgl2",e))return!0`). The probe's getContext
+  order matches the SDK's own.
+- **V3 ✓** — `preserveDrawingBuffer:!1` is the renderer default (and the flag
+  defaults false even when options are passed). The §2.1 trap is real: pixel
+  reads outside the frame return transparent black on healthy canvases. Sample
+  stays corroboration-only. Design cannot be "simplified" back to pixels.
+- **V2 (upgraded, better than designed)** — the SDK exposes
+  `viewer.getCanvas()` (bundle: `getCanvas(){return this._container.canvas}`).
+  The probe/rebind should use `iv.viewer.getCanvas()` as the PRIMARY canvas
+  source (querySelector("canvas") demoted to fallback), eliminating the
+  first-canvas-in-DOM-order risk this checklist worried about. Build note.
+- **V4** — `viewer.remove()` runs a dispose chain (customRenderer →
+  customCameraControls → observer → componentController → navigator →
+  container). Throw-wrapping stands; no leak evidence either way.
 
 **Live-fire harness:** a `__gpChaos.killContext` hook (dev-host-gated like
 every chaos hook) that grabs the viewer canvas's context and calls
