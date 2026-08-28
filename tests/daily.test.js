@@ -397,6 +397,75 @@ test("inflightMatchesPool: pool drift discards the save", () => {
   assert.equal(inflightMatchesPool(null, 0xab3f), false);
 });
 
+/* ---------------- Fable release-review fixes (F1 / F3) ----------------
+ * These two fixes live in daily-ui.js boot/resume glue, which the repo does
+ * not execute under test (it pulls in Firebase, the viewer wrapper, sound…).
+ * Following the established pattern (ghost-duel-race.test.js tests the pure
+ * decisions the glue sequences), these lock the pure invariants the glue now
+ * depends on end-to-end. */
+
+test("F1: a HARD inflight discarded on pool-drift re-mints the fresh run on the HARD board", () => {
+  // The drift branch of resumeChallenge: a HARD mid-run save whose day's pool
+  // drifted. At boot, mode was set to "hard" FROM the inflight's board
+  // (daily-ui.js §boot: inflightState.run.hard ⇒ mode = "hard"); resolveInflight
+  // routed it to resume; the drift guard then discards it.
+  const inflight = parseInflight(
+    JSON.stringify(buildInflight(inflightRun("20260819", true), [1, 3, 4], 0xab3f)),
+    "20260819");
+  assert.equal(inflight.run.hard, true, "the save belongs to the hard board");
+  assert.equal(resolveInflight({ inflight, hasSavedResult: false }), "resume");
+  const mode = inflight.run.hard ? "hard" : "normal";   // boot's mode derivation
+  assert.equal(inflightMatchesPool(inflight, 0x0001), false, "pool drifted → discard");
+
+  // F1: the replacement run must carry the board's hard flag — not the stale
+  // boot-default normal `run` built while mode was still "normal". Before the
+  // fix the fresh path ran a 60s clock, re-persisted hard:false, and saved into
+  // the NORMAL result slot.
+  const fresh = newDailyRun("20260819", mode === "hard");
+  assert.equal(fresh.hard, true, "the fresh run is a hard-board run");
+  assert.equal(dailyRoundSeconds(fresh.hard), HARD_ROUND_SECONDS,
+    "so it runs the hard 30s clock, not the normal 60s one");
+  // …and any re-persist of that fresh run stays on the hard board.
+  assert.equal(buildInflight(fresh, [1], 1).run.hard, true);
+});
+
+test("F3: a solo boot clears a lingering slot on a 'discard' disposition; duel/exhibition never do",
+  () => {
+    // A crash landed after saveDailyResult but before clearInflight: the slot
+    // still holds a (hard-flagged) run while a same-board saved result now
+    // exists. resolveInflight → "discard"; daily-ui.js §boot must clear the byte
+    // on a solo boot so a hard leftover can't force the hard-board done view all
+    // day. Duel/exhibition boots never touch the slot (§5.1 rule 1).
+    const build = () => JSON.stringify(
+      buildInflight(inflightRun("20260819", true), [1, 3, 4], 1));
+
+    // Solo boot: the byte is cleared.
+    const solo = memStorage();
+    solo.setItem(DAILY_INFLIGHT_KEY, build());
+    const inflight = loadInflight(solo, "20260819");
+    assert.ok(inflight, "the slot is present before boot");
+    const disposition = resolveInflight({ inflight, hasSavedResult: true });
+    assert.equal(disposition, "discard");
+    const isDuel = false, isExhibition = false;
+    if (!isDuel && !isExhibition && disposition === "discard") clearInflight(solo);
+    assert.equal(solo.getItem(DAILY_INFLIGHT_KEY), null, "the leftover slot is gone");
+
+    // Duel boot: the same slot decision is skipped entirely — the byte survives
+    // for the later solo boot to resolve.
+    const duel = memStorage();
+    duel.setItem(DAILY_INFLIGHT_KEY, build());
+    const dIsDuel = true, dIsExhibition = false;
+    if (!dIsDuel && !dIsExhibition && disposition === "discard") clearInflight(duel);
+    assert.ok(loadInflight(duel, "20260819"), "a duel boot leaves the slot untouched");
+
+    // Exhibition boot: likewise untouched.
+    const exh = memStorage();
+    exh.setItem(DAILY_INFLIGHT_KEY, build());
+    const eIsDuel = false, eIsExhibition = true;
+    if (!eIsDuel && !eIsExhibition && disposition === "discard") clearInflight(exh);
+    assert.ok(loadInflight(exh, "20260819"), "an exhibition boot leaves the slot untouched");
+  });
+
 test("placesFromCursors: reconstructs the skip-adjusted play order exactly", () => {
   // A stand-in seeded order; entry i shown for a run is order[cursors[i] - 1].
   const order = [

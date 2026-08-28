@@ -1091,6 +1091,10 @@ function makeViewer() {
     surface: "player",
     container: "playerViewer",
     moveAllowed,
+    // F2: a §18 in-place rebuild swaps the raw SDK viewer, silently orphaning
+    // the live-write subscriptions below. Re-bind them against the fresh
+    // iv.viewer when the wrapper rebuilds (invoked once per rebuild).
+    onRebuilt: subscribeViewer,
     component: {
       cover: false,
       direction: moveAllowed,
@@ -1105,15 +1109,25 @@ function makeViewer() {
   // a removed viewer. Read `iv.viewer` fresh at every use site instead.
   // Construction failed: viewer_init is reported and every moveTo rejects,
   // so the existing "guess from the map" degradation path takes over.
-  if (!iv.viewer) return;
+  subscribeViewer();
+}
+
+// F2: bind live-write listeners to the CURRENT raw viewer. scheduleLiveWrite
+// and onViewerImage are stable named references, so a rebuild's re-subscription
+// against the fresh viewer replaces the dead handlers rather than duplicating.
+// A stub/failed viewer (no iv.viewer) degrades exactly as before — no listeners.
+function subscribeViewer() {
+  if (!iv || !iv.viewer) return;
   iv.viewer.on("pov", scheduleLiveWrite);
   iv.viewer.on("position", scheduleLiveWrite);
-  iv.viewer.on("image", (ev) => {
-    // Movement (when allowed) navigates to neighbor images; the TV panel
-    // follows this team's own imageId, independent of the other teams.
-    currentImageId = ev.image.id;
-    scheduleLiveWrite();
-  });
+  iv.viewer.on("image", onViewerImage);
+}
+
+function onViewerImage(ev) {
+  // Movement (when allowed) navigates to neighbor images; the TV panel
+  // follows this team's own imageId, independent of the other teams.
+  currentImageId = ev.image.id;
+  scheduleLiveWrite();
 }
 
 function destroyViewer() {

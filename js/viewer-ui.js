@@ -231,7 +231,7 @@ function stubViewer(surface, errorClass) {
   };
 }
 
-export function createViewer({ surface, container, component, moveAllowed, onRecovery }) {
+export function createViewer({ surface, container, component, moveAllowed, onRecovery, onRebuilt }) {
   const t0 = now();
   const c = chaos();
 
@@ -271,7 +271,7 @@ export function createViewer({ surface, container, component, moveAllowed, onRec
   }
 
   reportInit(surface, true, null, t0, supported, "");
-  const iv = instrument({ surface, container, component, viewer: raw, onRecovery });
+  const iv = instrument({ surface, container, component, viewer: raw, onRecovery, onRebuilt });
   iv.moveEnabled = moveAllowed === true;
   registerForChaos(iv);
   return iv;
@@ -296,7 +296,7 @@ function reportInit(surface, ok, errorClass, t0, webgl, rawMessage) {
  * The instrumented viewer
  * ================================================================ */
 
-function instrument({ surface, container, component, viewer: rawViewer, onRecovery }) {
+function instrument({ surface, container, component, viewer: rawViewer, onRecovery, onRebuilt }) {
   // `viewer` is a mutable binding, not a parameter: §18's in-place rebuild
   // replaces the raw SDK viewer BEHIND the stable `iv` façade (§3.1), so every
   // internal reference and every rebound on(...) handler follows the swap.
@@ -981,6 +981,14 @@ function instrument({ surface, container, component, viewer: rawViewer, onRecove
     viewer = newRaw;
     iv.viewer = newRaw;               // keep the façade property fresh (§3.1)
     bindViewerHandlers();             // re-register pov/fov/navigable/image
+    // F2 (Fable P2): the wrapper re-registers its OWN handlers above, but a page
+    // that subscribed to the raw viewer directly (host/player pose mirroring via
+    // iv.viewer.on(...)) lost those subscriptions when the raw viewer was swapped.
+    // Give the page a hook to re-bind its own listeners against the fresh
+    // iv.viewer — invoked exactly once per rebuild, after the new viewer is bound.
+    if (typeof onRebuilt === "function") {
+      try { onRebuilt(); } catch { /* a page callback must never break the wrapper */ }
+    }
     attachCanvas();                   // canvas is null until the resume settles (F5)
     desiredMove = iv.moveEnabled === true;  // a hard/frozen viewer comes back frozen
     applyMove();

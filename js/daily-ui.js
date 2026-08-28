@@ -1091,6 +1091,14 @@ async function resumeChallenge() {
         hard: !!held.run.hard, action: "discarded",
       });
       resumeState = null;
+      // F1 (Fable P1): the module-level `run` was built at boot with the
+      // then-current mode; a HARD-run drift discard reaches startChallenge's
+      // fresh path with `mode === "hard"` but a stale normal-flagged `run`
+      // (hard:false), so re-mint it for the effective mode BEFORE the fresh
+      // path uses it — mirroring startOver. Otherwise the fresh run runs the
+      // 30s-vs-60s clock wrong, re-persists hard:false, and clobbers the
+      // NORMAL result slot at save time.
+      run = newDailyRun(runKey, mode === "hard");
       toast("Couldn't restore your earlier rounds — starting today's five fresh.");
       await startChallenge();   // resumeState is null now → the fresh path
       return;
@@ -1333,6 +1341,15 @@ const inflightDisposition = resolveInflight({
 if (!isDuel && !isExhibition &&
     (inflightDisposition === "resume" || inflightDisposition === "finalize")) {
   resumeState = inflightState;
+} else if (!isDuel && !isExhibition && inflightDisposition === "discard") {
+  // F3 (Fable P3): a solo "discard" means a saved result already superseded
+  // this slot — a crash that landed after saveDailyResult but before
+  // clearInflight — or the slot was empty/stale. Either way the bytes must not
+  // linger: a hard-flagged leftover would otherwise force the hard-board done
+  // view at every boot for the rest of the day. Clear it through the same
+  // storage seam. Duel/exhibition boots must NEVER touch the slot (§5.1 rule
+  // 1), so they fall through here untouched.
+  clearInflight(localStorage);
 }
 
 renderIntro();

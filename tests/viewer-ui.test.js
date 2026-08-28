@@ -16,6 +16,7 @@
 //   G handled skip         → one imagery_load{skips:n}, one deduped issue
 import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { NAV_HINT_MAX_MS } from "../js/imagery.js";
 
 /* ================================================================
@@ -2099,3 +2100,75 @@ test("§18 stub viewer: never probes and never rebuilds", async () => {
   assert.equal(events("render_recovery").length, 0);
   iv.destroy();
 });
+
+/* ================================================================
+ * F2 (Fable release-review P2) — a §18 rebuild swaps the raw SDK viewer, which
+ * orphans any subscriptions a page bound directly (host/player pose mirroring
+ * via iv.viewer.on(...)). createViewer now takes an onRebuilt callback, fired
+ * once inside rebuild() after the new viewer is bound, so the page can re-bind.
+ * ================================================================ */
+
+test("F2: a rebuild fires onRebuilt exactly once, AFTER the new raw viewer is bound", async () => {
+  const seen = [];
+  let iv;
+  iv = viewerUi.createViewer({
+    surface: "daily", container: "dailyViewer", moveAllowed: true,
+    component: { cover: false, direction: true, sequence: true, keyboard: true },
+    onRebuilt: () => seen.push(iv.viewer),
+  });
+  const raw = iv.viewer;
+  const canvas = makeCanvas({ ctxLost: false });
+  await healthyAnchor(iv, raw, canvas, "anchor-1");
+  canvas._gl = makeFakeGl({ lost: true });    // the context dies
+  iv.__renderProbeTickForTests();             // dead → rebuild → onRebuilt
+  assert.equal(seen.length, 1, "onRebuilt fired exactly once");
+  assert.equal(mly.viewers.length, 2, "a fresh viewer was constructed");
+  assert.equal(seen[0], mly.viewers[1],
+    "onRebuilt observed the NEW raw viewer — iv.viewer was swapped before the callback");
+  assert.notEqual(seen[0], raw, "not the dead viewer");
+  iv.destroy();
+});
+
+test("F2: onRebuilt lets a page re-bind its own listeners to the fresh raw viewer", async () => {
+  // Mirrors host/player: a named handler subscribed to the RAW viewer, plus a
+  // subscribe() re-run from onRebuilt so a rebuild doesn't leave the page
+  // mirroring a dead viewer. The re-subscription must fire exactly once on the
+  // replacement (a stable named handler → replaces, never duplicates).
+  let hits = 0;
+  const onImage = () => { hits += 1; };
+  let iv;
+  const subscribe = () => { if (iv && iv.viewer) iv.viewer.on("image", onImage); };
+  iv = viewerUi.createViewer({
+    surface: "daily", container: "dailyViewer", moveAllowed: true,
+    component: { cover: false, direction: true, sequence: true, keyboard: true },
+    onRebuilt: subscribe,
+  });
+  subscribe();                                // the initial makeViewer() subscription
+  const raw = iv.viewer;
+  const canvas = makeCanvas({ ctxLost: false });
+  await healthyAnchor(iv, raw, canvas, "anchor-1");
+  raw.emit("image", { image: { id: "n1" } }); // the pre-rebuild viewer: fires once
+  assert.equal(hits, 1);
+  canvas._gl = makeFakeGl({ lost: true });
+  iv.__renderProbeTickForTests();             // dead → rebuild → onRebuilt re-subscribes
+  await flushMicro();
+  const fresh = iv.viewer;
+  assert.notEqual(fresh, raw, "the raw viewer was swapped");
+  fresh.emit("image", { image: { id: "n2" } });
+  assert.equal(hits, 2,
+    "the page handler is live on the rebuilt viewer and bound exactly once (no duplicate)");
+  iv.destroy();
+});
+
+test("F2: host & player glue wire onRebuilt to a subscribeViewer that re-binds pov/position/image",
+  () => {
+    for (const f of ["host-ui.js", "player-ui.js"]) {
+      const src = readFileSync(new URL(`../js/${f}`, import.meta.url), "utf8");
+      assert.match(src, /onRebuilt:\s*subscribeViewer/, `${f} passes onRebuilt: subscribeViewer`);
+      const sub = src.slice(src.indexOf("function subscribeViewer"));
+      assert.ok(sub.length > 0, `${f} defines subscribeViewer`);
+      assert.match(sub, /iv\.viewer\.on\("pov"/, `${f} subscribeViewer re-binds pov`);
+      assert.match(sub, /iv\.viewer\.on\("position"/, `${f} subscribeViewer re-binds position`);
+      assert.match(sub, /iv\.viewer\.on\("image"/, `${f} subscribeViewer re-binds image`);
+    }
+  });

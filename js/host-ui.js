@@ -580,6 +580,10 @@ function makeViewer() {
     surface: "host",
     container: "hostViewer",
     moveAllowed,
+    // F2: a §18 in-place rebuild swaps the raw SDK viewer, silently orphaning
+    // the pose-mirroring subscriptions below. Re-bind them against the fresh
+    // iv.viewer when the wrapper rebuilds (invoked once per rebuild).
+    onRebuilt: subscribeViewer,
     component: {
       cover: false,
       // "No moving" mode locks navigation but keeps look-around (spec §6).
@@ -596,16 +600,26 @@ function makeViewer() {
   // Construction failed (no WebGL, SDK blocked): viewer_init is already
   // reported and every moveTo rejects. Every `iv.viewer` guard below then
   // degrades exactly as it does when the viewer is gone.
-  if (!iv.viewer) return;
+  subscribeViewer();
+}
+
+// F2: bind pose-mirroring listeners to the CURRENT raw viewer. schedulePoseWrite
+// and onViewerImage are stable named references, so a rebuild's re-subscription
+// against the fresh viewer replaces the dead handlers rather than duplicating.
+// A stub/failed viewer (no iv.viewer) degrades exactly as before — no listeners.
+function subscribeViewer() {
+  if (!iv || !iv.viewer) return;
   iv.viewer.on("pov", schedulePoseWrite);
   iv.viewer.on("position", schedulePoseWrite);
-  iv.viewer.on("image", (ev) => {
-    if (room && room.round && ev.image.id !== room.round.imageId) {
-      room.round.imageId = ev.image.id;
-      push({ "round/imageId": ev.image.id });
-    }
-    schedulePoseWrite();
-  });
+  iv.viewer.on("image", onViewerImage);
+}
+
+function onViewerImage(ev) {
+  if (room && room.round && ev.image.id !== room.round.imageId) {
+    room.round.imageId = ev.image.id;
+    push({ "round/imageId": ev.image.id });
+  }
+  schedulePoseWrite();
 }
 
 function destroyViewer() {
