@@ -37,6 +37,13 @@ import {
   bestDailyDistance,
   loadDailyResult,
   saveDailyResult,
+  buildInflight,
+  inflightMatchesPool,
+  placesFromCursors,
+  resolveInflight,
+  loadInflight,
+  saveInflight,
+  clearInflight,
 } from "./daily.js";
 import {
   withUtm, dailyShareText, dailyChallengeUrl, emojiRow, distanceEmoji,
@@ -207,6 +214,16 @@ let peekPlacesCache = null;
 // they actually saw without recomputing. Reset on a hard-mode restart.
 const playedPlaces = [];
 
+// Mid-run persistence (docs/daily-persistence-spec.md). `cursors[i]` is the
+// sampler cursor after round i advanced; `inflightPoolCheck` is the day's
+// drift-guard hash, computed once per solo run before the first round;
+// `resumeState` is the validated inflight parse when boot routes to resume /
+// finalize (null otherwise). All three stay null/empty for duel/exhibition
+// runs — those never persist (§5.4).
+let cursors = [];
+let inflightPoolCheck = null;
+let resumeState = null;
+
 let iv = null;
 let guessMap = null;
 let guessMarker = null;
@@ -246,6 +263,11 @@ function resolveSavedRun(saved) {
 }
 
 async function startChallenge() {
+  // Mid-run persistence (§7): the calm intro's primary button carries the
+  // resume affordance when a valid mid-run save exists — dispatch to it here
+  // so the button wiring stays single. "Start over" clears resumeState first,
+  // so it falls through to the fresh path below.
+  if (resumeState) { await resumeChallenge(); return; }
   // R1: re-check the replay lock BEFORE anything async. A completed board for
   // this day+mode must never replay — not even when this tap raced the boot's
   // instant-verdict load, during which the intro/"Take the challenge" button
@@ -285,6 +307,13 @@ async function startChallenge() {
         vs_ghost: isDuel,
         streak: records.streak.count,
       });
+    }
+    // Mid-run persistence (§4): a solo run gets a drift-guard hash over the
+    // day's first DAILY_ROUNDS skip-free seeded ids, computed once from the
+    // in-memory pool (peekDayIds is cached, no network). Stashed for the
+    // per-lock-in saves. Duel/exhibition runs never persist (§5.4).
+    if (!isDuel && !isExhibition) {
+      inflightPoolCheck = poolCheck(await peekDayIds(runKey));
     }
     await startRound();
   } catch (e) {
@@ -520,6 +549,15 @@ function lockIn(auto = false) {
   // the done-screen recap can pair pins to places with no recompute (index i
   // aligns with run.rounds[i]).
   playedPlaces.push({ name: current.name, lat: current.lat, lng: current.lng });
+  // Mid-run persistence (§4): a solo run commits its progress at every
+  // lock-in (≤ DAILY_ROUNDS writes/day). The sampler cursor here is the
+  // post-advance position, so cursors.at(-1) is exactly where a resume
+  // rebuilds the sampler. Duel/exhibition runs never write (§5.4). A
+  // storage failure is swallowed — the run continues un-persisted.
+  if (!isDuel && !isExhibition) {
+    cursors.push(sampler.cursor);
+    saveInflight(localStorage, buildInflight(run, cursors, inflightPoolCheck));
+  }
   if (auto) {
     toast(guess
       ? "Time! Your pin was locked in."
@@ -616,6 +654,20 @@ function nextOrFinish() {
 
 /* ---------------- Done ---------------- */
 
+// The solo completion fold (docs/daily-persistence-spec.md §6): save the run
+// to its board slot and fold records/streak/PB. Shared by the live finishRun
+// path and the finalize-rescue boot path so a crash-at-the-finish run folds
+// identically. Returns the applyDailyResult result (records/streak/graceUsed/
+// pb). Does NOT saveRecords — the caller does that (finishRun folds duels
+// first). Does NOT touch the inflight slot — the caller sequences the clear.
+function foldDailyRecords(completedRun) {
+  saveDailyResult(localStorage, completedRun);
+  const applied = applyDailyResult(records, completedRun,
+    { day: runDayNum, key: runKey });
+  Object.assign(records, applied.records);
+  return applied;
+}
+
 async function finishRun() {
   stopTick();
   destroyViewer();
@@ -652,9 +704,7 @@ async function finishRun() {
   const aces = run.rounds.filter(
     (r) => typeof r.distanceKm === "number" && r.distanceKm < 1).length;
   if (plan.foldRecords) {
-    saveDailyResult(localStorage, run);
-    const applied = applyDailyResult(records, run, { day: runDayNum, key: runKey });
-    Object.assign(records, applied.records);
+    const applied = foldDailyRecords(run);
     streakCount = applied.streak;
     graceUsed = applied.graceUsed;
     pb = applied.pb;
@@ -666,6 +716,11 @@ async function finishRun() {
       markDuelResolved(runDayNum, mode);
     }
     saveRecords(localStorage, records);
+    // Mid-run persistence (§4/§6): clear the inflight slot only AFTER the save
+    // + records fold succeed, so a crash inside finishRun leaves a *complete*
+    // inflight that the finalize boot route can still rescue. Solo only —
+    // duel/exhibition runs never wrote the slot.
+    if (!isDuel && !isExhibition) clearInflight(localStorage);
   }
 
   // "Your Color Takes the Room": a notable run (a PB, an ACE, or the streak
@@ -993,8 +1048,156 @@ function startHardMode() {
   // fresh five, so tear it down and clear the captured play order.
   destroyRecap();
   playedPlaces.length = 0;
+  // Mid-run persistence: a hard restart is a fresh solo run — the normal run
+  // already cleared its slot at completion. Reset the in-flight bookkeeping so
+  // the hard run persists under its own cursors/pool-check (run.hard = true).
+  cursors = [];
+  inflightPoolCheck = null;
+  resumeState = null;
   destroyViewer();
   renderIntro();
+  startChallenge();
+}
+
+/* ================================================================
+ * Mid-run persistence — resume + finalize + start-over
+ * (docs/daily-persistence-spec.md §5.2/§6/§7). Glue only; every decision
+ * (validate, drift-guard, reconstruct places, route) is a pure daily.js /
+ * ghost.js call made at boot before any viewer exists.
+ * ================================================================ */
+
+// Resume tap (§5.2): confirm the day's pool still matches the save, restore
+// the run + sampler + play order, then re-enter the ordinary round flow. Does
+// NOT re-fire daily_challenge_started (it fired before the reload; the funnel
+// stays 1 started : 1 completed).
+async function resumeChallenge() {
+  $("btnDailyStart").disabled = true;
+  $("btnDStartOver").classList.add("hidden");
+  $("dIntroErr").textContent = "";
+  const held = resumeState;
+  try {
+    const pool = await loadPool();
+    const poolCheckNow = poolCheck(await peekDayIds(runKey));
+    const order = new PoolSampler(pool, dailySeed(held.run.key)).order;
+    const places = inflightMatchesPool(held, poolCheckNow)
+      ? placesFromCursors(order, held.cursors)
+      : null;
+    if (!places) {
+      // Pool drift, or a cursor beyond the (shrunk) order: the persisted
+      // indices can't be trusted. Discard and start today's five fresh.
+      clearInflight(localStorage);
+      track("daily_resumed", {
+        day_number: runDayNum, rounds_done: held.run.rounds.length,
+        hard: !!held.run.hard, action: "discarded",
+      });
+      resumeState = null;
+      toast("Couldn't restore your earlier rounds — starting today's five fresh.");
+      await startChallenge();   // resumeState is null now → the fresh path
+      return;
+    }
+    // Restore the run and the sampler at the last locked-in cursor; startRound
+    // re-derives and re-shows the image the player was on, with a full clock.
+    run = held.run;
+    mode = held.run.hard ? "hard" : "normal";
+    cursors = held.cursors.slice();
+    inflightPoolCheck = poolCheckNow;
+    sampler = new PoolSampler(pool, dailySeed(held.run.key), cursors[cursors.length - 1]);
+    playedPlaces.length = 0;
+    playedPlaces.push(...places);
+    const roundsDone = held.run.rounds.length;
+    resumeState = null;
+    track("daily_resumed", {
+      day_number: runDayNum, rounds_done: roundsDone,
+      hard: !!held.run.hard, action: "resume",
+    });
+    toast(`Picked up where you left off — round ${roundsDone + 1} of ${DAILY_ROUNDS}.`);
+    await startRound();
+  } catch (e) {
+    console.error(scrubErrorMessage(e));
+    // Any unexpected throw degrades to today's ordinary behavior (§8).
+    resumeState = held;
+    $("dIntroErr").textContent = "Couldn't load today's places — try again.";
+    $("btnDailyStart").disabled = false;
+    $("btnDStartOver").classList.remove("hidden");
+  }
+}
+
+// Finalize rescue (§6): a crash on the round-5 reveal (or inside finishRun
+// before the save) leaves a *complete* inflight and no saved result. Fold it
+// exactly as finishRun's solo path does — save, records/streak/PB, the
+// completed event — clear the slot, and render the full fresh-completion
+// celebration (they did finish it). Rule 5.1-2 (a saved result discards the
+// inflight) is what makes this fold un-repeatable across reloads.
+async function finalizeInflight() {
+  const held = resumeState;
+  try {
+    const completedRun = held.run;
+    mode = completedRun.hard ? "hard" : "normal";
+    run = completedRun;
+    const applied = foldDailyRecords(completedRun);
+    saveRecords(localStorage, records);
+    clearInflight(localStorage);
+    resumeState = null;
+    const aces = completedRun.rounds.filter(
+      (r) => typeof r.distanceKm === "number" && r.distanceKm < 1).length;
+    const notable = applied.pb || aces > 0 ||
+      (!completedRun.hard && applied.streak > 0 && applied.streak % 7 === 0);
+    playSound(notable ? "championFanfare" : "fanfare");
+    track("daily_challenge_completed", {
+      day_number: runDayNum,
+      score: completedRun.score,
+      rounds_played: guessedRounds(completedRun),
+      best_distance_km: bestDailyDistance(completedRun),
+      hard: !!completedRun.hard,
+      vs_ghost: false,
+      streak: completedRun.hard ? records.streak.count : applied.streak,
+      pb: applied.pb,
+      aces,
+    });
+    track("daily_resumed", {
+      day_number: runDayNum, rounds_done: DAILY_ROUNDS,
+      hard: !!completedRun.hard, action: "resume",
+    });
+    // Rebuild the play order for the recap (best-effort: a failure here just
+    // leaves the recap empty, never breaks the done screen).
+    try {
+      const pool = await loadPool();
+      const order = new PoolSampler(pool, dailySeed(completedRun.key)).order;
+      const places = placesFromCursors(order, held.cursors);
+      if (places) { playedPlaces.length = 0; playedPlaces.push(...places); }
+    } catch { /* recap just won't populate */ }
+    renderDone(completedRun, false, {
+      streakCount: applied.streak, graceUsed: applied.graceUsed,
+      pb: applied.pb, aces, notable,
+    });
+  } catch (e) {
+    console.error(scrubErrorMessage(e));
+    // A broken finalize must never strand the player at a dead intro (§8).
+    resumeState = null;
+    $("btnDailyStart").disabled = false;
+    $("btnDailyStart").textContent = mode === "hard"
+      ? "Play hard mode ⚡" : "Play Today's Daily";
+    showScreen("d-intro");
+  }
+}
+
+// "Start over" (§7): drop the mid-run save and play today's five fresh. This
+// is a real second start — the fresh path re-fires daily_challenge_started,
+// honest in the funnel.
+function startOver() {
+  const roundsDone = resumeState ? resumeState.run.rounds.length : 0;
+  const wasHard = resumeState ? !!resumeState.run.hard : (mode === "hard");
+  clearInflight(localStorage);
+  track("daily_resumed", {
+    day_number: runDayNum, rounds_done: roundsDone,
+    hard: wasHard, action: "restart",
+  });
+  resumeState = null;
+  $("btnDStartOver").classList.add("hidden");
+  // Reset to a fresh run for the resumed board and play it.
+  run = newDailyRun(runKey, mode === "hard");
+  cursors = [];
+  inflightPoolCheck = null;
   startChallenge();
 }
 
@@ -1023,6 +1226,19 @@ function renderIntro() {
     if (rules) rules.classList.remove("hidden");
     $("btnDailyStart").textContent = mode === "hard"
       ? "Play hard mode ⚡" : "Play Today's Daily";
+  }
+
+  // Mid-run persistence (§7): a resume intro relabels the primary button as
+  // the resume affordance (the label IS the indicator) and reveals the ghost
+  // "Start over". The round number comes from the save, not the (still empty)
+  // run object. Never on a duel (resumeState is null for duel/exhibition).
+  if (resumeState) {
+    const roundsDone = resumeState.run.rounds.length;
+    $("btnDailyStart").textContent =
+      `Resume — round ${roundsDone + 1} of ${DAILY_ROUNDS}`;
+    $("btnDStartOver").classList.remove("hidden");
+  } else {
+    $("btnDStartOver").classList.add("hidden");
   }
 
   // Records line (G1/G8) — streak + PB, normal board on a normal intro.
@@ -1070,6 +1286,7 @@ $("btnDLockIn").addEventListener("click", () => lockIn(false));
 $("btnDNext").addEventListener("click", nextOrFinish);
 $("btnDHardStart").addEventListener("click", startHardMode);
 $("btnDHardDone").addEventListener("click", startHardMode);
+$("btnDStartOver").addEventListener("click", startOver);
 // §6: the done-screen "How to play" link.
 $("dHowto").addEventListener("click", () =>
   track("howto_opened", { source: "gameover" }));
@@ -1090,10 +1307,35 @@ if (ghostLinkReason === "malformed" || ghostLinkReason === "version" ||
   if (seedHard) Object.assign(records, seedBestFromResult(records, seedHard, todayNum, true));
 }
 
-renderIntro();
+// Mid-run persistence (docs/daily-persistence-spec.md §5): read the inflight
+// slot once, at boot, before any viewer exists. A solo mid-run save may belong
+// to the HARD board (hard is entered only after the normal run completed, §4),
+// so restore that board BEFORE reading the replay lock — otherwise the still-
+// present normal result would shadow a legitimately in-flight hard run. Duel/
+// exhibition runs never consult a solo save (§5.4) and must not destroy it
+// (§5.1 rule 1): a usable duel link is routed by dailyEntryRoute, which
+// outranks the slot and leaves it untouched.
+const inflightState = loadInflight(localStorage, todayKey);
+if (!isDuel && !isExhibition && inflightState && inflightState.run.hard) {
+  mode = "hard";
+}
 
-// Replay lock: a saved run for THIS run's mode/day already exists.
+// Replay lock: a completed run for the EFFECTIVE board (normal, or hard when a
+// hard save is in flight) already exists.
 const savedForRun = savedResultForRun();
+
+// resolveInflight arbitrates the slot against that same-board saved result: a
+// saved result discards the slot — the double-fold guard that keeps the
+// finalize fold un-repeatable.
+const inflightDisposition = resolveInflight({
+  inflight: inflightState, hasSavedResult: !!savedForRun,
+});
+if (!isDuel && !isExhibition &&
+    (inflightDisposition === "resume" || inflightDisposition === "finalize")) {
+  resumeState = inflightState;
+}
+
+renderIntro();
 
 if (ghostLinkReason === "malformed") {
   toast("That challenge link got damaged in transit — today's Daily is right here.");
@@ -1105,6 +1347,9 @@ if (ghostLinkReason === "malformed") {
 
 const bootRoute = dailyEntryRoute({
   hasSaved: !!savedForRun, isExhibition, isDuel, ghostOk: !!(ghost && ghost.ok),
+  inflight: resumeState
+    ? (inflightDisposition === "finalize" ? "complete" : "partial")
+    : null,
 });
 if (bootRoute === "instant-verdict") {
   // C3 (spec §3.5.2 case 5): the recipient already completed this board today,
@@ -1120,6 +1365,16 @@ if (bootRoute === "instant-verdict") {
 } else if (bootRoute === "done") {
   // Already played this board today, no usable duel — the plain done screen.
   resolveSavedRun(savedForRun);
+} else if (bootRoute === "finalize") {
+  // Mid-run persistence (§6): a complete inflight with no saved result — a
+  // crash at the finish line. Fold it and show the full done screen. Neutralize
+  // the intro button while the async fold runs (like the instant-verdict path).
+  showScreen("d-intro");
+  $("btnDailyStart").disabled = true;
+  $("btnDailyStart").textContent = "Finishing your run…";
+  finalizeInflight();
 } else {
+  // "resume" and "play" both land on the intro; the resume affordance is the
+  // relabeled primary button + "Start over" (rendered by renderIntro above).
   showScreen("d-intro");
 }

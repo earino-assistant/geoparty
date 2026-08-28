@@ -149,6 +149,11 @@ one.
   either — the Daily win celebration has no `winLine` (solo, no team name
   to interpolate), so its headline is only ever the existing static
   done-title copy
+- Daily resume intro (mid-run persistence, `docs/daily-persistence-spec.md`
+  §7): **nothing to mask, no selector change**. The resume affordance is only
+  a round index (`#btnDailyStart` relabelled "Resume — round N of 5") and a
+  score (`#dIntroRecords`, already unmasked above); `#btnDStartOver` is static
+  copy. No team name, room code, place name, or map renders on this surface
 
 ### Cross-page
 - `.leaflet-tooltip` — Leaflet pin labels carry team names on reveal maps

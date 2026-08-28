@@ -19,6 +19,7 @@ import {
   parseGhostFragment,
   ghostFragment,
   appendGhostFragment,
+  dailyEntryRoute,
 } from "../js/ghost.js";
 import { mulberry32, hashSeed } from "../js/pool.js";
 import {
@@ -302,4 +303,55 @@ test("runHasPins: true only when at least one round has a usable v2 pin", () => 
   assert.equal(runHasPins(null), false);
   assert.equal(runHasPins({}), false);
   assert.equal(runHasPins({ rounds: [] }), false);
+});
+
+/* ---------------- dailyEntryRoute: mid-run persistence routing (spec §5.1) -- */
+
+test("dailyEntryRoute: a partial inflight routes to resume", () => {
+  assert.equal(dailyEntryRoute({
+    hasSaved: false, isExhibition: false, isDuel: false, ghostOk: false,
+    inflight: "partial",
+  }), "resume");
+});
+
+test("dailyEntryRoute: a complete inflight routes to finalize", () => {
+  assert.equal(dailyEntryRoute({
+    hasSaved: false, isExhibition: false, isDuel: false, ghostOk: false,
+    inflight: "complete",
+  }), "finalize");
+});
+
+test("dailyEntryRoute: a live duel link outranks a mid-run save", () => {
+  // A usable ghost link is explicit intent: the duel plays, the slot is left
+  // untouched (rule 1) — never resume/finalize.
+  assert.equal(dailyEntryRoute({
+    hasSaved: false, isExhibition: false, isDuel: true, ghostOk: true,
+    inflight: "partial",
+  }), "play");
+  assert.equal(dailyEntryRoute({
+    hasSaved: false, isExhibition: false, isDuel: true, ghostOk: true,
+    inflight: "complete",
+  }), "play");
+  // A completed board still routes the duel to its verdict, slot discarded.
+  assert.equal(dailyEntryRoute({
+    hasSaved: true, isExhibition: false, isDuel: true, ghostOk: true,
+    inflight: "partial",
+  }), "instant-verdict");
+});
+
+test("dailyEntryRoute: a saved result outranks a stale inflight", () => {
+  // A completed board for this day+mode is terminal and discards the slot
+  // (rule 2, the double-fold guard) — done, not finalize/resume.
+  assert.equal(dailyEntryRoute({
+    hasSaved: true, isExhibition: false, isDuel: false, ghostOk: false,
+    inflight: "complete",
+  }), "done");
+  assert.equal(dailyEntryRoute({
+    hasSaved: true, isExhibition: false, isDuel: false, ghostOk: false,
+    inflight: "partial",
+  }), "done");
+  // No inflight argument at all keeps the pre-persistence behavior intact.
+  assert.equal(dailyEntryRoute({
+    hasSaved: false, isExhibition: false, isDuel: false, ghostOk: false,
+  }), "play");
 });

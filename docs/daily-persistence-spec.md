@@ -1,10 +1,11 @@
 # Daily mid-run persistence — resume at round N after a reload
 
-> **STATUS: PROPOSED (2026-08-28) — design only, unimplemented.**
-> Implement **after** the iOS blackout render-recovery build
-> (docs/ios-blackout-review.md §18) lands — this design layers on top of it
-> and touches none of the same seams (§9). Positions are taken, not offered
-> as menus; the two genuinely owner-level calls are isolated in §12.
+> **STATUS: SHIPPED (2026-08-28) — implemented on top of the landed iOS
+> blackout render-recovery build (docs/ios-blackout-review.md §18, commit
+> 416c439), which it layers on and shares no seams with (§9).** Owner calls
+> §12.1 (pins ride inside the persisted run) and §12.2 (one-tap resume, not
+> silent auto-resume) were both settled 2026-08-28 in favor of this spec's
+> recommendation. The design below is preserved as the implemented contract.
 
 Field incident, 2026-08-28: an iOS player hit a black canvas at Daily
 round 3, reloaded in frustration, and lost rounds 1–2 — a reload restarts

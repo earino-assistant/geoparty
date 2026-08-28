@@ -339,6 +339,28 @@ test("sanitizeEvent: daily_recap_engaged — aggregates only, no place/coordinat
     { day_number: 2, source: "swipe", vs_ghost: false, hard: true });
 });
 
+test("sanitizeEvent: daily_resumed passes the sanitizer with aggregate properties only", () => {
+  const out = sanitizeEvent("daily_resumed", {
+    day_number: 37, rounds_done: 3, hard: false, action: "resume",
+    // No mid-run payload byte may ride: pins, cursors, coordinates, ids.
+    lat: 35.01, lng: 135.77, cursors: [1, 3, 4], poolCheck: 0xab3f,
+    image_id: "abc", place_name: "Kyoto, Japan", guess: { lat: 1 },
+  });
+  assert.deepEqual(out.props,
+    { day_number: 37, rounds_done: 3, hard: false, action: "resume" });
+  // The restart / discarded / finalize variants carry the same shape; flags
+  // strictly typed, rounds_done a strict int (0 when unparseable).
+  const restart = sanitizeEvent("daily_resumed", {
+    day_number: 2, rounds_done: 0, hard: true, action: "restart",
+  });
+  assert.deepEqual(restart.props,
+    { day_number: 2, rounds_done: 0, hard: true, action: "restart" });
+  const finalize = sanitizeEvent("daily_resumed", {
+    day_number: 5, rounds_done: 5.9, hard: false, action: "resume",
+  });
+  assert.equal(finalize.props.rounds_done, 6);   // int coercion
+});
+
 test("sanitizeEvent: party_recap_engaged — aggregates only, no place/coordinate/team", () => {
   const out = sanitizeEvent("party_recap_engaged", {
     room: "ABCDEF", mode: "h2h", surface: "player", rounds_shown: 5, source: "swipe",

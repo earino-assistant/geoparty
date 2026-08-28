@@ -163,9 +163,11 @@ export function bestDailyDistance(run) {
 
 /* ================================================================
  * Replay lock: one scored run per day per device. A single slot —
- * yesterday's result is superseded, so nothing accumulates. (A
- * mid-run refresh restarts the run; the locations are deterministic
- * anyway, and devtools-grade honesty is not a threat model we carry.)
+ * yesterday's result is superseded, so nothing accumulates. (A mid-run
+ * refresh RESUMES the run from the last locked-in round, via the inflight
+ * slot below; the locations are deterministic anyway, and devtools-grade
+ * honesty — reloading for a fresh clock on a scouted round — is not a
+ * threat model we carry, docs/daily-persistence-spec.md §4.)
  * ================================================================ */
 
 export const DAILY_RESULT_KEY = "geoparty_daily_result";
@@ -199,4 +201,125 @@ export function saveDailyResult(storage, run, storageKey) {
   try {
     storage.setItem(target, JSON.stringify(run));
   } catch { /* private mode: today just won't be remembered */ }
+}
+
+/* ================================================================
+ * Mid-run persistence — resume at round N after a reload
+ * (docs/daily-persistence-spec.md). One localStorage slot holds the
+ * in-flight solo run so a reload / tab-kill / phone-lock resumes at the
+ * last locked-in round instead of restarting from round 1. All decision
+ * logic here is pure (§3); the browser glue lives in daily-ui.js. Nothing
+ * in this slot is ever transmitted — it exists only to rebuild local
+ * state on the same device.
+ * ================================================================ */
+
+export const DAILY_INFLIGHT_KEY = "geoparty_daily_inflight";
+// Bump on ANY shape change — a mismatched version is discarded, never
+// migrated (a mid-run save is worth at most DAILY_ROUNDS - 1 rounds, §8).
+export const INFLIGHT_VERSION = 1;
+
+// The persisted payload (§2). `run` is the recordDailyRound object verbatim
+// (same bytes that land in geoparty_daily_result at completion, pins
+// included); `cursors[i]` is the sampler cursor AFTER round i advanced, which
+// encodes both the resume position (last element) and — via order[cursors[i]
+// - 1] — the exact truth each round showed; `poolCheck` is ghost.js's 16-bit
+// fold over the day's first DAILY_ROUNDS skip-free ids (a hash, never an id),
+// the drift guard applied at resume time (§5.3).
+export function buildInflight(run, cursors, poolCheck) {
+  return {
+    v: INFLIGHT_VERSION,
+    poolCheck,
+    cursors: cursors.slice(),
+    run,
+  };
+}
+
+// Total validator: raw JSON string -> { run, cursors, poolCheck, complete }
+// or null. Never throws. Discards anything stale, tampered, or from another
+// day so broken persistence can only ever degrade to a fresh run (§8).
+export function parseInflight(raw, todayKey) {
+  try {
+    const p = JSON.parse(raw);
+    if (!p || p.v !== INFLIGHT_VERSION) return null;
+    const run = p.run;
+    // The loadDailyResult structural checks, plus day-scope: yesterday's
+    // half-run indexed yesterday's seed order and must never restore.
+    if (!run || run.key !== todayKey ||
+        typeof run.score !== "number" || !Array.isArray(run.rounds)) return null;
+    const n = run.rounds.length;
+    if (n < 1 || n > DAILY_ROUNDS) return null;
+    // Score integrity: every round carries the numeric aggregates the recap
+    // and the completed-event read.
+    for (const r of run.rounds) {
+      if (!r || typeof r.points !== "number" ||
+          typeof r.distancePoints !== "number" ||
+          typeof r.timeBonus !== "number") return null;
+    }
+    // cursors: strictly increasing positive ints, one per played round.
+    const cursors = p.cursors;
+    if (!Array.isArray(cursors) || cursors.length !== n) return null;
+    let prev = 0;
+    for (const c of cursors) {
+      if (!Number.isInteger(c) || c <= prev) return null;
+      prev = c;
+    }
+    return { run, cursors, poolCheck: p.poolCheck, complete: n >= DAILY_ROUNDS };
+  } catch { return null; }
+}
+
+// Pool-drift guard (§5.3), applied once the day's ids are loaded at resume
+// time: if the pool file redeployed mid-day the seeded order reshuffles and
+// the persisted cursors point at different entries. poolCheckNow is ghost.js
+// poolCheck over the re-derived day ids.
+export function inflightMatchesPool(inflight, poolCheckNow) {
+  return !!inflight && inflight.poolCheck === poolCheckNow;
+}
+
+// Rebuild playedPlaces (the truths actually shown, skip-adjusted) from the
+// seeded `order` array + the persisted cursors: entry i is order[cursors[i]
+// - 1]. Returns null if any cursor exceeds the order (pool shrank; the caller
+// discards — the poolCheck guard normally catches this first). Only name +
+// coords are read; no image id or user text is touched.
+export function placesFromCursors(order, cursors) {
+  const places = [];
+  for (const c of cursors) {
+    const e = order[c - 1];
+    if (!e) return null;
+    places.push({ name: e.name, lat: e.lat, lng: e.lng });
+  }
+  return places;
+}
+
+// Boot arbitration for the inflight SLOT against a completed saved result for
+// the same day+mode (§5.1 rule 2, §6). A saved result discards the inflight —
+// the double-fold guard that makes the finalize fold un-repeatable: a crash
+// after saveDailyResult but before clearInflight must not re-fold the streak.
+export function resolveInflight({ inflight, hasSavedResult }) {
+  if (!inflight) return "discard";
+  if (hasSavedResult) return "discard";
+  return inflight.complete ? "finalize" : "resume";
+}
+
+// Thin storage glue (house style: try/catch, degrade to null/no-op). A stale
+// or corrupt slot is removed on read so it can't linger (§4/§8); a save that
+// hits quota / private mode is swallowed (the run continues un-persisted).
+export function loadInflight(storage, todayKey) {
+  try {
+    const parsed = parseInflight(storage.getItem(DAILY_INFLIGHT_KEY), todayKey);
+    if (!parsed) {
+      try { storage.removeItem(DAILY_INFLIGHT_KEY); } catch { /* ignore */ }
+      return null;
+    }
+    return parsed;
+  } catch { return null; }
+}
+
+export function saveInflight(storage, payload) {
+  try {
+    storage.setItem(DAILY_INFLIGHT_KEY, JSON.stringify(payload));
+  } catch { /* quota / private mode: run continues un-persisted */ }
+}
+
+export function clearInflight(storage) {
+  try { storage.removeItem(DAILY_INFLIGHT_KEY); } catch { /* swallow */ }
 }

@@ -380,6 +380,16 @@ export const EVENT_SCHEMA = Object.freeze({
   daily_recap_engaged: {
     day_number: "int", source: "string", vs_ghost: "bool", hard: "bool",
   },
+  // Daily mid-run persistence (docs/daily-persistence-spec.md §10). Fired at
+  // the moment of choice on a device that had saved mid-run state:
+  // action ∈ "resume" (continued at round rounds_done+1, incl. the 5-round
+  // finalize rescue) | "restart" ("Start over" chosen) | "discarded" (state
+  // was invalid/drifted and a fresh run started). rounds_done is how many
+  // rounds the save held (0 when unparseable). No coordinate, pin, image id,
+  // or payload byte rides — aggregates only.
+  daily_resumed: {
+    day_number: "int", rounds_done: "int", hard: "bool", action: "string",
+  },
   // Party game-over "Where were the places" recap (docs/party-recap-spec.md).
   // Fired at most ONCE per game-over render, when the recap is actually
   // engaged — a carousel card scrolled. surface: "host" | "player" (the TV

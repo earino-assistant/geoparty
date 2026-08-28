@@ -277,10 +277,24 @@ export function duelVerdict(yourPoints, ghostPoints) {
 // run for THIS run's day+mode already exists. Identical logic at both sites is
 // the guarantee: the tap re-checks and gets the same answer the boot did, so
 // it resolves to the verdict / plain done instead of starting a fresh replay.
-export function dailyEntryRoute({ hasSaved, isExhibition, isDuel, ghostOk }) {
+//
+// `inflight` (docs/daily-persistence-spec.md §5.1) is the validated mid-run
+// save's status: null | "partial" | "complete". Precedence, top wins:
+//   1. A completed board for this day+mode is terminal — verdict or plain
+//      done — and discards the inflight (rule 2, the double-fold guard).
+//   2. A usable ghost link is explicit intent: the duel plays and the inflight
+//      slot is left untouched for a later boot (rule 1).
+//   3/4. Otherwise the mid-run save decides: complete → finalize (§6),
+//      partial → resume (§7).
+// The `inflight` argument defaults to null so existing callers are unchanged.
+export function dailyEntryRoute({ hasSaved, isExhibition, isDuel, ghostOk,
+                                  inflight = null }) {
   if (hasSaved && !isExhibition) {
     return isDuel && ghostOk ? "instant-verdict" : "done";
   }
+  if (isDuel && ghostOk) return "play";
+  if (inflight === "complete") return "finalize";
+  if (inflight === "partial") return "resume";
   return "play";
 }
 
