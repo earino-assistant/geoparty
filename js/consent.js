@@ -171,15 +171,26 @@ function ensureBanner() {
   // headline and tightening are adopted and the replay + diagnostics clause
   // is kept in substance. The timing and the layout moved; the promise did
   // not (see PRIVACY.md).
+  //
+  // REVISED 2026-08-28 by owner decision
+  // (/opt/data/notes/replay-privacy-decision-2026-08-28.md, GeoParty only).
+  // The old wording promised the street view and maps "are blanked out" and
+  // that we never see "your guesses". Both stopped being true when gameplay
+  // was unmasked in replay (`blockSelector` / `captureCanvas` in
+  // js/analytics.js), so the promise is restated rather than softened: the
+  // recording now shows the game content, and the "never" list is narrowed
+  // to what is actually still never captured — identity. Whatever this
+  // banner says must remain literally true of the config; if masking changes
+  // again, this string changes in the same commit.
   const text = document.createElement("p");
   const lead = document.createElement("strong");
   lead.textContent = "\u{1F30D} Share anonymous play stats?";
   text.append(
     lead,
     " Scores, distances and modes, plus technical diagnostics and an ",
-    "anonymised replay of the menus and score screens (the street view ",
-    "and maps are blanked out), so we can fix broken imagery. Never your ",
-    "guesses, your names, or anything you type. EU-hosted, change anytime.",
+    "anonymised replay of what the game showed you — maps and street view ",
+    "included — so we can fix broken imagery. Never your name, your room ",
+    "code, or anything you type. EU-hosted, change anytime.",
   );
   const status = document.createElement("span");
   status.className = "consent-status";

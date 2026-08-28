@@ -2,6 +2,7 @@
 // and the gated tracker (PostHog must not load before opt-in).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   CONSENT_KEY,
   CONSENT_ACCEPTED,
@@ -1440,6 +1441,40 @@ test("init options: replay masking is configured and stays mutable", () => {
   assert.equal(POSTHOG_INIT_OPTIONS.enable_recording_console_log, true);
   assert.equal(Object.isExtensible(r), true);
   assert.equal(Object.isExtensible(POSTHOG_INIT_OPTIONS.capture_exceptions), true);
+});
+
+// The consent banner is a public promise, and js/consent.js is DOM glue with
+// no unit-testable seam, so guard the one property that actually matters: the
+// banner text must never claim a masking posture the config does not have.
+// Owner decision 2026-08-28 unmasked gameplay, which falsified the old
+// "blanked out" / "never your guesses" wording.
+test("consent banner copy stays literally true of the replay config", () => {
+  const src = readFileSync(new URL("../js/consent.js", import.meta.url), "utf8");
+  // Only the banner's own append() call, not the surrounding comments —
+  // otherwise the rationale explaining the change would trip its own test.
+  const start = src.indexOf("lead.textContent");
+  const copy = src.slice(start, src.indexOf(");", start));
+  const r = POSTHOG_INIT_OPTIONS.session_recording;
+
+  const claimsBlanked = /blanked out|are blocked|never recorded/i.test(copy);
+  const gameplayVisible =
+    !r.blockSelector.includes(".leaflet-container") || r.captureCanvas?.recordCanvas;
+  assert.ok(
+    !(claimsBlanked && gameplayVisible),
+    "banner promises blanking that the config no longer does",
+  );
+  // Recording the pano and the maps has to be disclosed, not merely not-denied.
+  if (r.captureCanvas?.recordCanvas) {
+    assert.ok(/street view/i.test(copy), "canvas capture is on but undisclosed");
+    assert.ok(/maps/i.test(copy), "maps are recorded but undisclosed");
+    assert.ok(
+      !/Never your guesses/i.test(copy),
+      "a guess is visible in the recording; the banner may not deny it",
+    );
+  }
+  // Identity is still never captured, and the banner still says so.
+  assert.equal(r.maskAllInputs, true);
+  assert.ok(/anything you type/i.test(copy), "the input-masking promise is load-bearing");
 });
 
 test("init options: exception + web-vitals autocapture are on, console errors off", () => {
