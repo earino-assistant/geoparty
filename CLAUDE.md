@@ -59,11 +59,16 @@ change:
   page module.** Go through `createViewer()` / `iv.moveTo(id, purpose)` /
   `loadRoundImage()` in `js/viewer-ui.js`, or the failure becomes invisible
   again. Decision logic belongs in `js/imagery.js` (pure, tested).
-- **Session replay masking is a ship-blocker, not a follow-up.** Any new
-  screen that renders a team name, a room code or a place name needs
-  `data-ph-mask`; any new map needs to fall under `blockSelector` (a tile
-  URL is a coordinate). Update `docs/replay-mask-checklist.md` in the same
-  change.
+- **Session replay masking of IDENTITY is a ship-blocker, not a
+  follow-up.** Any new screen that renders a team name, a room code or a
+  place name needs `data-ph-mask`. Maps no longer need `blockSelector`
+  coverage: per the owner decision of 2026-08-28
+  (`/opt/data/notes/replay-privacy-decision-2026-08-28.md`, GeoParty only),
+  gameplay — the guess map, the reveal map and the pano — is deliberately
+  VISIBLE in recordings so imagery bugs stay debuggable. Keep
+  `.leaflet-tooltip` masked (pin labels carry team names), and use
+  `data-ph-block` only for something that must not be recorded at all.
+  Update `docs/replay-mask-checklist.md` in the same change.
 - **Nothing derived from a user's guess may be sent, hashed or otherwise.**
   Pool entries travel as the opaque `poolDiagId` only — never a raw
   Mapillary image id, never a coordinate. This stays the default rule.

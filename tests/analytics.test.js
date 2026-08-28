@@ -1432,11 +1432,23 @@ test("one-shot init options: memory persistence, no replay, no autocapture", () 
 test("init options: replay masking is configured and stays mutable", () => {
   const r = POSTHOG_INIT_OPTIONS.session_recording;
   assert.equal(r.maskAllInputs, true);
-  assert.equal(r.captureCanvas, false, "street pixels are never recorded");
   assert.equal(r.recordHeaders, false);
   assert.equal(r.recordBody, false);
   assert.ok(r.maskTextSelector.includes("[data-ph-mask]"));
-  assert.ok(r.blockSelector.includes(".leaflet-container"), "map tiles are coordinates");
+  // Owner decision 2026-08-28: gameplay is VISIBLE in replay so imagery bugs
+  // stay debuggable. Maps are no longer blocked...
+  assert.ok(!r.blockSelector.includes(".leaflet-container"), "maps are gameplay, not identity");
+  assert.equal(r.blockSelector, "[data-ph-block]", "only an explicit opt-out blocks");
+  // ...and the pano canvas is recorded. The shape matters: posthog-js reads
+  // captureCanvas.recordCanvas, so a bare `true` would be a silent no-op.
+  assert.equal(typeof r.captureCanvas, "object", "the boolean form is a no-op in posthog-js");
+  assert.equal(r.captureCanvas.recordCanvas, true, "the WebGL pano is recorded");
+  assert.ok(r.captureCanvas.canvasFps > 0 && r.captureCanvas.canvasFps <= 12);
+  assert.equal(Object.isExtensible(r.captureCanvas), true);
+  // But identity masking inside those now-visible maps is untouched: the
+  // Leaflet pin labels carry team names.
+  assert.ok(r.maskTextSelector.includes(".leaflet-tooltip"), "pin labels carry team names");
+  assert.equal(r.maskAllInputs, true);
   assert.equal(typeof r.maskCapturedNetworkRequestFn, "function");
   assert.equal(POSTHOG_INIT_OPTIONS.enable_recording_console_log, true);
   assert.equal(Object.isExtensible(r), true);
