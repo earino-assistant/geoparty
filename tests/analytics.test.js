@@ -999,6 +999,62 @@ test("sanitizeEvent: edge_recovery drops unknown/malformed props, keeps a real 0
   assert.ok(!("spatial_after" in junk.props));
 });
 
+/* ---- §18 render-death probe (docs/ios-blackout-review.md) ---- */
+
+test("sanitizeEvent: pano_session.render_dead / .partial are strict bools, absent-when-false", () => {
+  const flagged = sanitizeEvent("pano_session", {
+    surface: "daily", round_number: 3, render_dead: true, partial: true,
+  });
+  assert.equal(flagged.props.render_dead, true);
+  assert.equal(flagged.props.partial, true);
+  // Non-boolean junk is stripped, never coerced.
+  const junk = sanitizeEvent("pano_session", {
+    surface: "daily", round_number: 3, render_dead: "yes", partial: 1,
+  });
+  assert.ok(!("render_dead" in junk.props));
+  assert.ok(!("partial" in junk.props));
+});
+
+test("sanitizeEvent: render_probe round-trips its aggregate shape, strips coordinate junk", () => {
+  const out = sanitizeEvent("render_probe", {
+    surface: "daily", round_number: 3, verdict: "dead", ctx_lost: true,
+    canary_ok: false, sample: "blank", since_load_ms: 1500,
+    net_type: "4g", online: true,
+    // coordinate-shaped and identity junk must never survive.
+    lat: 48.85, lng: 2.35, guess: { lat: 1 }, team_name: "The Atlas Cats",
+    image_id: "1263588815098567",
+  });
+  assert.deepEqual(out.props, {
+    surface: "daily", round_number: 3, verdict: "dead", ctx_lost: true,
+    canary_ok: false, sample: "blank", since_load_ms: 1500,
+    net_type: "4g", online: true,
+  });
+});
+
+test("sanitizeEvent: render_probe drops absent optional signals (ctx_lost/canary_ok)", () => {
+  // A "suspect" verdict whose canary never ran and whose ctxLost was unreadable
+  // omits both — the schema keeps only strictly-boolean values.
+  const out = sanitizeEvent("render_probe", {
+    surface: "daily", round_number: 2, verdict: "suspect", sample: "unreadable",
+    since_load_ms: 5000, net_type: "3g", online: true,
+  });
+  assert.ok(!("ctx_lost" in out.props));
+  assert.ok(!("canary_ok" in out.props));
+  assert.equal(out.props.verdict, "suspect");
+});
+
+test("sanitizeEvent: render_recovery round-trips, strips a smuggled coordinate", () => {
+  const out = sanitizeEvent("render_recovery", {
+    surface: "daily", round_number: 3, attempt: 1, trigger: "context_lost",
+    result: "recovered", duration_ms: 2100, net_type: "4g", online: true,
+    lat: 48.85, lng: 2.35, guess: "x", device: "iphone", image_id: "1263588815098567",
+  });
+  assert.deepEqual(out.props, {
+    surface: "daily", round_number: 3, attempt: 1, trigger: "context_lost",
+    result: "recovered", duration_ms: 2100, net_type: "4g", online: true,
+  });
+});
+
 test("sanitizeEvent: imagery_report carries the ref code and the consent path", () => {
   const out = sanitizeEvent("imagery_report", {
     surface: "player", ref_code: "GP-4K7QX2", error_class: "image_dead",

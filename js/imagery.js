@@ -32,6 +32,7 @@ export const ERROR_CLASSES = Object.freeze([
   "viewer_init",
   "webgl_unavailable",
   "webgl_context_lost",
+  "render_dead",
   "gesture_blocked",
   "reanchor_bounce",
   "cancelled",
@@ -49,6 +50,9 @@ export const HARD_FAILURE_CLASSES = Object.freeze([
   "http_auth",
   "webgl_unavailable",
   "webgl_context_lost",
+  // §18: a render-death probe verdict means the player saw a black pano behind
+  // a live HUD — a broken game (§9.1 "failed"), same tier as a lost context.
+  "render_dead",
   "viewer_init",
 ]);
 
@@ -439,6 +443,10 @@ export function createPanoSession(opts) {
     // Issue #2 Phase 2: count of setFilter() recovery attempts this round
     // (0..EDGE_RECOVERY_MAX_ATTEMPTS). Reported only when > 0 (§ below).
     edge_recoveries: 0,
+    // §18 render-death probe (docs/ios-blackout-review.md): latched true once a
+    // probe returned "dead" this round — a black-canvas-behind-a-live-page death
+    // for funnel joins. Reported only when true (absent-when-false, § below).
+    render_dead: false,
     reanchors: 0,
     pointer_downs: 0,
     first_move_ms: null,
@@ -474,6 +482,9 @@ export function foldPanoEvent(state, ev) {
     case "navigable": next.nav_available = ev.value === true; break;
     // Issue #2 Phase 2: one per setFilter() recovery attempt this round.
     case "edge_recovery_attempt": next.edge_recoveries += 1; break;
+    // §18: a render-death probe condemned this round's canvas (context lost or
+    // the GPU layer is down). Latch once — one death per round is the signal.
+    case "render_dead": next.render_dead = true; break;
     case "edges":
       // Latch the ANCHOR image's edge availability once per round: the first
       // image of a round is the anchor, and a later image is a different place
@@ -528,6 +539,8 @@ export function panoSessionProps(state) {
   // Issue #2 Phase 2: only reported when recovery actually ran this round —
   // absent (not 0) on the healthy majority, same convention as first_move_ms.
   if (state.edge_recoveries > 0) props.edge_recoveries = state.edge_recoveries;
+  // §18: absent unless a probe actually condemned the round's canvas.
+  if (state.render_dead === true) props.render_dead = true;
   return props;
 }
 
@@ -780,4 +793,150 @@ export function decideNavHint(ctx) {
     return "hide_timeout";
   }
   return "wait";
+}
+
+/* ================================================================
+ * §18 Render-death probe + bounded viewer rebuild
+ * ================================================================
+ * docs/ios-blackout-review.md (incident 2026-08-28, iOS Daily black-pano).
+ * The failure class: a WebGL-context-dead canvas behind a fully alive page —
+ * `imagery_load ok`, HUD alive, zero exceptions, zero `webglcontextlost`, a
+ * black pano (Verdict §C). No signal we ship today sees it: the SDK swallows
+ * context loss silently (F6), nothing in the render path can throw (F7), and
+ * `imagery_load` has never measured pixels. This section is the PURE decision
+ * core — a probe that makes the class LOUD (classifyRenderProbe /
+ * decideRenderProbe) and a bounded in-place rebuild that recovers it without
+ * consuming the round (decideRenderRecovery / classifyRenderOutcome). All the
+ * DOM/WebGL/canary/rebuild plumbing lives in js/viewer-ui.js, behind the `iv`
+ * façade — no page module touches the raw viewer (CLAUDE.md).
+ */
+
+// Probe schedule (glue reads these; §15 chaos may override the delays on a dev
+// host). Small constants — mutation-guard tested like the EDGE_RECOVERY_* set.
+export const RENDER_PROBE_FIRST_MS = 1500;   // anchor/resume ok → first probe
+export const RENDER_PROBE_SECOND_MS = 5000;  // anchor/resume ok → second probe
+export const RENDER_PROBE_VISIBLE_MS = 300;  // visibilitychange→visible / restore
+                                             // (let the compositor re-present)
+
+// Rebuild bounds — the bounds ARE the design (§3.2). One shot per round, two
+// per session: a device under persistent GPU pressure must never enter a
+// destroy/create loop that WORSENS the pressure — the exact failure mode the
+// bound exists to prevent.
+export const RENDER_REBUILD_MAX_PER_ROUND = 1;
+export const RENDER_REBUILD_MAX_PER_SESSION = 2;
+
+// classifyRenderProbe(signals) → "alive" | "dead" | "suspect" | "unknown".
+// Pure, total, first-match-wins (the decideEdgeRecovery style). signals:
+//   visible:         bool      — document.visibilityState === "visible"
+//   canvasFound:     bool      — the SDK canvas was located (getCanvas/query)
+//   canvasConnected: bool      — canvas.isConnected
+//   ctxLost:         bool|null — gl.isContextLost() (null when unreadable)
+//   canaryOk:        bool|null — offscreen GPU canary (null when not run)
+//   sample:          "content" | "blank" | "unreadable" | "skipped"
+//
+// The soul of this classifier (both branches are mutation-guard tested):
+//   • a blank/unreadable sample with ctxLost !== true and no canary verdict is
+//     NEVER "dead". three.js renders with preserveDrawingBuffer:false and the
+//     SDK clears to #0f0f0f, so a perfectly healthy idle canvas reads uniform
+//     near-black (§2.1 / D5). "blank" corroborates a death; it never causes one.
+//   • !visible is always "unknown" — a backgrounded page is legitimately blank
+//     and must never be judged (reschedule when it returns to the foreground).
+export function classifyRenderProbe(signals) {
+  const s = signals || {};
+  if (s.visible !== true) return "unknown";
+  if (s.ctxLost === true) return "dead";
+  if (s.canaryOk === false) return "dead";
+  if (s.canvasFound !== true || s.canvasConnected !== true) return "suspect";
+  if (s.sample === "content") return "alive";
+  return "suspect";
+}
+
+// Per-arm probe state (created on anchor/resume success, dropped at endRound).
+export function createRenderWatch() {
+  return { probes: 0, verdict: null, done: false };
+}
+
+// Pure transitions — the glue reassigns its local binding to the result.
+export function renderWatchProbed(state, verdict) {
+  const s = state || createRenderWatch();
+  return { probes: s.probes + 1, verdict, done: false };
+}
+export function renderWatchStopped(state) {
+  const s = state || createRenderWatch();
+  return { probes: s.probes, verdict: s.verdict, done: true };
+}
+
+// decideRenderProbe(state, ctx) → { act: "probe" | "skip" | "stop" | "nudge" }.
+// Pure, total. Two roles, disambiguated by whether ctx carries a post-probe
+// `verdict`:
+//   • pre-probe (no verdict) — should this scheduled probe run? done / stub
+//     viewer / round closed → "stop"; a moveTo in flight → "skip" (the load
+//     path re-arms its own probes); otherwise → "probe".
+//   • post-probe (ctx.verdict set) — the reaction. "suspect" → "nudge" (D3:
+//     iv.resize() marks needsRender ⇒ a forced repaint, and nudges WebKit into
+//     re-attaching a dropped compositor layer). A nudge is NEVER a rebuild — the
+//     §2.3 policy is no action on the viewer's life for a mere suspect. Any
+//     other verdict here → "skip" (a "dead" verdict is decideRenderRecovery's).
+export function decideRenderProbe(state, ctx) {
+  const s = state || createRenderWatch();
+  const c = ctx || {};
+  if (s.done) return { act: "stop" };
+  if (c.viewerOk === false) return { act: "stop" };
+  if (c.roundOpen === false) return { act: "stop" };
+  if (c.inFlight === true) return { act: "skip" };
+  if (c.verdict === "suspect") return { act: "nudge" };
+  if (c.verdict != null) return { act: "skip" };
+  return { act: "probe" };
+}
+
+// Session-scoped rebuild budget (per-round counter reset at each round;
+// per-session counter persists — see renderRecoveryRoundReset).
+export function createRenderRecovery() {
+  return { roundRebuilds: 0, sessionRebuilds: 0 };
+}
+export function renderRecoveryUsed(state) {
+  const s = state || createRenderRecovery();
+  return {
+    roundRebuilds: s.roundRebuilds + 1,
+    sessionRebuilds: s.sessionRebuilds + 1,
+  };
+}
+export function renderRecoveryRoundReset(state) {
+  const s = state || createRenderRecovery();
+  return { roundRebuilds: 0, sessionRebuilds: s.sessionRebuilds };
+}
+
+// decideRenderRecovery(state, ctx) → "rebuild" | "skip" | "stop". Pure, total.
+//   ctx: { verdict, viewerOk, roundOpen, inFlight, visible }
+// Only a "dead" verdict is ever actionable. Budget exhaustion → "stop" (there
+// is nothing left to try — the render_dead exception already fired), and it is
+// checked BEFORE the transient skip conditions so an exhausted device stops
+// probing rather than spinning. Never rebuild while hidden or with a moveTo in
+// flight (a "skip" — a later probe re-checks).
+export function decideRenderRecovery(state, ctx) {
+  const s = state || createRenderRecovery();
+  const c = ctx || {};
+  if (c.verdict !== "dead") return "skip";
+  if (c.viewerOk === false) return "stop";
+  if (c.roundOpen === false) return "stop";
+  if (s.sessionRebuilds >= RENDER_REBUILD_MAX_PER_SESSION) return "stop";
+  if (s.roundRebuilds >= RENDER_REBUILD_MAX_PER_ROUND) return "stop";
+  if (c.visible === false) return "skip";
+  if (c.inFlight === true) return "skip";
+  return "rebuild";
+}
+
+// classifyRenderOutcome(ctx) → "recovered" | "rebuild_failed" | "still_dead".
+// Pure, total.
+//   ctx: { rebuilt: bool, resumeOk: bool, followupVerdict: string }
+// rebuilt=false (the constructor threw) or resumeOk=false (the resume moveTo
+// rejected) → "rebuild_failed". A resume that landed but whose re-armed probe
+// still reads "dead" → "still_dead" (the GPU layer is simply gone right now).
+// Otherwise the resume landed and the follow-up probe did not condemn it →
+// "recovered".
+export function classifyRenderOutcome(ctx) {
+  const c = ctx || {};
+  if (c.rebuilt === false || c.resumeOk === false) return "rebuild_failed";
+  if (c.followupVerdict === "dead") return "still_dead";
+  return "recovered";
 }

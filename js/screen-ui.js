@@ -79,7 +79,6 @@ let heartbeatInterval = null;
 let latestState = null;
 
 let iv = null;            // instrumented viewer wrapper (viewer-ui.js)
-let viewer = null;        // its raw MapillaryJS viewer (pose APIs unchanged)
 let currentImageId = null;
 let countdownInterval = null;
 
@@ -319,7 +318,9 @@ function ensureViewer() {
       bearing: false,
     },
   });
-  viewer = iv.viewer;   // null when construction failed; guards below cope
+  // §3.4/G5: no cached `viewer` alias — a §18 in-place rebuild swaps the raw
+  // SDK viewer behind the stable `iv` façade, so a stored alias would point at
+  // a removed viewer. applyPose reads `iv.viewer` fresh at use time instead.
 }
 
 function destroyViewer() {
@@ -327,19 +328,20 @@ function destroyViewer() {
     iv.destroy();   // flushes the open pano_session, then viewer.remove()
     iv = null;
   }
-  viewer = null;
   currentImageId = null;
 }
 
 function applyPose(pose) {
-  if (!viewer) return;
+  if (!iv || !iv.viewer) return;
   // Guard the applier too: a legacy/racing writer could still hold a non-finite
   // pose, and setCenter([NaN, …]) throws inside the SDK.
   const p = sanitizePose(pose);
   if (!p) return;
+  // Fresh read at use time (§3.4/G5): a rebuild may have swapped the raw viewer.
+  const v = iv.viewer;
   try {
-    viewer.setCenter(p.center);
-    viewer.setZoom(p.zoom);
+    v.setCenter(p.center);
+    v.setZoom(p.zoom);
   } catch { /* viewer between images; next pose write catches up */ }
 }
 

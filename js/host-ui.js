@@ -251,7 +251,6 @@ let gameBest = null;      // closest guess so far — the share card's brag (S1)
 let connected = true;
 
 let iv = null;            // instrumented viewer wrapper (viewer-ui.js)
-let viewer = null;        // its raw MapillaryJS viewer (pose APIs unchanged)
 let guessMap = null;      // Leaflet map
 let guessMarker = null;
 // The active team's guess-modifier deploy state (SUPER SURE arming; couch has
@@ -591,14 +590,16 @@ function makeViewer() {
       bearing: true,
     },
   });
-  viewer = iv.viewer;
+  // §3.4/G5: no cached `viewer` alias — a §18 in-place rebuild swaps the raw
+  // SDK viewer behind the stable `iv` façade, so a stored alias would point at
+  // a removed viewer. Read `iv.viewer` fresh at every use site instead.
   // Construction failed (no WebGL, SDK blocked): viewer_init is already
-  // reported and every moveTo rejects. Every `if (viewer)` guard below then
+  // reported and every moveTo rejects. Every `iv.viewer` guard below then
   // degrades exactly as it does when the viewer is gone.
-  if (!viewer) return;
-  viewer.on("pov", schedulePoseWrite);
-  viewer.on("position", schedulePoseWrite);
-  viewer.on("image", (ev) => {
+  if (!iv.viewer) return;
+  iv.viewer.on("pov", schedulePoseWrite);
+  iv.viewer.on("position", schedulePoseWrite);
+  iv.viewer.on("image", (ev) => {
     if (room && room.round && ev.image.id !== room.round.imageId) {
       room.round.imageId = ev.image.id;
       push({ "round/imageId": ev.image.id });
@@ -612,7 +613,6 @@ function destroyViewer() {
     iv.destroy();   // flushes the open pano_session, then viewer.remove()
     iv = null;
   }
-  viewer = null;
 }
 
 // Throttle pose writes to at most 4/second (spec §1).
@@ -623,13 +623,15 @@ function schedulePoseWrite() {
   if (poseTimer) return;
   poseTimer = setTimeout(async () => {
     poseTimer = null;
-    if (!poseDirty || !viewer || !room || room.phase !== "roundActive") return;
+    if (!poseDirty || !iv || !iv.viewer || !room || room.phase !== "roundActive") return;
     poseDirty = false;
+    // Fresh read at use time (§3.4/G5): a rebuild may have swapped the raw viewer.
+    const v = iv.viewer;
     try {
       const [pov, center, zoom] = await Promise.all([
-        viewer.getPointOfView(),
-        viewer.getCenter(),
-        viewer.getZoom(),
+        v.getPointOfView(),
+        v.getCenter(),
+        v.getZoom(),
       ]);
       // A viewer read mid-navigation can hand back a NaN center/zoom; a NaN in
       // the patch would make Firebase reject the whole update. Drop the bad

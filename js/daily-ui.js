@@ -208,7 +208,6 @@ let peekPlacesCache = null;
 const playedPlaces = [];
 
 let iv = null;
-let viewer = null;
 let guessMap = null;
 let guessMarker = null;
 let revealHandle = null;
@@ -374,6 +373,17 @@ function makeViewer() {
     surface: "daily",
     container: "dailyViewer",
     moveAllowed,
+    // §18 (docs/ios-blackout-review.md): the wrapper rebuilds a render-dead
+    // viewer in place, silently on success. It only calls back on a failure the
+    // player must know about — the map-guess path is still fully functional, so
+    // the round is not lost.
+    onRecovery: (result) => {
+      if (result === "rebuild_failed" || result === "still_dead") {
+        toast(
+          "Street imagery crashed on this phone — you can still guess from the map.",
+          { surface: "daily" });
+      }
+    },
     component: {
       cover: false,
       direction: moveAllowed,
@@ -383,12 +393,10 @@ function makeViewer() {
       bearing: true,
     },
   });
-  viewer = iv.viewer;
 }
 
 function destroyViewer() {
   if (iv) { iv.destroy(); iv = null; }
-  viewer = null;
 }
 
 /* ---------------- Guess map ---------------- */
@@ -433,7 +441,9 @@ function backToStreet() {
   if (locked) return;
   stage = "explore";
   showScreen("d-round");
-  if (viewer) viewer.resize();
+  // §3.4/G5: resize through the façade, never a raw `iv.viewer` alias — after a
+  // §18 rebuild that alias would point at a removed viewer.
+  if (iv) iv.resize();
 }
 
 function updateGuessBanner() {

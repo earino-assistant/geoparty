@@ -31,7 +31,21 @@ window.__gpChaos = {
 window.__gpViewers[0].viewer            // the raw MapillaryJS viewer
 document.querySelector("#hostViewer canvas")
   .dispatchEvent(new Event("webglcontextlost"));
+
+// §18 render-death live-fire (docs/ios-blackout-review.md §7). Registered by
+// registerForChaos() alongside __gpViewers, so it too is dev-host only.
+window.__gpChaos.killContext(0);        // 0 = __gpViewers[0]; omit for the first
 ```
+
+`killContext(idx)` grabs that live viewer's *current* canvas
+(`viewer.getCanvas()` primary, `querySelector("canvas")` fallback), acquires
+its existing context (`webgl2`→`webgl`→`experimental-webgl` — the SDK's own
+order, so no second context is created) and calls
+`WEBGL_lose_context.loseContext()` — a **genuine** context loss, exactly the
+iOS jetsam path, not a synthetic `webglcontextlost` event. It returns `true`
+only if it actually lost a context (no canvas yet / no extension → `false`).
+This is the closest reproducible stand-in for the field incident and is the
+one hook that drives the whole §18 pipeline end to end.
 
 Serve locally with any static server (`python3 -m http.server 8000`), accept
 the consent banner, and watch the PostHog live-events view.
@@ -129,3 +143,26 @@ Run once before trusting the dashboard, on a real phone, consent accepted:
    blocker: the game is unaffected and the report sheet shows "Couldn't
    send the report". Separately block `unpkg.com`: the landing degrades to
    its gradient exactly as before.
+8. **Render-death live-fire (§18, `docs/ios-blackout-review.md`).** On a dev
+   host (this hook is dev-host-only — same `chaosAllowed` gate as every chaos
+   hook, `registerForChaos` never runs on production), open `daily.html`
+   (or any panorama surface), let a round's anchor settle, then in the console
+   run `window.__gpChaos.killContext(0)`. It calls
+   `WEBGL_lose_context.loseContext()` on the live canvas — a real context loss,
+   the iOS jetsam path. Confirm the full pipeline, in order:
+   - **detect** — the next scheduled render probe (+1500/+5000 ms after the
+     anchor, or force it with `iv.__renderProbeTickForTests()`) reads
+     `ctxLost === true` and classifies `"dead"`;
+   - **emit** — one `render_dead` `trackError` (a PostHog issue, the signal
+     that was invisible on 2026-08-28), one `render_probe{verdict:"dead"}`
+     event, recording forced, and `render_dead:true` folded into the round's
+     `pano_session`;
+   - **rebuild** — the wrapper tears down only the raw viewer and constructs a
+     replacement behind the same `iv` façade (bounded: ≤1/round, ≤2/session);
+   - **resume** — a `moveTo(:, "resume")` re-covers, reloads the current image,
+     and re-arms the probe as its own verification pass; on success the cover
+     lifts silently (no toast). A `rebuild_failed`/`still_dead` outcome instead
+     shows the one "Street imagery crashed on this phone — you can still guess
+     from the map." toast, and one `render_recovery` event carries the result.
+   Best run on a real iPhone via local serving — the reproducible stand-in for
+   the field jetsam path.

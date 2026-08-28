@@ -161,6 +161,17 @@ one.
   co-equal both-tease "Raise the stakes?"), no team name, room code, place name
   or coordinate. Audited no-mask; the guess map beneath it is
   already blocked by `blockSelector`. No mask needed.
+- **Render-death probe (§18, `docs/ios-blackout-review.md`) — no maskable
+  surface added.** The probe's two GPU/2D scratch canvases — the `drawImage`
+  sample canvas and the persistent 1×1 GPU canary — are created detached and
+  **never enter the DOM** (`document.createElement` with no append), so there
+  is nothing for `maskTextSelector`/`blockSelector` to match and nothing rrweb
+  can record. `captureCanvas: false` stays regardless, so even the SDK's own
+  on-page WebGL canvas is not captured. The probe reads only our own viewer's
+  context state (`gl.isContextLost()`) and a uniform-vs-content classification;
+  no pixel, image id, coordinate, or user input is captured, logged, or sent —
+  only the aggregate `render_probe`/`render_recovery` events (§5 of the spec).
+  Audited no-mask. No mask needed.
 
 ## 3. Blocked outright (`blockSelector`)
 

@@ -479,6 +479,15 @@ export const EVENT_SCHEMA = Object.freeze({
     // (0..EDGE_RECOVERY_MAX_ATTEMPTS). Absent when recovery never ran (the
     // healthy majority) — pairs with the edge_recovery event below.
     edge_recoveries: "int",
+    // §18 (docs/ios-blackout-review.md): a render-death probe condemned this
+    // round's canvas (black pano behind a live HUD). Absent-when-false, the
+    // edge_recoveries convention — present only on a genuine death, for funnel
+    // joins against render_probe / the render_dead exception.
+    render_dead: "bool",
+    // §18/G3: the round fold was flushed on pagehide (a mid-round abandon:
+    // reload/tab close), NOT at a normal round boundary. Absent-when-false;
+    // lets dashboards exclude or study torn rounds explicitly.
+    partial: "bool",
     reanchors: "int",        // re-anchor writes during active play
     first_move_ms: "int",    // round start → first user interaction
     pointer_downs: "int",    // with looks==0 → gesture_blocked signal
@@ -499,6 +508,38 @@ export const EVENT_SCHEMA = Object.freeze({
     spatial_after: "int",
     sequence_after: "int",
     duration_ms: "int",      // setFilter call → outcome classified
+    net_type: "string",
+    online: "bool",
+  },
+
+  // §18 render-death probe (docs/ios-blackout-review.md). One per NON-alive
+  // render probe verdict (≤4/round by the probe schedule) — the measurement
+  // stream behind the §2.3 "suspect" policy decision and the render-death-rate
+  // KPI. Aggregates only: verdict/signal booleans and timings, never a canvas
+  // pixel, image id, coordinate, or user input.
+  render_probe: {
+    surface: "string",       // host|player|tv|tv_panel|daily|landing
+    round_number: "int",
+    verdict: "string",       // "dead" | "suspect"
+    ctx_lost: "bool",        // gl.isContextLost() (absent when unreadable)
+    canary_ok: "bool",       // offscreen GPU canary (absent when it didn't run)
+    sample: "string",        // "content" | "blank" | "unreadable" | "skipped"
+    since_load_ms: "int",    // anchor/resume ok → this probe
+    net_type: "string",
+    online: "bool",
+  },
+
+  // §18. One per bounded viewer-rebuild attempt (≤2/session by the pure
+  // bounds). trigger is why the canvas was condemned; result is the outcome of
+  // the in-place rebuild + resume. Its own event (not folded into
+  // edge_recovery) so the spatial-edge-recovery KPI stays uncontaminated.
+  render_recovery: {
+    surface: "string",
+    round_number: "int",
+    attempt: "int",          // 1-based, ≤ RENDER_REBUILD_MAX_PER_SESSION
+    trigger: "string",       // "context_lost" | "canary_dead"
+    result: "string",        // "recovered" | "rebuild_failed" | "still_dead"
+    duration_ms: "int",      // verdict → outcome classified
     net_type: "string",
     online: "bool",
   },

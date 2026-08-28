@@ -59,6 +59,21 @@ import {
   NAV_HINT_POLL_MS,
   decideNavHint,
   navHintBaselineCleared,
+  RENDER_PROBE_FIRST_MS,
+  RENDER_PROBE_SECOND_MS,
+  RENDER_PROBE_VISIBLE_MS,
+  RENDER_REBUILD_MAX_PER_ROUND,
+  RENDER_REBUILD_MAX_PER_SESSION,
+  classifyRenderProbe,
+  createRenderWatch,
+  renderWatchProbed,
+  renderWatchStopped,
+  decideRenderProbe,
+  createRenderRecovery,
+  renderRecoveryUsed,
+  renderRecoveryRoundReset,
+  decideRenderRecovery,
+  classifyRenderOutcome,
 } from "../js/imagery.js";
 
 /* ================================================================
@@ -1123,4 +1138,204 @@ test("nav hint constants: finite, and the poll interval is smaller than the time
 
 test("EDGE_RECOVERY_GRACE_MS: raised to 15000 (2026-08-21 field correction)", () => {
   assert.equal(EDGE_RECOVERY_GRACE_MS, 15000);
+});
+
+/* ================================================================
+ * §18 Render-death probe + bounded rebuild (docs/ios-blackout-review.md)
+ * ================================================================ */
+
+test("render_dead is a real error class and a HARD failure (a broken game)", () => {
+  assert.ok(ERROR_CLASSES.includes("render_dead"));
+  assert.ok(HARD_FAILURE_CLASSES.includes("render_dead"));
+  assert.ok(isFailureClass("render_dead"));
+});
+
+const aliveSignals = {
+  visible: true, canvasFound: true, canvasConnected: true,
+  ctxLost: false, canaryOk: null, sample: "content",
+};
+
+test("classifyRenderProbe: a healthy painting canvas is alive", () => {
+  assert.equal(classifyRenderProbe(aliveSignals), "alive");
+});
+
+test("classifyRenderProbe: ctxLost===true is dead (the primary silent-death signal)", () => {
+  assert.equal(classifyRenderProbe({ ...aliveSignals, ctxLost: true }), "dead");
+});
+
+test("classifyRenderProbe: a dead canary is dead (GPU layer down for the page)", () => {
+  assert.equal(
+    classifyRenderProbe({ ...aliveSignals, sample: "blank", canaryOk: false }),
+    "dead");
+});
+
+test("classifyRenderProbe: a missing/disconnected canvas is suspect (mid-teardown ≠ death)", () => {
+  assert.equal(
+    classifyRenderProbe({ ...aliveSignals, canvasFound: false, sample: "unreadable" }),
+    "suspect");
+  assert.equal(
+    classifyRenderProbe({ ...aliveSignals, canvasConnected: false, sample: "unreadable" }),
+    "suspect");
+});
+
+test("classifyRenderProbe: a blank sample with no ctxLost/canary condemnation is suspect", () => {
+  assert.equal(
+    classifyRenderProbe({ ...aliveSignals, sample: "blank", canaryOk: true }),
+    "suspect");
+});
+
+// SOUL TEST 1 (the preserveDrawingBuffer/#0f0f0f trap, §2.1/D5): a blank or
+// unreadable sample with ctxLost !== true and NO canary verdict is NEVER dead.
+test("classifyRenderProbe SOUL: blank/unreadable + ctxLost!=true + no canary is NEVER dead", () => {
+  for (const sample of ["blank", "unreadable", "skipped"]) {
+    for (const ctxLost of [false, null, undefined]) {
+      const v = classifyRenderProbe({
+        visible: true, canvasFound: true, canvasConnected: true,
+        ctxLost, canaryOk: null, sample,
+      });
+      assert.notEqual(v, "dead",
+        `sample=${sample} ctxLost=${ctxLost} must not be dead`);
+      assert.equal(v, "suspect");
+    }
+  }
+});
+
+// SOUL TEST 2: a backgrounded page is legitimately blank — never judged.
+test("classifyRenderProbe SOUL: !visible is always unknown, even with ctxLost true", () => {
+  assert.equal(classifyRenderProbe({ visible: false, ctxLost: true }), "unknown");
+  assert.equal(classifyRenderProbe({ visible: false, canaryOk: false }), "unknown");
+  assert.equal(classifyRenderProbe({}), "unknown");
+});
+
+test("classifyRenderProbe: total on junk input", () => {
+  assert.equal(classifyRenderProbe(null), "unknown");
+  assert.equal(classifyRenderProbe(undefined), "unknown");
+});
+
+test("createRenderWatch / transitions: probed increments, stopped is terminal", () => {
+  const w0 = createRenderWatch();
+  assert.deepEqual(w0, { probes: 0, verdict: null, done: false });
+  const w1 = renderWatchProbed(w0, "alive");
+  assert.deepEqual(w1, { probes: 1, verdict: "alive", done: false });
+  assert.deepEqual(w0, { probes: 0, verdict: null, done: false }, "input not mutated");
+  const w2 = renderWatchStopped(w1);
+  assert.deepEqual(w2, { probes: 1, verdict: "alive", done: true });
+});
+
+test("decideRenderProbe: stop on done / stub viewer / closed round", () => {
+  const done = renderWatchStopped(createRenderWatch());
+  assert.equal(decideRenderProbe(done, {}).act, "stop");
+  assert.equal(decideRenderProbe(createRenderWatch(), { viewerOk: false }).act, "stop");
+  assert.equal(
+    decideRenderProbe(createRenderWatch(), { viewerOk: true, roundOpen: false }).act,
+    "stop");
+});
+
+test("decideRenderProbe: skip while a moveTo is in flight (the load re-arms)", () => {
+  assert.equal(
+    decideRenderProbe(createRenderWatch(),
+      { viewerOk: true, roundOpen: true, inFlight: true }).act,
+    "skip");
+});
+
+test("decideRenderProbe: probe when live and idle", () => {
+  assert.equal(
+    decideRenderProbe(createRenderWatch(),
+      { viewerOk: true, roundOpen: true, inFlight: false }).act,
+    "probe");
+});
+
+test("decideRenderProbe: a suspect verdict reacts with a nudge, never a rebuild (D3)", () => {
+  assert.equal(
+    decideRenderProbe(createRenderWatch(),
+      { viewerOk: true, roundOpen: true, inFlight: false, verdict: "suspect" }).act,
+    "nudge");
+  // A dead verdict is decideRenderRecovery's call — decideRenderProbe defers.
+  assert.equal(
+    decideRenderProbe(createRenderWatch(),
+      { viewerOk: true, roundOpen: true, verdict: "dead" }).act,
+    "skip");
+});
+
+test("RENDER_PROBE constants are the scheduled values", () => {
+  assert.equal(RENDER_PROBE_FIRST_MS, 1500);
+  assert.equal(RENDER_PROBE_SECOND_MS, 5000);
+  assert.equal(RENDER_PROBE_VISIBLE_MS, 300);
+});
+
+// Mutation guards — the bounds ARE the design (§3.2), the EDGE_RECOVERY precedent.
+test("mutation guard: RENDER_REBUILD_MAX_PER_ROUND === 1", () => {
+  assert.equal(RENDER_REBUILD_MAX_PER_ROUND, 1);
+});
+test("mutation guard: RENDER_REBUILD_MAX_PER_SESSION === 2", () => {
+  assert.equal(RENDER_REBUILD_MAX_PER_SESSION, 2);
+});
+
+const deadCtx = (over) => ({
+  verdict: "dead", viewerOk: true, roundOpen: true, inFlight: false,
+  visible: true, ...over,
+});
+
+test("decideRenderRecovery: only a dead verdict is actionable", () => {
+  assert.equal(decideRenderRecovery(createRenderRecovery(), deadCtx({ verdict: "suspect" })), "skip");
+  assert.equal(decideRenderRecovery(createRenderRecovery(), deadCtx({ verdict: "alive" })), "skip");
+  assert.equal(decideRenderRecovery(createRenderRecovery(), deadCtx()), "rebuild");
+});
+
+test("decideRenderRecovery: never rebuild on a stub viewer or a closed round", () => {
+  assert.equal(decideRenderRecovery(createRenderRecovery(), deadCtx({ viewerOk: false })), "stop");
+  assert.equal(decideRenderRecovery(createRenderRecovery(), deadCtx({ roundOpen: false })), "stop");
+});
+
+test("decideRenderRecovery: never rebuild while hidden or in flight (skip, re-check later)", () => {
+  assert.equal(decideRenderRecovery(createRenderRecovery(), deadCtx({ visible: false })), "skip");
+  assert.equal(decideRenderRecovery(createRenderRecovery(), deadCtx({ inFlight: true })), "skip");
+});
+
+test("decideRenderRecovery: one shot per round, two per session, then STOP forever", () => {
+  // First rebuild allowed.
+  let rec = createRenderRecovery();
+  assert.equal(decideRenderRecovery(rec, deadCtx()), "rebuild");
+  rec = renderRecoveryUsed(rec);                       // { round:1, session:1 }
+  // Second dead verdict SAME round → per-round budget spent → stop.
+  assert.equal(decideRenderRecovery(rec, deadCtx()), "stop");
+  // New round resets the per-round budget but keeps the session count.
+  rec = renderRecoveryRoundReset(rec);                 // { round:0, session:1 }
+  assert.deepEqual(rec, { roundRebuilds: 0, sessionRebuilds: 1 });
+  assert.equal(decideRenderRecovery(rec, deadCtx()), "rebuild");
+  rec = renderRecoveryUsed(rec);                       // { round:1, session:2 }
+  // Session budget now exhausted → stop even after a round reset.
+  rec = renderRecoveryRoundReset(rec);                 // { round:0, session:2 }
+  assert.equal(decideRenderRecovery(rec, deadCtx()), "stop",
+    "two rebuilds per session is the hard ceiling");
+});
+
+test("classifyRenderOutcome: recovered / rebuild_failed / still_dead", () => {
+  assert.equal(
+    classifyRenderOutcome({ rebuilt: true, resumeOk: true, followupVerdict: "alive" }),
+    "recovered");
+  assert.equal(
+    classifyRenderOutcome({ rebuilt: true, resumeOk: true, followupVerdict: "suspect" }),
+    "recovered", "a suspect follow-up is not a confirmed death");
+  assert.equal(
+    classifyRenderOutcome({ rebuilt: false, resumeOk: false, followupVerdict: null }),
+    "rebuild_failed");
+  assert.equal(
+    classifyRenderOutcome({ rebuilt: true, resumeOk: false, followupVerdict: null }),
+    "rebuild_failed");
+  assert.equal(
+    classifyRenderOutcome({ rebuilt: true, resumeOk: true, followupVerdict: "dead" }),
+    "still_dead");
+});
+
+test("foldPanoEvent: render_dead latches a per-round flag; panoSessionProps emits it only when true", () => {
+  const s = createPanoSession({ surface: "daily", roundNumber: 3, startedAt: 0 });
+  assert.equal(s.render_dead, false);
+  assert.ok(!("render_dead" in panoSessionProps(s)));
+  const dead = foldPanoEvent(s, { type: "render_dead", at: 100 });
+  assert.equal(dead.render_dead, true);
+  assert.equal(s.render_dead, false, "fold never mutates the input");
+  assert.equal(panoSessionProps(dead).render_dead, true);
+  // Idempotent — one death per round is the signal, latch stays true.
+  assert.equal(foldPanoEvent(dead, { type: "render_dead", at: 200 }).render_dead, true);
 });

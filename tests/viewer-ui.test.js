@@ -22,6 +22,54 @@ import { NAV_HINT_MAX_MS } from "../js/imagery.js";
  * A very small fake browser
  * ================================================================ */
 
+// §18 render probe: the offscreen canary reads a module-level toggle so a test
+// can force "GPU layer down" without reaching into the wrapper's private state.
+let canaryDead = false;
+
+function makeFakeGl(opts) {
+  const o = opts || {};
+  return {
+    COLOR_BUFFER_BIT: 0x4000, RGBA: 0x1908, UNSIGNED_BYTE: 0x1401,
+    isContextLost: () => o.lost === true,
+    clearColor() {}, clear() {},
+    // Only the canary calls readPixels (clears to green → "ok"). canaryDead
+    // makes it read black so probeCanaryOk() returns false.
+    readPixels(x, y, w, h, fmt, type, px) {
+      if (canaryDead) { px[0] = 0; px[1] = 0; px[2] = 0; px[3] = 255; }
+      else { px[0] = 0; px[1] = 255; px[2] = 0; px[3] = 255; }
+    },
+    getExtension(name) {
+      return name === "WEBGL_lose_context"
+        ? { loseContext() { o.lost = true; } } : null;
+    },
+  };
+}
+
+function makeFake2dContext() {
+  let src = null;
+  return {
+    clearRect() {},
+    drawImage(cv) { src = cv; },
+    getImageData(x, y, w, h) {
+      const n = Math.max(4, (w || 1) * (h || 1) * 4);
+      const data = new Uint8ClampedArray(n);   // all-zero = uniform (blank)
+      if (src && src._content) data[4] = 255;  // one differing channel → content
+      return { data };
+    },
+  };
+}
+
+// A canvas whose WebGL state the probe reads. ctxLost: true (dead context),
+// false (healthy), or null (unreadable — no obtainable context). content: the
+// pixel sample reads non-uniform ("content"), else uniform ("blank").
+function makeCanvas({ ctxLost = false, content = true } = {}) {
+  const cv = makeElement("canvas");
+  cv.isConnected = true;
+  cv._gl = ctxLost === null ? null : makeFakeGl({ lost: ctxLost });
+  cv._content = content;
+  return cv;
+}
+
 function makeElement(tag) {
   const classes = new Set();
   const el = {
@@ -64,6 +112,26 @@ function makeElement(tag) {
       const wants = String(sel).split(",").map((s) => s.trim().replace(/^\./, ""));
       return this.children.find((c) => c && c.className &&
         String(c.className).split(/\s+/).some((cn) => wants.includes(cn))) || null;
+    },
+    width: 0,
+    height: 0,
+    // A live element is connected unless a test says otherwise (the §18 probe
+    // reads canvas.isConnected).
+    isConnected: true,
+    // §18 render probe: a canvas hands back a WebGL or 2D context. `_gl` is set
+    // per-test (a lost context, an unreadable null); a canvas created for the
+    // offscreen canary/sample lazily gets a healthy default.
+    getContext(type) {
+      if (type === "2d") {
+        if (!this.__ctx2d) this.__ctx2d = makeFake2dContext();
+        return this.__ctx2d;
+      }
+      if (this._gl !== undefined) return this._gl;
+      if (String(tag).toLowerCase() === "canvas") {
+        this._gl = makeFakeGl();
+        return this._gl;
+      }
+      return null;
     },
     cloneNode() { return makeElement(tag); },
     replaceWith() {},
@@ -116,7 +184,26 @@ function installFakeBrowser() {
     Object.defineProperty(globalThis, name,
       { value, configurable: true, writable: true });
 
-  define("window", {
+  // A tiny event target so the wrapper's document/window listeners
+  // (visibilitychange, pagehide — §18) register and can be dispatched.
+  const eventTarget = (host) => {
+    const listeners = {};
+    host.addEventListener = (name, fn) => {
+      (listeners[name] = listeners[name] || []).push(fn);
+    };
+    host.removeEventListener = (name, fn) => {
+      const l = listeners[name] || [];
+      const i = l.indexOf(fn);
+      if (i >= 0) l.splice(i, 1);
+    };
+    host.dispatchEvent = (name, ev) => {
+      for (const fn of (listeners[name] || []).slice()) fn(ev || {});
+    };
+    host.__listeners = listeners;
+    return host;
+  };
+
+  const win = eventTarget({
     localStorage: {
       getItem: (k) => (store.has(k) ? store.get(k) : null),
       setItem: (k, v) => store.set(k, String(v)),
@@ -125,6 +212,8 @@ function installFakeBrowser() {
     posthog,
     matchMedia: () => ({ matches: false }),
   });
+  define("window", win);
+  eventTarget(doc);            // document.addEventListener for visibilitychange
   define("document", doc);
   define("location", { hostname: "localhost", pathname: "/host.html" });
   define("navigator", { onLine: true, connection: { effectiveType: "4g" } });
@@ -135,7 +224,7 @@ function installFakeBrowser() {
   // tests/analytics.test.js, which exercises it directly.
   store.set("geoparty_analytics_consent", "accepted");
 
-  return { doc, posthog, byId };
+  return { doc, posthog, byId, win };
 }
 
 /* ---------------- a fake MapillaryJS ---------------- */
@@ -167,12 +256,24 @@ function installFakeMapillary() {
     }
     on(name, fn) { (this.handlers[name] = this.handlers[name] || []).push(fn); }
     emit(name, ev) { for (const fn of this.handlers[name] || []) fn(ev); }
-    moveTo() { (this.calls = this.calls || []).push("moveTo"); return Promise.resolve(); }
+    // §18: getCanvas() is the probe/rebind's PRIMARY canvas source (V2). Returns
+    // null until a test sets `_canvas` (mirrors the SDK's detached-until-first-
+    // moveTo getter, Verdict F5).
+    getCanvas() { return this._canvas || null; }
+    moveTo(id) { (this.calls = this.calls || []).push("moveTo"); this.movedTo = id; return Promise.resolve(); }
     setCenter(c) { (this.calls = this.calls || []).push("setCenter"); this.center = c; }
     setZoom(z) { (this.calls = this.calls || []).push("setZoom"); this.zoom = z; }
     setFilter() { (this.calls = this.calls || []).push("setFilter"); return Promise.resolve(); }
-    remove() { this.removed = true; }
-    resize() {}
+    // Verdict F8: SDK teardown deliberately fires a real loseContext(), so a
+    // bound webglcontextlost listener WILL fire during a normal destroy unless
+    // detached first. The fake mirrors it — the D2 order regression depends on it.
+    remove() {
+      this.removed = true;
+      if (this._canvas && typeof this._canvas.dispatch === "function") {
+        this._canvas.dispatch("webglcontextlost", {});
+      }
+    }
+    resize() { this.resizes = (this.resizes || 0) + 1; }
     activateComponent(name) {
       (this.activated = this.activated || []).push(name);
       (this.activatedAtOrder = this.activatedAtOrder || []).push(this.order++);
@@ -213,8 +314,10 @@ beforeEach(() => {
   viewerUi.__resetSessionForTests();
   mly.supported = true;
   mly.constructThrows = null;
+  mly.viewers.length = 0;   // §18 rebuild tests assert on the constructed count
   globalThis.navigator.onLine = true;
   window.__gpChaos = {};
+  canaryDead = false;
 });
 
 const events = (name) => env.posthog.captured.filter((c) => c.event === name);
@@ -1664,3 +1767,335 @@ test("mutation guard: attempt 1 alone never recovers — proves EDGE_RECOVERY_MA
     assert.equal(lastEvent("edge_recovery").props.result, "recovered");
     iv.destroy();
   });
+
+/* ================================================================
+ * §18 render-death probe + bounded rebuild (docs/ios-blackout-review.md).
+ * The probe schedule routes through __renderProbeTickForTests, the same seam
+ * convention as edge recovery — nothing here sleeps for a real delay.
+ * ================================================================ */
+
+const flushMicro = () => new Promise((r) => setTimeout(r, 0));
+
+function makeDailyViewer(opts = {}) {
+  const recoveryCalls = [];
+  const iv = viewerUi.createViewer({
+    surface: "daily",
+    container: "dailyViewer",
+    moveAllowed: opts.moveAllowed !== false,
+    onRecovery: (result) => recoveryCalls.push(result),
+    component: {
+      cover: false,
+      direction: opts.moveAllowed !== false,
+      sequence: opts.moveAllowed !== false,
+      keyboard: opts.moveAllowed !== false,
+    },
+  });
+  iv._recoveryCalls = recoveryCalls;
+  return iv;
+}
+
+// Drive a healthy anchor load that binds the canvas and arms the probe.
+async function healthyAnchor(iv, raw, canvas, id = "anchor-1") {
+  raw._canvas = canvas;
+  iv.beginRound(3);
+  await iv.moveTo(id, "anchor");
+}
+
+test("§18 probe: a healthy anchor arms a probe that reads alive — no events, no rebuild", async () => {
+  const iv = makeDailyViewer();
+  const raw = iv.viewer;
+  await healthyAnchor(iv, raw, makeCanvas({ ctxLost: false, content: true }));
+  iv.__renderProbeTickForTests();          // first probe → alive
+  assert.equal(events("render_probe").length, 0, "an alive verdict emits nothing");
+  assert.equal(events("render_recovery").length, 0);
+  assert.equal(mly.viewers.length, 1, "no rebuild");
+  iv.destroy();
+});
+
+test("§18 D1 late canvas: the listener binds on the FIRST successful attempt (the incident shape)",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    const late = makeCanvas();
+    // getCanvas() is null at create AND at t0 — the canvas only enters the DOM
+    // when the first moveTo settles (F5). Simulate by attaching it in moveTo.
+    raw.moveTo = (id) => { raw._canvas = late; raw.movedTo = id; return Promise.resolve(); };
+    assert.equal(raw.getCanvas(), null, "no canvas at create");
+    iv.beginRound(1);
+    await iv.moveTo("anchor-1", "anchor");
+    // The success re-attached — the listener is now bound to the late canvas.
+    late.dispatch("webglcontextlost", {});
+    assert.equal(env.posthog.exceptions.slice(-1)[0].props.error_class, "webgl_context_lost");
+    iv.destroy();
+  });
+
+test("§18 D1 rebind: a canvas that changes between loads detaches the old listener, binds the new",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    const c1 = makeCanvas();
+    const c2 = makeCanvas();
+    raw._canvas = c1;
+    iv.beginRound(1);
+    await iv.moveTo("a1", "anchor");     // binds c1
+    raw._canvas = c2;
+    await iv.moveTo("a2", "anchor");     // rebinds to c2, detaches c1
+    const before = env.posthog.exceptions.length;
+    c1.dispatch("webglcontextlost", {}); // stale listener gone → nothing
+    assert.equal(env.posthog.exceptions.length, before, "old canvas listener detached");
+    c2.dispatch("webglcontextlost", {}); // live listener → one issue
+    assert.equal(env.posthog.exceptions.slice(-1)[0].props.error_class, "webgl_context_lost");
+    iv.destroy();
+  });
+
+test("§18 D6: webglcontextrestored resizes and schedules a probe", async () => {
+  const iv = makeDailyViewer();
+  const raw = iv.viewer;
+  const canvas = makeCanvas({ ctxLost: false });
+  await healthyAnchor(iv, raw, canvas);
+  const resizesBefore = raw.resizes || 0;
+  // The context comes back but the canvas is actually dead now: the restore
+  // schedules a probe that will catch it.
+  canvas._gl = makeFakeGl({ lost: true });
+  canvas.dispatch("webglcontextrestored", {});
+  assert.ok((raw.resizes || 0) > resizesBefore, "restore resizes to force a repaint");
+  iv.__renderProbeTickForTests();          // the restore-scheduled probe runs
+  assert.equal(lastEvent("render_probe").props.verdict, "dead");
+  iv.destroy();
+});
+
+test("§18 suspect: a blank sample with a healthy canary is suspect → resize nudge, never a rebuild",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    // Healthy context, but the pixel sample reads uniform (blank) — the exact
+    // preserveDrawingBuffer trap. Canary is healthy (default) → suspect.
+    const canvas = makeCanvas({ ctxLost: false, content: false });
+    await healthyAnchor(iv, raw, canvas);
+    const resizesBefore = raw.resizes || 0;
+    iv.__renderProbeTickForTests();
+    const ev = lastEvent("render_probe");
+    assert.equal(ev.props.verdict, "suspect");
+    assert.equal(ev.props.canary_ok, true);
+    assert.equal(ev.props.sample, "blank");
+    assert.ok((raw.resizes || 0) > resizesBefore, "suspect nudges with a resize");
+    assert.equal(events("render_recovery").length, 0, "a suspect NEVER rebuilds");
+    assert.equal(mly.viewers.length, 1);
+    iv.destroy();
+  });
+
+test("§18 dead: ctxLost verdict emits render_dead + render_probe, forces recording, flags the fold, rebuilds",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    const canvas = makeCanvas({ ctxLost: false });
+    await healthyAnchor(iv, raw, canvas, "anchor-1");
+    env.posthog.reset();                     // isolate the probe's own captures
+    canvas._gl = makeFakeGl({ lost: true }); // the context dies
+    iv.__renderProbeTickForTests();          // probe → dead → rebuild
+
+    // 1) one render_dead exception, 2) one render_probe event, 3) recording forced
+    const deadEx = env.posthog.exceptions.filter((e) => e.props.error_class === "render_dead");
+    assert.equal(deadEx.length, 1, "exactly one render_dead trackError");
+    const probe = lastEvent("render_probe");
+    assert.equal(probe.props.verdict, "dead");
+    assert.equal(probe.props.ctx_lost, true);
+    assert.ok(env.posthog.recordings >= 1, "a render death forces recording");
+
+    // 4) the raw viewer was replaced behind the SAME iv façade
+    assert.equal(mly.viewers.length, 2, "a fresh viewer was constructed");
+    assert.equal(iv.viewer, mly.viewers[1], "iv.viewer points at the replacement");
+    assert.equal(raw.removed, true, "the dead viewer was torn down");
+    // 5) resume moveTo issued at the anchor (player never navigated off)
+    await flushMicro();
+    assert.equal(mly.viewers[1].movedTo, "anchor-1");
+    assert.equal(lastEvent("imagery_load").props.purpose, "resume");
+
+    // 6) the pano fold carries render_dead: true
+    iv.endRound();
+    assert.equal(lastEvent("pano_session").props.render_dead, true);
+    iv.destroy();
+  });
+
+test("§18 rebuild target: after the player walks off the anchor, resume returns to their CURRENT image",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    const canvas = makeCanvas({ ctxLost: false });
+    await healthyAnchor(iv, raw, canvas, "anchor-1");
+    // The player navigated to a neighbour (an image event we did not ask for).
+    raw.emit("image", { image: { id: "neighbour-9" } });
+    canvas._gl = makeFakeGl({ lost: true });
+    iv.__renderProbeTickForTests();
+    await flushMicro();
+    assert.equal(mly.viewers[1].movedTo, "neighbour-9",
+      "resume lands where the player was standing, not the anchor");
+    iv.destroy();
+  });
+
+test("§18 hard mode comes back frozen: a rebuilt no-move viewer re-asserts the deactivated lever",
+  async () => {
+    const iv = makeDailyViewer({ moveAllowed: false });
+    const raw = iv.viewer;
+    iv.setMoveAllowed(false);                 // G6 Hard
+    const canvas = makeCanvas({ ctxLost: false });
+    raw._canvas = canvas;
+    iv.beginRound(2);
+    await iv.moveTo("anchor-h", "anchor");
+    canvas._gl = makeFakeGl({ lost: true });
+    iv.__renderProbeTickForTests();           // dead → rebuild
+    const rebuilt = mly.viewers[1];
+    assert.deepEqual(rebuilt.deactivated, ["direction", "sequence", "keyboard"],
+      "the replacement viewer comes back with movement frozen");
+    iv.destroy();
+  });
+
+test("§18 recovered: the re-armed probe reads alive → one render_recovery(recovered), silent (no toast)",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    const canvas = makeCanvas({ ctxLost: false });
+    await healthyAnchor(iv, raw, canvas, "anchor-1");
+    canvas._gl = makeFakeGl({ lost: true });
+    iv.__renderProbeTickForTests();           // dead → rebuild
+    await flushMicro();                        // resume settles, re-arms the probe
+    // The replacement viewer paints fine — its getCanvas is healthy.
+    mly.viewers[1]._canvas = makeCanvas({ ctxLost: false, content: true });
+    iv.__renderProbeTickForTests();           // verification probe → alive
+    const rec = lastEvent("render_recovery");
+    assert.equal(rec.props.result, "recovered");
+    assert.equal(rec.props.trigger, "context_lost");
+    assert.equal(iv._recoveryCalls.length, 0, "a successful recovery is SILENT");
+    iv.destroy();
+  });
+
+test("§18 still dead + single-shot: a second dead verdict the same round does NOT rebuild again; toasts",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    const canvas = makeCanvas({ ctxLost: false });
+    await healthyAnchor(iv, raw, canvas, "anchor-1");
+    canvas._gl = makeFakeGl({ lost: true });
+    iv.__renderProbeTickForTests();           // dead → rebuild (1/round)
+    await flushMicro();
+    assert.equal(mly.viewers.length, 2);
+    // The replacement is ALSO dead.
+    mly.viewers[1]._canvas = makeCanvas({ ctxLost: true });
+    iv.__renderProbeTickForTests();           // verification probe → still dead
+    assert.equal(mly.viewers.length, 2, "the per-round budget (1) forbids a second rebuild");
+    const rec = lastEvent("render_recovery");
+    assert.equal(rec.props.result, "still_dead");
+    assert.deepEqual(iv._recoveryCalls, ["still_dead"], "a failed recovery toasts once");
+    iv.destroy();
+  });
+
+test("§18 D5 soul: a blank sample NEVER escalates to dead on its own (no ctxLost, no canary condemnation)",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    // Context readable-and-healthy, sample uniform, canary healthy → suspect.
+    const canvas = makeCanvas({ ctxLost: false, content: false });
+    await healthyAnchor(iv, raw, canvas);
+    iv.__renderProbeTickForTests();
+    assert.equal(lastEvent("render_probe").props.verdict, "suspect");
+    assert.equal(events("render_recovery").length, 0);
+    assert.equal(mly.viewers.length, 1, "a blank sample alone must never rebuild a healthy viewer");
+    iv.destroy();
+  });
+
+test("§18 canary-dead path: unreadable context + dead canary is dead (GPU layer down)", async () => {
+  const iv = makeDailyViewer();
+  const raw = iv.viewer;
+  const canvas = makeCanvas({ ctxLost: null, content: false }); // no obtainable context
+  await healthyAnchor(iv, raw, canvas);
+  canaryDead = true;                          // force the offscreen canary down
+  iv.__renderProbeTickForTests();
+  const probe = lastEvent("render_probe");
+  assert.equal(probe.props.verdict, "dead");
+  assert.equal(probe.props.canary_ok, false);
+  assert.ok(!("ctx_lost" in probe.props), "unreadable context ⇒ ctx_lost absent");
+  assert.equal(mly.viewers.length, 2, "a canary-dead verdict still drives a rebuild");
+  iv.destroy();
+});
+
+test("§18 lifecycle: endRound / destroy / a new attempt each cancel a pending probe", async () => {
+  // endRound cancels
+  let iv = makeDailyViewer();
+  await healthyAnchor(iv, iv.viewer, makeCanvas({ ctxLost: true }));
+  iv.endRound();
+  iv.__renderProbeTickForTests();             // nothing pending → no verdict
+  assert.equal(events("render_probe").length, 0, "endRound cancelled the armed probe");
+  iv.destroy();
+
+  // a new attempt() supersedes the pending probe (its success re-arms afresh)
+  env.posthog.reset();
+  iv = makeDailyViewer();
+  const raw = iv.viewer;
+  raw._canvas = makeCanvas({ ctxLost: true });
+  iv.beginRound(1);
+  await iv.moveTo("a1", "anchor");            // arms a probe
+  await iv.moveTo("a2", "nav");               // a nav load cancels it mid-flight
+  // the nav is not a covered purpose, so it does NOT re-arm — no probe pending
+  iv.__renderProbeTickForTests();
+  assert.equal(events("render_probe").length, 0, "a superseding load cancelled the probe");
+  iv.destroy();
+});
+
+test("§18 D2 teardown order: destroy detaches BEFORE remove() — the SDK's loseContext fires into nothing",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    const canvas = makeCanvas({ ctxLost: false });
+    await healthyAnchor(iv, raw, canvas);     // binds the listener
+    env.posthog.reset();
+    iv.destroy();                             // detach, THEN remove() fires loseContext
+    assert.equal(raw.removed, true);
+    const lost = env.posthog.exceptions.filter((e) => e.props.error_class === "webgl_context_lost");
+    assert.equal(lost.length, 0, "a normal teardown emits zero webgl_context_lost");
+    assert.equal(events("render_probe").length, 0, "and zero probe verdicts");
+  });
+
+test("§18 D2 (rebuild): the in-place rebuild's teardown also fires loseContext into a detached canvas",
+  async () => {
+    const iv = makeDailyViewer();
+    const raw = iv.viewer;
+    const canvas = makeCanvas({ ctxLost: false });
+    await healthyAnchor(iv, raw, canvas, "anchor-1");
+    canvas._gl = makeFakeGl({ lost: true });
+    env.posthog.reset();
+    iv.__renderProbeTickForTests();           // dead → rebuild (remove() fires loseContext)
+    // The only webgl_context_lost we should EVER see is zero — the rebuild
+    // detached before remove(), exactly like destroy() (D2/F8).
+    const lost = env.posthog.exceptions.filter((e) => e.props.error_class === "webgl_context_lost");
+    assert.equal(lost.length, 0, "rebuild teardown emits no spurious context-lost");
+    iv.destroy();
+  });
+
+test("§18 pagehide (G3/D7): an open round fold is flushed exactly once with partial:true", () => {
+  const iv = makeDailyViewer();
+  iv.beginRound(4);
+  iv.viewer.emit("pov", {});                  // some interaction folds in
+  assert.equal(events("pano_session").length, 0, "no fold emitted yet");
+  window.dispatchEvent("pagehide", {});       // the wrapper's pagehide listener
+  const ev = lastEvent("pano_session");
+  assert.equal(ev.props.round_number, 4);
+  assert.equal(ev.props.partial, true, "a torn round is flagged partial");
+  // The fold is cleared, so a normal endRound does not double-emit it.
+  const count = events("pano_session").length;
+  iv.endRound();
+  assert.equal(events("pano_session").length, count, "pagehide already flushed the fold");
+  iv.destroy();
+});
+
+test("§18 stub viewer: never probes and never rebuilds", async () => {
+  mly.supported = false;                      // forces a stub (webgl_unavailable)
+  const iv = makeDailyViewer();
+  assert.equal(iv.ok, false);
+  assert.equal(typeof iv.__renderProbeTickForTests, "undefined",
+    "a stub exposes no probe seam");
+  const s = sampler("x1");
+  await viewerUi.loadRoundImage(s, iv, "anchor");
+  assert.equal(events("render_probe").length, 0);
+  assert.equal(events("render_recovery").length, 0);
+  iv.destroy();
+});

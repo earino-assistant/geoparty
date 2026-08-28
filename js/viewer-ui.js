@@ -47,6 +47,19 @@ import {
   navHintBaselineCleared,
   NAV_HINT_MAX_MS,
   NAV_HINT_POLL_MS,
+  classifyRenderProbe,
+  createRenderWatch,
+  renderWatchProbed,
+  renderWatchStopped,
+  decideRenderProbe,
+  createRenderRecovery,
+  renderRecoveryUsed,
+  renderRecoveryRoundReset,
+  decideRenderRecovery,
+  classifyRenderOutcome,
+  RENDER_PROBE_FIRST_MS,
+  RENDER_PROBE_SECOND_MS,
+  RENDER_PROBE_VISIBLE_MS,
 } from "./imagery.js";
 
 // Keep in sync with the pinned <script> tag in *.html (unpkg mapillary-js).
@@ -144,6 +157,16 @@ function registerForChaos(iv) {
   if (!chaosAllowed(host)) return;
   window.__gpViewers = window.__gpViewers || [];
   window.__gpViewers.push(iv);
+  // §7 live-fire harness: __gpChaos.killContext(idx?) kills a live viewer's
+  // WebGL context exactly as the iOS jetsam path does (WEBGL_lose_context),
+  // driving the whole detect→emit→rebuild→resume pipeline on a real device.
+  // Dev-host only (we are already inside the chaosAllowed guard).
+  window.__gpChaos = window.__gpChaos || {};
+  window.__gpChaos.killContext = (idx) => {
+    const t = window.__gpViewers[idx || 0];
+    return t && typeof t.__chaosKillContext === "function"
+      ? t.__chaosKillContext() : false;
+  };
 }
 
 /* ================================================================
@@ -208,7 +231,7 @@ function stubViewer(surface, errorClass) {
   };
 }
 
-export function createViewer({ surface, container, component, moveAllowed }) {
+export function createViewer({ surface, container, component, moveAllowed, onRecovery }) {
   const t0 = now();
   const c = chaos();
 
@@ -248,7 +271,7 @@ export function createViewer({ surface, container, component, moveAllowed }) {
   }
 
   reportInit(surface, true, null, t0, supported, "");
-  const iv = instrument({ surface, container, viewer: raw });
+  const iv = instrument({ surface, container, component, viewer: raw, onRecovery });
   iv.moveEnabled = moveAllowed === true;
   registerForChaos(iv);
   return iv;
@@ -273,7 +296,11 @@ function reportInit(surface, ok, errorClass, t0, webgl, rawMessage) {
  * The instrumented viewer
  * ================================================================ */
 
-function instrument({ surface, container, viewer }) {
+function instrument({ surface, container, component, viewer: rawViewer, onRecovery }) {
+  // `viewer` is a mutable binding, not a parameter: §18's in-place rebuild
+  // replaces the raw SDK viewer BEHIND the stable `iv` façade (§3.1), so every
+  // internal reference and every rebound on(...) handler follows the swap.
+  let viewer = rawViewer;
   let pano = null;             // open pano_session fold, or null
   let expectImage = null;      // image id our own moveTo is steering toward
   let destroyed = false;
@@ -341,25 +368,31 @@ function instrument({ surface, container, viewer }) {
     try { viewer.on(name, fn); } catch { /* SDK build without this event */ }
   };
 
-  on("pov", () => { pano = foldPanoEvent(pano, { type: "look", at: now() }); });
-  on("fov", () => { pano = foldPanoEvent(pano, { type: "zoom", at: now() }); });
-  on("navigable", (ev) => {
-    const value = ev && typeof ev.navigable === "boolean" ? ev.navigable : true;
-    pano = foldPanoEvent(pano, { type: "navigable", value });
-  });
-  on("image", (ev) => {
-    const id = ev && ev.image && ev.image.id;
-    // An image change we did NOT ask for is the user navigating (arrow
-    // clicks are internal to the SDK and never reach our moveTo).
-    if (id && id !== expectImage) {
-      pano = foldPanoEvent(pano, { type: "nav_move", at: now() });
-    }
-    // Issue #2 Phase 2: latch the LIVE image ref (never cloned) — a later
-    // setFilter() recovery re-reads spatialEdges/sequenceEdges off this same
-    // object, since a recovered status renders with no further "image" event.
-    if (ev && ev.image && typeof ev.image === "object") lastImage = ev.image;
-    observeEdges(ev);
-  });
+  // Collected so §18's rebuild can re-run them against the replacement viewer
+  // (they close over the mutable `viewer` binding but must be re-registered on
+  // the new SDK instance). Called once at construction, again after a rebuild.
+  function bindViewerHandlers() {
+    on("pov", () => { pano = foldPanoEvent(pano, { type: "look", at: now() }); });
+    on("fov", () => { pano = foldPanoEvent(pano, { type: "zoom", at: now() }); });
+    on("navigable", (ev) => {
+      const value = ev && typeof ev.navigable === "boolean" ? ev.navigable : true;
+      pano = foldPanoEvent(pano, { type: "navigable", value });
+    });
+    on("image", (ev) => {
+      const id = ev && ev.image && ev.image.id;
+      // An image change we did NOT ask for is the user navigating (arrow
+      // clicks are internal to the SDK and never reach our moveTo).
+      if (id && id !== expectImage) {
+        pano = foldPanoEvent(pano, { type: "nav_move", at: now() });
+      }
+      // Issue #2 Phase 2: latch the LIVE image ref (never cloned) — a later
+      // setFilter() recovery re-reads spatialEdges/sequenceEdges off this same
+      // object, since a recovered status renders with no further "image" event.
+      if (ev && ev.image && typeof ev.image === "object") lastImage = ev.image;
+      observeEdges(ev);
+    });
+  }
+  bindViewerHandlers();
 
   // Issue #2: read the image's spatial/sequence edge counts (bounded, opaque
   // aggregates — never an id, coordinate, or edge payload) and latch them.
@@ -560,6 +593,33 @@ function instrument({ surface, container, viewer }) {
     el.addEventListener("pointerdown", onPointerDown, true);
   }
 
+  // §18: re-probe when the page returns to the foreground while a round is
+  // open (+300ms lets the compositor re-present first). A backgrounded page is
+  // never judged (classifyRenderProbe → "unknown").
+  const onVisibility = () => {
+    if (documentVisible() && pano != null && renderWatch && !renderWatch.done) {
+      scheduleRenderProbe(renderProbeTick, renderProbeDelays().visible);
+    }
+  };
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", onVisibility);
+  }
+
+  // G3/D7: on Daily a round's pano fold closes only at the NEXT beginRound (or
+  // destroy), so a mid-round abandon — reload, tab close — ALWAYS loses the
+  // open fold (her round-3 fold died exactly this way). Flush it on pagehide
+  // with partial:true (posthog-js flushes on pagehide via beacon) so torn
+  // rounds are studyable rather than silent.
+  const onPageHide = () => {
+    if (!pano) return;
+    const props = panoSessionProps(pano);
+    if (props) { props.partial = true; track("pano_session", props); }
+    pano = null;
+  };
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("pagehide", onPageHide);
+  }
+
   // GPU/memory pressure kills the WebGL context: the viewer renders nothing
   // from here on, and today that is completely silent.
   const onContextLost = () => {
@@ -569,15 +629,414 @@ function instrument({ surface, container, viewer }) {
     log.record({ error_class: "webgl_context_lost", surface, pool_entry: "" });
     startRecording();
   };
-  let canvas = null;
-  const attachCanvas = () => {
-    if (canvas || !el || !el.querySelector) return;
-    canvas = el.querySelector("canvas");
-    if (canvas) canvas.addEventListener("webglcontextlost", onContextLost);
+  // D6: three.js preventDefault()s the lost event (F6), so a restore CAN fire —
+  // but its GL re-init still needs a needsRender trigger before it repaints. So
+  // the restore schedules a probe AND resizes (guaranteeing the repaint the
+  // probe then verifies).
+  const onContextRestored = () => {
+    try { viewer.resize(); } catch { /* not laid out yet */ }
+    if (pano != null) {
+      if (!renderWatch || renderWatch.done) renderWatch = createRenderWatch();
+      scheduleRenderProbe(renderProbeTick, renderProbeDelays().visible);
+    }
   };
+
+  // D1 (THE primary listener fix). The SDK canvas is created DETACHED and
+  // enters the DOM only after the FIRST moveTo settles (Verdict F1–F5);
+  // getCanvas() returns null until then. So the listener can only bind once a
+  // load has actually painted — which is why attachCanvas() now re-runs on
+  // EVERY successful attempt() (any purpose), using getCanvas() as the primary
+  // source and querySelector("canvas") as the fallback. A null canvas is "not
+  // present yet", never an error. The create-time and +1500ms attempts stay as
+  // harmless first tries (known-insufficient on cold mobile networks, §B).
+  let canvas = null;
+  function currentCanvas() {
+    let cv = null;
+    try {
+      if (viewer && typeof viewer.getCanvas === "function") cv = viewer.getCanvas();
+    } catch { cv = null; }
+    if (!cv && el && typeof el.querySelector === "function") {
+      try { cv = el.querySelector("canvas"); } catch { cv = null; }
+    }
+    return cv || null;
+  }
+  function detachCanvas() {
+    if (!canvas) return;
+    try { canvas.removeEventListener("webglcontextlost", onContextLost); } catch { /* gone */ }
+    try { canvas.removeEventListener("webglcontextrestored", onContextRestored); } catch { /* gone */ }
+    canvas = null;
+  }
+  function attachCanvas() {
+    const cv = currentCanvas();
+    if (!cv) return;             // not in the DOM yet (F5) — retry on next success
+    if (cv === canvas) return;   // already bound to this exact element
+    detachCanvas();              // rebind: drop the stale listener first (D1)
+    canvas = cv;
+    if (typeof canvas.addEventListener === "function") {
+      canvas.addEventListener("webglcontextlost", onContextLost);
+      canvas.addEventListener("webglcontextrestored", onContextRestored);
+    }
+  }
   attachCanvas();
   const canvasTimer = typeof setTimeout !== "undefined"
     ? setTimeout(attachCanvas, 1500) : null;
+
+  /* ==============================================================
+   * §18 render-death probe + bounded rebuild (docs/ios-blackout-review.md).
+   * Wrapper-internal, behind the `iv` façade — the probe reads only our own
+   * viewer's canvas; the canary and 2D sample canvas are offscreen and never
+   * enter the DOM. All timers route through one scheduleRenderProbe() seam so
+   * __renderProbeTickForTests can drive the state machine without sleeping —
+   * exactly the edge-recovery lifecycle, already proven in this file.
+   * ============================================================== */
+  let renderWatch = null;
+  let renderProbeTimer = null;
+  let pendingRenderProbeTick = null;
+  let renderProbeArmedAt = null;
+  let renderRecovery = createRenderRecovery();  // SESSION-scoped (persists per round)
+  let renderRebuildPending = null;              // { attempt, trigger, t0, roundNumber }
+  let canary = null;                            // { canvas, gl } — lazy, one per viewer
+  let sampleCanvas = null;
+  let sampleCtx = null;
+
+  function renderProbeDelays() {
+    const c = chaos();
+    const over = (c && c.renderProbeMs) || {};
+    return {
+      first: Number.isFinite(over.first) ? over.first : RENDER_PROBE_FIRST_MS,
+      second: Number.isFinite(over.second) ? over.second : RENDER_PROBE_SECOND_MS,
+      visible: Number.isFinite(over.visible) ? over.visible : RENDER_PROBE_VISIBLE_MS,
+    };
+  }
+
+  function cancelRenderProbe() {
+    if (renderProbeTimer !== null) { clearTimeout(renderProbeTimer); renderProbeTimer = null; }
+    pendingRenderProbeTick = null;
+  }
+
+  function scheduleRenderProbe(fn, ms) {
+    cancelRenderProbe();
+    pendingRenderProbeTick = fn;
+    if (typeof setTimeout === "undefined") return;
+    renderProbeTimer = setTimeout(() => {
+      renderProbeTimer = null;
+      const f = pendingRenderProbeTick;
+      pendingRenderProbeTick = null;
+      if (f) f();
+    }, ms);
+  }
+
+  // Armed on anchor/resume success (D4: the canvas always exists by then).
+  function armRenderProbe() {
+    cancelRenderProbe();
+    renderWatch = createRenderWatch();
+    renderProbeArmedAt = now();
+    scheduleRenderProbe(renderProbeTick, renderProbeDelays().first);
+  }
+
+  function documentVisible() {
+    if (typeof document === "undefined") return true;
+    // A document with no visibilityState (old/stub) is treated as visible.
+    return document.visibilityState === undefined ||
+      document.visibilityState === "visible";
+  }
+
+  // The canary answers the case isContextLost() cannot: a GPU process dead
+  // enough that even context-state queries lie. One persistent 1×1 offscreen
+  // context, created LAZILY (only when a probe is already suspicious) and kept
+  // for the viewer's life — iOS caps live WebGL contexts and evicts the oldest,
+  // so churning a canary could itself cause the SDK's loss (§2.2).
+  function ensureCanary() {
+    if (canary) return canary;
+    if (typeof document === "undefined" || typeof document.createElement !== "function") {
+      canary = { canvas: null, gl: null };
+      return canary;
+    }
+    try {
+      const cv = document.createElement("canvas");
+      cv.width = 1; cv.height = 1;
+      const gl = typeof cv.getContext === "function" &&
+        (cv.getContext("webgl2") || cv.getContext("webgl") ||
+         cv.getContext("experimental-webgl"));
+      canary = { canvas: cv, gl: gl || null };
+    } catch { canary = { canvas: null, gl: null }; }
+    return canary;
+  }
+
+  function probeCanaryOk() {
+    const cn = ensureCanary();
+    if (!cn || !cn.gl) return false;
+    const gl = cn.gl;
+    try {
+      if (typeof gl.isContextLost === "function" && gl.isContextLost()) return false;
+      gl.clearColor(0, 1, 0, 1);              // clear to green
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const px = new Uint8Array(4);
+      // readPixels in the SAME task is spec-valid even with
+      // preserveDrawingBuffer:false — the buffer survives until the task yields.
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      return px[1] > 200 && px[0] < 80 && px[2] < 80;
+    } catch { return false; }
+  }
+
+  function releaseCanary() {
+    if (canary && canary.gl && typeof canary.gl.getExtension === "function") {
+      try {
+        const ext = canary.gl.getExtension("WEBGL_lose_context");
+        if (ext && typeof ext.loseContext === "function") ext.loseContext();
+      } catch { /* already gone */ }
+    }
+    canary = null;
+  }
+
+  function readCtxLost(cv) {
+    if (!cv || typeof cv.getContext !== "function") return null;
+    let gl = null;
+    try {
+      gl = cv.getContext("webgl2") || cv.getContext("webgl") ||
+        cv.getContext("experimental-webgl");
+    } catch { gl = null; }
+    if (!gl || typeof gl.isContextLost !== "function") return null;
+    try { return gl.isContextLost() === true; } catch { return null; }
+  }
+
+  // Corroboration only (§2.1). D5: three.js clears to #0f0f0f, so a healthy
+  // idle canvas is uniform near-black — ANY uniform frame is "blank", whatever
+  // the color; only a non-uniform frame proves paint ("content").
+  function readSample(cv) {
+    if (!cv || typeof document === "undefined" ||
+        typeof document.createElement !== "function") {
+      return "unreadable";
+    }
+    try {
+      if (!sampleCtx) {
+        sampleCanvas = document.createElement("canvas");
+        sampleCanvas.width = 8; sampleCanvas.height = 8;
+        sampleCtx = typeof sampleCanvas.getContext === "function"
+          ? sampleCanvas.getContext("2d") : null;
+      }
+      if (!sampleCtx) return "unreadable";
+      sampleCtx.clearRect(0, 0, 8, 8);
+      sampleCtx.drawImage(cv, 0, 0, 8, 8);
+      const data = sampleCtx.getImageData(0, 0, 8, 8).data;
+      for (let i = 4; i < data.length; i += 4) {
+        if (data[i] !== data[0] || data[i + 1] !== data[1] ||
+            data[i + 2] !== data[2] || data[i + 3] !== data[3]) {
+          return "content";
+        }
+      }
+      return "blank";
+    } catch { return "unreadable"; }
+  }
+
+  function gatherRenderSignals() {
+    if (!documentVisible()) return { visible: false };
+    const cv = currentCanvas();
+    const canvasFound = cv != null;
+    const canvasConnected = canvasFound && cv.isConnected === true;
+    const ctxLost = readCtxLost(cv);
+    if (ctxLost === true) {
+      // Decisive — never spend a canary when the context already reports lost.
+      return { visible: true, canvasFound, canvasConnected, ctxLost: true, sample: "skipped" };
+    }
+    const sample = canvasFound ? readSample(cv) : "unreadable";
+    // The canary is for the ambiguous middle ONLY: run it when the canvas is
+    // present but not clearly painting, never during a teardown (canvas gone).
+    let canaryOk = null;
+    if (canvasFound && canvasConnected && sample !== "content") {
+      canaryOk = probeCanaryOk();
+    }
+    return { visible: true, canvasFound, canvasConnected, ctxLost, canaryOk, sample };
+  }
+
+  function emitRenderProbe(verdict, signals) {
+    const props = {
+      surface,
+      round_number: pano && Number.isFinite(pano.round_number) ? pano.round_number : 0,
+      verdict,
+      since_load_ms: renderProbeArmedAt === null
+        ? 0 : Math.round(now() - renderProbeArmedAt),
+      net_type: netType(), online: isOnline(),
+    };
+    if (signals.ctxLost === true || signals.ctxLost === false) props.ctx_lost = signals.ctxLost;
+    if (signals.canaryOk === true || signals.canaryOk === false) props.canary_ok = signals.canaryOk;
+    if (typeof signals.sample === "string") props.sample = signals.sample;
+    track("render_probe", props);
+  }
+
+  function renderProbeTick() {
+    if (!renderWatch || renderWatch.done) return;
+    const gate = decideRenderProbe(renderWatch, {
+      viewerOk: iv.ok === true,
+      roundOpen: pano != null,
+      inFlight: inFlightCount > 0,
+    });
+    if (gate.act === "stop") { renderWatch = renderWatchStopped(renderWatch); return; }
+    if (gate.act === "skip") return; // a load is in flight; its success re-arms
+    const signals = gatherRenderSignals();
+    const verdict = classifyRenderProbe(signals);
+    renderWatch = renderWatchProbed(renderWatch, verdict);
+    handleRenderVerdict(verdict, signals);
+    // Second probe of the +1500/+5000 pair — only after the first, and only if
+    // the watch is still live (a dead verdict that stopped/rebuilt must not
+    // reschedule a corpse probe).
+    if (renderWatch && renderWatch.probes === 1 && !renderWatch.done) {
+      const d = renderProbeDelays();
+      scheduleRenderProbe(renderProbeTick, Math.max(0, d.second - d.first));
+    }
+  }
+
+  function handleRenderVerdict(verdict, signals) {
+    // Resolve a pending rebuild on the first real verdict its re-armed probe
+    // returns (the rebuild's own verification pass, §3.1.5).
+    if (renderRebuildPending && verdict !== "unknown") {
+      const pending = renderRebuildPending;
+      renderRebuildPending = null;
+      finishRebuild(classifyRenderOutcome({
+        rebuilt: true, resumeOk: true, followupVerdict: verdict,
+      }), pending);
+      // fall through: a still-dead follow-up must still emit its render_probe
+      // and reach decideRenderRecovery — which now says "stop" (budget spent),
+      // so there is never a second rebuild this round.
+    }
+    if (verdict === "alive" || verdict === "unknown") return;
+    emitRenderProbe(verdict, signals);
+    if (verdict === "suspect") {
+      const react = decideRenderProbe(renderWatch, {
+        viewerOk: iv.ok === true, roundOpen: pano != null,
+        inFlight: inFlightCount > 0, verdict: "suspect",
+      });
+      if (react.act === "nudge") { try { viewer.resize(); } catch { /* not laid out */ } }
+      return;
+    }
+    handleRenderDead(signals);
+  }
+
+  function handleRenderDead(signals) {
+    // §2.4 step 1: THIS alone converts the silent class into a PostHog issue.
+    emitException("render_dead", "render probe: webgl context dead", {
+      surface, error_class: "render_dead", webgl: true,
+    });
+    log.record({ error_class: "render_dead", surface, pool_entry: "" });
+    startRecording();
+    if (pano) pano = foldPanoEvent(pano, { type: "render_dead", at: now() });
+    const decision = decideRenderRecovery(renderRecovery, {
+      verdict: "dead",
+      viewerOk: iv.ok === true,
+      roundOpen: pano != null,
+      inFlight: inFlightCount > 0,
+      visible: documentVisible(),
+    });
+    if (decision === "rebuild") {
+      rebuild(signals.ctxLost === true ? "context_lost" : "canary_dead");
+    } else if (decision === "stop") {
+      renderWatch = renderWatchStopped(renderWatch);
+    }
+    // "skip": leave the watch live; the second/visibility probe re-checks.
+  }
+
+  // §3.1 in-place rebuild: replace the raw SDK viewer behind the same `iv`,
+  // then moveTo the player's current image ("resume"). Bounded 1/round, 2/
+  // session by the pure decideRenderRecovery.
+  function rebuild(trigger) {
+    const t0 = now();
+    renderRecovery = renderRecoveryUsed(renderRecovery);
+    const attemptNumber = renderRecovery.sessionRebuilds;
+    const roundNumber = pano && Number.isFinite(pano.round_number) ? pano.round_number : 0;
+    // Resume target, chosen BEFORE teardown: where the player is standing now
+    // (navigated off the anchor) or the anchor itself. lastImage is a live ref,
+    // never serialized (only extractEdgeCounts reads it elsewhere).
+    const navigatedOff = lastImage && typeof lastImage === "object" &&
+      lastImage.id != null && anchorImageId != null && lastImage.id !== anchorImageId;
+    const target = navigatedOff ? lastImage.id : anchorImageId;
+
+    // D2 (load-bearing, F8): SDK teardown deliberately fires a REAL
+    // loseContext(). Detach canvas listeners and cancel probes BEFORE
+    // remove(), or the destroy trips our own webglcontextlost handler and
+    // re-probes a corpse. Mirrors today's correct destroy() order.
+    renderWatch = renderWatchStopped(renderWatch);
+    cancelRenderProbe();
+    detachCanvas();
+    cancelEdgeRecoveryTimer();
+    edgeRecovery = null;
+    cancelNavHint();
+    try { viewer.remove(); } catch { /* a context-lost viewer may throw */ }
+
+    let newRaw;
+    try {
+      const resolvedComponent = {
+        ...component,
+        direction: directionComponentConfig(
+          iv.moveEnabled === true && component.direction !== false),
+      };
+      newRaw = new mapillary.Viewer({
+        accessToken: MAPILLARY_TOKEN,
+        container,
+        component: resolvedComponent,
+      });
+    } catch {
+      finishRebuild("rebuild_failed", { attempt: attemptNumber, trigger, t0, roundNumber });
+      return;
+    }
+    viewer = newRaw;
+    iv.viewer = newRaw;               // keep the façade property fresh (§3.1)
+    bindViewerHandlers();             // re-register pov/fov/navigable/image
+    attachCanvas();                   // canvas is null until the resume settles (F5)
+    desiredMove = iv.moveEnabled === true;  // a hard/frozen viewer comes back frozen
+    applyMove();
+
+    if (target == null) {
+      finishRebuild("rebuild_failed", { attempt: attemptNumber, trigger, t0, roundNumber });
+      return;
+    }
+    // Through the façade moveTo: resume gets the cover, the 20s timeout, an
+    // imagery_load{purpose:"resume"}, and re-arms edge recovery, the nav hint
+    // AND the render probe — that re-armed probe becomes the rebuild's own
+    // verification pass (§3.1.4). moveTo rethrows on failure → rebuild_failed.
+    iv.moveTo(target, "resume").then(
+      () => {
+        renderRebuildPending = { attempt: attemptNumber, trigger, t0, roundNumber };
+      },
+      () => {
+        finishRebuild("rebuild_failed", { attempt: attemptNumber, trigger, t0, roundNumber });
+      },
+    );
+  }
+
+  function finishRebuild(result, pending) {
+    track("render_recovery", {
+      surface, round_number: pending.roundNumber, attempt: pending.attempt,
+      trigger: pending.trigger, result,
+      duration_ms: Math.round(now() - pending.t0),
+      net_type: netType(), online: isOnline(),
+    });
+    // §3.3: a successful rebuild is silent (the cover drops/lifts like a round
+    // transition). Only a failure toasts — through the page's callback, so the
+    // wrapper never imports UI. The map-guess path is fully functional.
+    if ((result === "rebuild_failed" || result === "still_dead") &&
+        typeof onRecovery === "function") {
+      try { onRecovery(result); } catch { /* a page callback must never break the wrapper */ }
+    }
+  }
+
+  // §7 live-fire harness handle (reachable only via __gpChaos.killContext on a
+  // dev host — see registerForChaos). Kills the live canvas's context exactly
+  // as the jetsam path does; the SDK swallows it (F6) and the probe catches it.
+  function chaosKillContext() {
+    const cv = currentCanvas();
+    if (!cv || typeof cv.getContext !== "function") return false;
+    let gl = null;
+    try {
+      gl = cv.getContext("webgl2") || cv.getContext("webgl") ||
+        cv.getContext("experimental-webgl");
+    } catch { gl = null; }
+    if (!gl || typeof gl.getExtension !== "function") return false;
+    try {
+      const ext = gl.getExtension("WEBGL_lose_context");
+      if (ext && typeof ext.loseContext === "function") { ext.loseContext(); return true; }
+    } catch { /* ignore */ }
+    return false;
+  }
 
   /* Round-transition cover (§ overnight bundle #4). A round-anchor moveTo can
    * take up to 20s (SLOW_TIMEOUT_MS); until it settles, the container still
@@ -726,6 +1185,9 @@ function instrument({ surface, container, viewer }) {
     cancelEdgeRecoveryTimer();
     // A new load supersedes whatever the nav hint was waiting on too.
     cancelNavHint();
+    // §18: a new load supersedes pending render probes — the canvas it was
+    // judging is about to change; a successful load re-arms them.
+    cancelRenderProbe();
     inFlightCount += 1;
     // §15: the injection harness may shorten the budget on a dev host so a
     // timeout scenario doesn't take 20 real seconds. Inert in production.
@@ -779,6 +1241,10 @@ function instrument({ surface, container, viewer }) {
       real.then(
         () => {
           inFlightCount = Math.max(0, inFlightCount - 1);
+          // D1: the SDK canvas may have JUST entered the DOM on this settle
+          // (F5) — re-attach the context listeners on every success (any
+          // purpose), which is the earliest possible bind moment.
+          attachCanvas();
           // The image actually arrived: reveal it (whether on time or late).
           if (coversRound(purpose)) {
             hideCover();
@@ -787,6 +1253,8 @@ function instrument({ surface, container, viewer }) {
             armEdgeRecovery(imageId,
               pano && Number.isFinite(pano.round_number) ? pano.round_number : 0);
             armNavHint();
+            // §18: arm the render-death probe on the same anchor/resume success.
+            armRenderProbe();
           }
           if (settled) {
             // The SDK finished late: correct the record rather than leave a
@@ -867,6 +1335,13 @@ function instrument({ surface, container, viewer }) {
       edgeRecovery = null;
       lastImage = null;
       cancelNavHint();
+      // §18: cancel probes, reset the PER-ROUND rebuild budget (the per-SESSION
+      // budget persists), and drop any pending rebuild verification. Runs
+      // before the pano early-return so a destroy/pre-round-1 call clears too.
+      cancelRenderProbe();
+      renderWatch = null;
+      renderRecovery = renderRecoveryRoundReset(renderRecovery);
+      renderRebuildPending = null;
       if (!pano) return;
       const props = panoSessionProps(pano);
       pushFact(facts.panos, {
@@ -937,15 +1412,38 @@ function instrument({ surface, container, viewer }) {
       if (f) f();
     },
 
+    // Test-only seam (§18): synchronously runs one due render-probe tick, same
+    // convention as __edgeRecoveryTickForTests. Never called in production.
+    __renderProbeTickForTests() {
+      if (renderProbeTimer !== null) { clearTimeout(renderProbeTimer); renderProbeTimer = null; }
+      const f = pendingRenderProbeTick;
+      pendingRenderProbeTick = null;
+      if (f) f();
+    },
+
+    // §7 live-fire harness handle — wired to __gpChaos.killContext on a dev
+    // host only (registerForChaos). Inert data on any other page.
+    __chaosKillContext: chaosKillContext,
+
     destroy() {
       if (destroyed) return;
       destroyed = true;
       iv.endRound();
       if (canvasTimer) clearTimeout(canvasTimer);
       if (moveRetryTimer) { clearTimeout(moveRetryTimer); moveRetryTimer = null; }
-      if (canvas) canvas.removeEventListener("webglcontextlost", onContextLost);
+      // §18: cancel the probe, release the canary GPU context (via
+      // WEBGL_lose_context so iOS reclaims it), detach BOTH canvas listeners.
+      cancelRenderProbe();
+      releaseCanary();
+      detachCanvas();
       if (el && el.removeEventListener) {
         el.removeEventListener("pointerdown", onPointerDown, true);
+      }
+      if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+      if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+        window.removeEventListener("pagehide", onPageHide);
       }
       if (coverEl && coverEl.remove) { try { coverEl.remove(); } catch { /* gone */ } }
       coverEl = null;

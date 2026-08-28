@@ -273,7 +273,6 @@ let sampler = null;        // host-only pool sampler (lazy)
 let pool = null;
 
 let iv = null;             // instrumented viewer wrapper (viewer-ui.js)
-let viewer = null;         // its raw MapillaryJS viewer (this phone's eyes)
 let panoRoundSeen = null;  // round whose pano_session fold is already open
 let currentImageId = null; // where the player IS (movement lands on neighbors)
 let anchoredImageId = null; // the round anchor the viewer was last sent to
@@ -994,7 +993,9 @@ function renderRoundActive() {
       // the arrows when this round allows movement (#7).
       oneShotHint("pano", panoHintCard(
         twistMoveAllowed(room.settings, round.twist ? round.twist.id : null)));
-      if (viewer) viewer.resize();
+      // §3.4/G5: resize through the façade so a §18 rebuild's replacement viewer
+      // is the one resized, never the stale raw alias.
+      if (iv) iv.resize();
     }
     if (!iv) {
       makeViewer();
@@ -1099,13 +1100,15 @@ function makeViewer() {
       bearing: true,
     },
   });
-  viewer = iv.viewer;
+  // §3.4/G5: no cached `viewer` alias — a §18 in-place rebuild swaps the raw
+  // SDK viewer behind the stable `iv` façade, so a stored alias would point at
+  // a removed viewer. Read `iv.viewer` fresh at every use site instead.
   // Construction failed: viewer_init is reported and every moveTo rejects,
   // so the existing "guess from the map" degradation path takes over.
-  if (!viewer) return;
-  viewer.on("pov", scheduleLiveWrite);
-  viewer.on("position", scheduleLiveWrite);
-  viewer.on("image", (ev) => {
+  if (!iv.viewer) return;
+  iv.viewer.on("pov", scheduleLiveWrite);
+  iv.viewer.on("position", scheduleLiveWrite);
+  iv.viewer.on("image", (ev) => {
     // Movement (when allowed) navigates to neighbor images; the TV panel
     // follows this team's own imageId, independent of the other teams.
     currentImageId = ev.image.id;
@@ -1118,7 +1121,6 @@ function destroyViewer() {
     iv.destroy();   // flushes the open pano_session, then viewer.remove()
     iv = null;
   }
-  viewer = null;
   currentImageId = null;
   anchoredImageId = null;
   panoRoundSeen = null;
@@ -1386,7 +1388,8 @@ function placeDecoyMarker(latlng) {
 function backToStreet() {
   localStage = "explore";
   showScreen("p-round");
-  if (viewer) viewer.resize();
+  // §3.4/G5: resize through the façade (rebuild-safe), not the raw alias.
+  if (iv) iv.resize();
   scheduleLiveWrite();
 }
 
@@ -1414,11 +1417,13 @@ function scheduleLiveWrite() {
       pin: null,
     };
     try {
-      if (localStage === "explore" && viewer) {
+      if (localStage === "explore" && iv && iv.viewer) {
+        // Fresh read at use time (§3.4/G5): a rebuild may have swapped the raw viewer.
+        const v = iv.viewer;
         const [pov, center, zoom] = await Promise.all([
-          viewer.getPointOfView(),
-          viewer.getCenter(),
-          viewer.getZoom(),
+          v.getPointOfView(),
+          v.getCenter(),
+          v.getZoom(),
         ]);
         // A NaN center/zoom from a viewer mid-navigation would make Firebase
         // reject the ENTIRE round/live/<tid> patch (dropping stage + pin too);
