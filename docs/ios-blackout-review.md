@@ -160,8 +160,10 @@ incident: even a reliably-delivered event was unobservable.
 ### D. What the recording can and cannot confirm (owner watch-list)
 
 The footage covers 09:11:42→09:13:50 — round 2 in full and the first ~12s
-of round 3. **Caveat first: rrweb does not capture canvas pixels**
-(`captureCanvas` off — by our own masking posture), and the cream
+of round 3. **Caveat at the time of writing: rrweb was not capturing canvas
+pixels** (`captureCanvas` off — the masking posture THEN; superseded the
+same day by the owner decision of 2026-08-28, so a post-decision recording
+shows the pano), and the cream
 fragment / broken-img glyph are compositor artifacts, also invisible in
 replay. The replay will *not* show a black pano. Judge from behavior:
 
@@ -727,7 +729,10 @@ Consent posture: everything above rides `track()`/`trackError()` behind the
 existing gate; the probe reads only our own viewer's pixels and none of its
 signals encode a location, image id, or user input. Replay: no new screens,
 no new maps; the probe's 2D sample canvas and the canary are offscreen and
-never enter the DOM (and `captureCanvas: false` stands regardless).
+never enter the DOM. Note (2026-08-28 owner decision, post-review): the pano
+canvas is now recorded (`captureCanvas: { recordCanvas: true, … }`), so the
+probe's on-screen viewer pixels may appear in replays — game content,
+consistent with the new posture.
 `docs/replay-mask-checklist.md` gets a same-change note recording that
 audit ("render probe: no maskable surface added").
 

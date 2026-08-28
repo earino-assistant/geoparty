@@ -920,8 +920,10 @@ Call sites: callout render (both UIs) → `modifier_callout_shown`;
 ### 5.3 Replay masking
 
 The callout renders **static copy only** — no team name, room code, or
-place name — so no `data-ph-mask` is required; the guess map beneath it
-is already under `blockSelector`. Record exactly that verdict as a new
+place name — so no `data-ph-mask` is required. The guess map beneath it
+has been replay-visible since the 2026-08-28 owner decision (gameplay is
+recorded); the callout adds nothing new to mask. Record exactly that
+verdict as a new
 row in `docs/replay-mask-checklist.md` in the same change (the checklist
 also records reviewed-and-clean surfaces).
 

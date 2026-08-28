@@ -7,6 +7,14 @@ most conventional, familiar word wins. "Share" is the social verb (share icon +
 "share" = trained muscle memory for posting to a group chat). Consistency
 serves affordance; it never overrides it.
 
+> **STALE ROWS — consent banner (2026-08-28).** The "current" banner text in
+> the consent/replay rows below predates the 2026-08-28 replay-privacy owner
+> decision. The live banner (js/consent.js, commit 714d70f) now says the
+> replay shows "maps and street view included" and promises "Never your name,
+> your room code, or anything you type." Re-derive any consent-banner row from
+> js/consent.js before executing this table; do not copy the "current" column
+> for those rows. The .csv/.html siblings are the same vintage — same caveat.
+
 Legend: **keep** = no change (already precise/on-brand). All changes are pure
 copy unless marked **[test]** (a test locks the string and must be synced in
 the same change).

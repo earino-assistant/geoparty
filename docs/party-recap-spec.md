@@ -434,10 +434,11 @@ URLs. The exposure surface is session replay only, and it follows the
 
 - **Masked wholesale** (`data-ph-mask` in markup, §6): `#pRecap`,
   `#hRecap`, `#tvRecap` — captions carry place names.
-- **Maps auto-blocked**: every card map is rendered by
-  `renderRevealScene` and is therefore a `.leaflet-container`, covered by
-  `blockSelector` with no per-id entry (a tile URL is a coordinate). Tile
-  hosts are already absent from `NETWORK_HOST_ALLOWLIST`.
+- **Maps replay-visible**: every card map is rendered by
+  `renderRevealScene` and is therefore a `.leaflet-container`; since the
+  2026-08-28 owner decision (gameplay, not identity) these record
+  normally, and tile hosts remain absent from `NETWORK_HOST_ALLOWLIST`
+  (waterfall shows timing only).
 - **Team names never render in the recap**: no pin tooltips (D4), no
   names in captions (§2.3); the accumulator holds slot ids only (§2.1,
   test-enforced §9.1).

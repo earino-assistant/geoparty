@@ -180,7 +180,9 @@ export const POSTHOG_INIT_OPTIONS = {
   session_recording: {
     maskAllInputs: true,
     maskTextSelector: "[data-ph-mask]",   // team names, room codes (§9.4)
-    captureCanvas: false,                 // WebGL pano NOT recorded (§9.4)
+    captureCanvas: false,                 // SUPERSEDED 2026-08-28 — now
+                                          // { recordCanvas: true, ... }; see
+                                          // the note under §9.4
     recordHeaders: false,
     recordBody: false,
     maskCapturedNetworkRequestFn: (req) => {
@@ -598,6 +600,15 @@ one, and all of it only ever after explicit analytics consent.
   is deliberate: it keeps replay payloads small and keeps street imagery
   (a location proxy) out of PostHog. Debugging does not need the pixels —
   it needs console + network + UI state, which replay provides.
+
+  > **SUPERSEDED 2026-08-28 by owner decision**
+  > (docs/decisions/2026-08-28-replay-privacy.md, GeoParty only).
+  > The premise above — "debugging does not need the pixels" — did not
+  > survive contact with the field: the iOS black-pano investigation was
+  > blocked precisely because the pixels were missing. The pano canvas and
+  > the Leaflet maps are now recorded. Identity masking is unchanged. See
+  > `docs/replay-mask-checklist.md` §3 for the current posture and the
+  > measured constraints on `captureCanvas`.
 - Network capture: timing/status/path only; `recordHeaders`/`recordBody`
   false; query strings stripped in `maskCapturedNetworkRequestFn` (§4.1)
   — Mapillary access tokens travel in query params today, so this strip
@@ -995,8 +1006,10 @@ second session records nothing.
 - **Hard tab deaths** — OOM kills, iOS WebGL tab reloads, and TV-stick
   browser crashes can drop the buffer before `sendBeacon` flushes; the
   exception often outruns the crash, the replay tail may not.
-- **The pano pixels in replays** — deliberately black (`captureCanvas:
-  false`, §9.4), in learning mode exactly as in every later stage.
+- ~~**The pano pixels in replays** — deliberately black (`captureCanvas:
+  false`, §9.4), in learning mode exactly as in every later stage.~~
+  **No longer a blind spot** as of 2026-08-28: the pano canvas is recorded
+  (§9.4 note), so a black or frozen pano is now directly visible.
 - **Internal SDK arrow-click navigation failures** — no rejection reaches
   our code; visible only via console capture inside replays and
   `pano_session` counters, not as classified exceptions.
@@ -1086,6 +1099,13 @@ diagnostic consent for decliners is implemented exactly as specified.
    answer and the player's aim. `blockSelector: ".leaflet-container,
    [data-ph-block]"` plus dropping tile hosts from the waterfall closes it.
    Reveal **place names** are masked for the same reason.
+
+   > **Half superseded 2026-08-28.** The owner ruled that a guess and the
+   > round's location are gameplay, not personal information, so
+   > `.leaflet-container` was dropped from `blockSelector` and the maps
+   > record normally. The **network** half of this item stands unchanged:
+   > OSM tile hosts are still absent from the allowlist, and reveal place
+   > names outside the maps are still masked.
 3. **Stage-1 replay event triggers are NOT configured project-side.** In
    PostHog, `session_recording_event_trigger_config` *gates* recording:
    with triggers set, sessions that never fire the trigger do not record.

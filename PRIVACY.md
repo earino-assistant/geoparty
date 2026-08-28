@@ -51,11 +51,13 @@ recording does and does not contain is fixed in code (`js/analytics.js`):
 - **Everything you type is masked**, always — team names, room codes typed
   into a join box, anything else. Elements that render a team name, a room
   code or a place name are explicitly masked too.
-- **The street imagery is never recorded.** The panorama is a WebGL canvas
-  and canvas recording is off, so it appears as a blank box.
-- **The maps are never recorded.** Map tiles are blocked outright, because
-  a map tile's address *is* a coordinate — recording them would leak both
-  the round's answer and where you were aiming.
+- **The game content itself — the maps and the street view — IS recorded.**
+  Updated 28 August 2026. These used to be blanked out, and blanking them
+  meant that when imagery broke we could not see what had actually gone
+  wrong. A recording now shows the guess map, the reveal map and the
+  panorama as you saw them, including your pin and the round's answer. That
+  is game content, not information about you — and the pin labels on those
+  maps, which carry team names, are still masked.
 - **Network activity is timing only**: request path, status and duration,
   for a short allowlist of hosts. No headers, no request or response
   bodies, no query strings (which is where access tokens live), and map
@@ -116,8 +118,9 @@ What we **never** collect:
 
 - your map guesses or any coordinates — only the computed distance leaves
   your device, and coordinate-shaped properties are actively stripped;
-- the Mapillary image id of any location you were shown (only the opaque
-  pool code), the street imagery itself, or map tiles;
+- the Mapillary image id of any location you were shown — only the opaque
+  pool code (this is about the *events* we send; see "Session replay" above
+  for what a recording shows);
 - team names or anything you type;
 - HTTP headers, request/response bodies, URL query strings, or access
   tokens;
