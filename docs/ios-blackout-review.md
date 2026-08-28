@@ -10,6 +10,248 @@ then a fully black pano with the HUD alive, zero exceptions, zero
 `webgl_context_lost`, network healthy. The failure is invisible to every
 signal we ship today.
 
+> **⚡ UPDATED 2026-08-28 (debug pass).** The §7 checklist was executed
+> against the **served** bundle and the hypotheses adjudicated. Read the
+> new "Verdict" section directly below — it supersedes §1's ranking and
+> adds build-blocking corrections (D1–D7) to §2–§4.
+
+---
+
+## ⚡ Verdict — 2026-08-28 debug pass (supersedes §1's ranking)
+
+**Serving parity, established first:** `https://geoparty.social/release.json`
+= `99df25d`; served `daily.html` / `js/viewer-ui.js` / `js/daily-ui.js` are
+byte-identical to the repo at `99df25d` (and to this working tree). The SDK
+bundle `cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.js` was
+re-fetched today: 1,092,073 bytes, SHA-384 exactly matches the SRI pin in
+`daily.html:166`. Every bundle fact below is from that byte-exact artifact
+(offsets are byte offsets into it).
+
+### A. Bundle facts (each read from the served, SRI-verified bundle)
+
+- **F1 — one canvas per Viewer, created *detached*.** The `Container`
+  constructor (offset ~1015400) creates
+  `this._canvas=this._dom.createElement("canvas","mapillary-canvas")` with
+  **no parent argument** (contrast `createElement("div","mapillary-interactive",this._container)`).
+  The canvas exists but is **not in the DOM** at viewer construction.
+- **F2 — the canvas is appended exactly once, on the first GL render
+  registration, and never replaced.** `GLRenderer._webGLRenderer$`
+  (offset ~990384) = `this._render$.pipe(first(), map(() => { canvasContainer.appendChild(canvas); return new THREE.WebGLRenderer({canvas}); }), publishReplay(1), refCount())`.
+  One append, one renderer, for the life of the Viewer. §7-V "does the SDK
+  recreate its canvas?" — **No, never.**
+- **F3 — components are cover-gated.** `ComponentService.activate(name)`
+  (offset ~622770) marks a component active but only calls its
+  `.activate()` when `!this._coverActivated` — and `_coverActivated`
+  starts `true`. `_uTrue(i.image,"image")` at construction therefore does
+  **not** activate the image component.
+- **F4 — with no initial `imageId`, activation waits for the first
+  successful `moveTo`.** Our `createViewer` passes no `imageId`
+  (viewer-ui.js:239–243), so `ComponentController` (offset ~982276) takes
+  the no-key path: `movedToId$.pipe(first(id => id != null)).subscribe(…
+  componentService.deactivateCover() …)`. Chain: first `moveTo` settles →
+  cover deactivates → `ImageComponent._activate()` (offset ~705599)
+  registers with `glRenderer.render$` → F2 fires → **the canvas enters the
+  DOM only after the first `moveTo` settles.**
+- **F5 — `getCanvas()` returns `null` until then.**
+  `get canvas(){return this._canvas.parentNode ? this._canvas : null}`
+  (offset ~1016117); `Viewer.getCanvas()` (offset ~1087952) returns that
+  getter's value.
+- **F6 — the SDK swallows context loss *by design*.** The embedded
+  three.js `WebGLRenderer` binds `webglcontextlost`/`webglcontextrestored`
+  (offsets 402518/402563 — the only such listeners in the whole bundle);
+  its lost handler (offset ~403420) is
+  `fe(e){e.preventDefault(); console.log("THREE.WebGLRenderer: Context Lost."); g=!0}`
+  — console-only — and `render()` opens with `if(!0===g)return;`
+  (offset 416312): a **silent no-op forever after**. The RAF loop and all
+  page JS keep running; `moveTo` (graph/state layer, pure JS) keeps
+  resolving `ok:true`. If the event is *not* delivered (the WebKit jetsam
+  path), GL calls against a lost context are spec-defined silent no-ops —
+  same outcome. Either way: **no throw, no signal, black canvas, HUD
+  alive.** This is the §7 "does it swallow render-loop failures" answer —
+  it doesn't even need a `catchError`: the loss path *cannot* throw.
+- **F7 — no `catchError→EMPTY` in the GL render pipeline** (`GLRenderer`,
+  offset 988157 onward: no error operator anywhere in the render chain),
+  and the bundled RxJS is v7 (config object with
+  `onUnhandledError`/`onStoppedNotification`, offset ~12500): an exception
+  thrown inside a render subscription is re-thrown asynchronously →
+  `window.onerror` → `$exception`. Her session has zero exceptions with
+  server-side capture ON ⇒ **nothing in the render pipeline threw.**
+- **F8 — teardown deliberately fires a real context loss.**
+  `GLRenderer.remove()` (offset ~991540) calls
+  `getExtension("WEBGL_lose_context").loseContext()`, and
+  `Container.remove()` (offset ~1017089) then removes `canvasContainer`
+  (with the canvas) from the DOM. Consequences: (a) any bound
+  `webglcontextlost` listener **will fire during a normal destroy** unless
+  detached first — today's `destroy()` order is correct (detach at
+  viewer-ui.js:946 before `viewer.remove()` at :955) and must stay
+  normative for the rebuild; (b) after a rebuild there is **no stale
+  canvas** for `querySelector("canvas")` to mis-find.
+- Re-verified: **V1** (context acquisition order `webgl2` → `webgl` →
+  `experimental-webgl`) and **V3** (`preserveDrawingBuffer` defaults false;
+  the renderer is constructed as `new WebGLRenderer({canvas})` with no
+  override — F2) both stand. Bonus: the GL clear color is `0x0f0f0f`
+  (offset ~988900, `new Color(986895)`) — near-black — see D5.
+
+### B. The decisive session fact: our listener was NEVER bound
+
+`attachCanvas()` runs exactly twice: at viewer create and once at
++1500ms (viewer-ui.js:578–580). Nothing re-runs it. By F1–F4 the canvas
+enters the DOM no earlier than *(create → first-attempt gap)* + *(first
+anchor load duration)*. Her numbers: `viewer_init` 09:11:47 (42ms) ⇒
+create ≈ 47.0s; round-1 `imagery_load` ok at 09:11:49 with
+`duration 1700ms` ⇒ attempt started ≈ 47.3s, settled ≈ 49.0s ⇒ canvas
+appended ≈ 49.0s. The one-shot retry fired ≈ 48.5s — **400–500ms before
+the canvas existed**. Both attach attempts found nothing; `canvas` stayed
+`null` for the whole session; **no `webglcontextlost` event was observable
+by our glue, whether or not WebKit delivered one.**
+
+This is deterministic, not probabilistic: the listener binds **only** in
+sessions whose first anchor load settles within ~1.4–1.5s of viewer
+creation. Round-1 loads on cold mobile networks routinely exceed that
+(hers: 1700ms; her *warm* round-2 load was still 1037ms). Two corollaries:
+
+- The historical near-zero rate of `webgl_context_lost` events is largely
+  a **measurement artifact**, not health — most mobile sessions never had
+  the listener. Do not cite that dashboard as evidence about context-loss
+  frequency until the D1 fix ships.
+- §1-H2's "Against" bullet ("the canvas existed inside the attach
+  window") was **wrong** — round-1 *painting* at ~t0+2s proves the canvas
+  arrived *after* the 1.5s window, not inside it. Corrected in place below.
+
+### C. Adjudication
+
+**Mechanism — confirmed, no longer probabilistic:** the round-3 pano was
+a **WebGL-context-dead canvas behind a fully alive page**, invisible by
+construction: our listener was unbound (B), the SDK swallows loss silently
+(F6), nothing in the render path can throw (F7), and `imagery_load` has
+never measured pixels. Every datum in the timeline — silence included —
+is *predicted* by this chain.
+
+**Cause of the context loss** (what §1 was really ranking):
+
+1. **~80–85% — H1's causal story: WebKit GPU-process death / GPU resource
+   eviction under memory pressure.** Unchanged evidence: the cream
+   fragment (partial texture eviction), the broken-`<img>` glyph
+   (decoded-image buffer eviction — an independent memory-pressure
+   fingerprint in the same frame), round-3 timing at peak GPU footprint,
+   the small-RAM 375pt device, the Chrome-iOS-worst cohort gradient.
+   The r2→r3 anchor load is the likeliest kill moment: a fresh pano
+   texture set decode+upload is this page's biggest single GPU-memory
+   spike.
+2. **~15% — NEW residual, surfaced by this pass: compositor/layer detach
+   with a live context.** A known iOS WebKit failure class: the canvas's
+   layer is dropped from the compositor after a memory warning while the
+   GL context stays healthy — `isContextLost()` false, render loop fine,
+   screen black. The probe as designed would read such a canvas "alive".
+   Mitigation is cheap (D3: a `resize()` nudge) and the §7 field watch
+   discriminates: if `render_dead` never fires in the silent cohort while
+   blackouts persist, this is the mechanism.
+3. **≤5% — H3 (SDK render-loop death): killed.** No churn premise (§0.1),
+   no swallow mechanism in the render chain (F7 — a throw would have been
+   an `$exception`; there were zero), and the screenshot shows eviction
+   signatures, not a frozen last frame.
+
+**H1 vs H2 as originally framed is dissolved, not decided.** "Was the
+event delivered?" is unobservable in this session (nobody was listening —
+B) and irrelevant to the fix (the probe polls state; D1 rebinds the
+listener). The §1-H1 Blink-engine caveat is likewise **moot** for this
+incident: even a reliably-delivered event was unobservable.
+
+### D. What the recording can and cannot confirm (owner watch-list)
+
+The footage covers 09:11:42→09:13:50 — round 2 in full and the first ~12s
+of round 3. **Caveat first: rrweb does not capture canvas pixels**
+(`captureCanvas` off — by our own masking posture), and the cream
+fragment / broken-img glyph are compositor artifacts, also invisible in
+replay. The replay will *not* show a black pano. Judge from behavior:
+
+- **09:12:43→09:13:37 (round 2):** does her interaction cadence stay
+  *sighted* — deliberate arrow taps, pauses to look, purposeful pans — all
+  the way to the round's end? JS-side nav works fine on a black canvas
+  (arrows are DOM; `nav_move` counts SDK state changes, not pixels), so
+  r2's healthy-looking `pano_session` (42 taps / 24 moves) does **not**
+  prove r2 had pixels. If the cadence turns repetitive/blind mid-round,
+  the death was mid-r2.
+- **09:13:37→38:** the `pano-cover` element's class flip
+  (visible → hidden, ~1s apart) — confirms the cover lifted onto a dead
+  canvas (the §1 "stuck cover" rule-out, now visually checkable).
+- **09:13:38→09:13:50 (round 3 open):** the discriminator. Sighted r2 +
+  immediately-lost r3 behavior (taps with no reaction, quick retreat to
+  the map button) ⇒ death at the r2→r3 texture upload — the leading H1
+  moment. Already-degraded late-r2 behavior ⇒ death mid-r2.
+- Minor: why the recording flush stopped at 09:13:50 while JS lived to
+  ≥09:14:54 is unexplained — flagged, not chased (does not affect the
+  verdict; the death window is fully covered).
+
+### E. Build corrections D1–D7 (deltas to §2–§4 — Opus dispatch must apply)
+
+- **D1 (supersedes G1's emphasis — this is now THE primary listener fix).**
+  Re-attach on **every successful `attempt()`** (any purpose), using
+  `viewer.getCanvas()` as the primary source with
+  `el.querySelector("canvas")` as fallback; treat `null` as
+  "not present yet" (F5 — it is `null` until the first settle), never as
+  an error. The earliest possible bind moment **is** first-anchor-success;
+  the create-time and +1500ms attaches may stay but are known-insufficient
+  (B). Bind `webglcontextlost` **and** `webglcontextrestored`.
+  New required test: a stub container whose canvas appears only *after*
+  the first successful attempt (the exact incident shape) ⇒ listener
+  bound on that success.
+- **D2 (rebuild ordering is load-bearing, F8).** In `rebuild()`: detach
+  canvas listeners and cancel probes **before** `viewer.remove()` —
+  teardown fires a genuine `loseContext()`. Today's `destroy()` order
+  (:946 before :955) is correct; keep it and add a regression test: a
+  destroy/rebuild with a bound listener emits **zero** `webgl_context_lost`
+  and zero probe verdicts.
+- **D3 (cover the C-2 residual).** On a `"suspect"` verdict, additionally
+  call `iv.resize()` (three.js `setSize` marks `needsRender` ⇒ forced
+  repaint; also nudges WebKit into re-attaching a dropped compositor
+  layer). Non-destructive, free on healthy canvases. The §2.3 policy
+  stands: **no rebuild on suspect** — a nudge is not an action on the
+  viewer's life. Pure core: `classifyRenderProbe` unchanged;
+  `decideRenderProbe` gains `act:"nudge"` for suspect.
+- **D4 (probe schedule is safe as designed).** Probes arm only on load
+  success, so the canvas always exists when they run (F4). No change.
+- **D5 (sample classifier).** The SDK clears to `#0f0f0f` (A, last
+  bullet), so a healthy-idle canvas is *near*-black, not pure black: the
+  sample classifier must treat any **uniform** frame as `"blank"`
+  regardless of the color value. Reaffirms §2.1: sample is corroboration
+  only; `"blank"` never reaches `"dead"`.
+- **D6 (`webglcontextrestored` handling).** three.js `preventDefault()`s
+  the lost event (F6) — the precondition for `restored` to fire — and its
+  restore path re-inits GL state but repaint still needs a `needsRender`
+  trigger. Our restore listener should schedule a probe **and** call
+  `iv.resize()` (guarantees the repaint the probe then verifies).
+- **D7 (G3 confirmed necessary, mechanism now known).** On Daily a round's
+  `pano_session` fold closes only at the *next* `beginRound` or at
+  `destroy` (daily-ui.js calls `endRound` nowhere else) — a mid-round
+  abandon **always** loses the open fold. Her round-3 fold (which would
+  have read ~0 sighted moves — corroboration) died with the reload
+  exactly this way. The `pagehide` flush ships with the build.
+
+### F. Secondary telemetry oddity — adjudicated from code, closed
+
+`guess_submitted` / `reveal_shown` are **party-surface events only** —
+call sites exist solely in host-ui.js (:1169, :1516) and player-ui.js
+(:1565, :1812). daily-ui.js emits `daily_challenge_started/completed`,
+`pano_session`, `imagery_load` — no per-guess events, by design. So
+rounds 1–2 "missing" guess events is **not a loss**, and yes,
+`pano_session` fires on timeout-without-submit (it fires whenever the
+round leaves play, guess or no guess). The brief's "Android Daily session
+today emitted `guess_submitted`×3" is therefore mis-attributed — those
+events can only come from a party surface; one PostHog check of that
+session's events (`guess_submitted` carries `room`/`mode`) will confirm.
+No Daily-iOS event loss exists here.
+
+### G. Field verification (unchanged from §7, now with a discriminator)
+
+After the build ships: `render_dead` should appear precisely in the
+currently-silent cohort (iOS, zero-`$exception` histories). If blackout
+reports persist while `render_dead` stays at zero **and** suspects
+cluster on iOS with `ctx_lost:false` + `sample:"blank"`, the mechanism is
+the C-2 compositor detach — the D3 resize nudge is already the treatment,
+and its efficacy shows up as suspects that stop recurring within the same
+round.
+
 ---
 
 ## 0. Corrections to the brief (verified against `99df25d`)
@@ -49,6 +291,13 @@ recover this failure cheaply**, which raises the value of in-place recovery
 ---
 
 ## 1. Ranked root-cause hypotheses
+
+> **Superseded 2026-08-28 by the ⚡ Verdict above** — kept for the record.
+> Outcome: mechanism (silent context-dead canvas) is now *confirmed*, not
+> ranked; H1's causal story survives at ~80–85%; H2's listener gap turned
+> out to be a certainty (the listener was never bound — Verdict §B), which
+> dissolves the H1-vs-H2 event-delivery question; H3 is killed by bundle
+> facts F6/F7.
 
 ### H1 (leading, ~70%): WebKit GPU-process death / GPU resource eviction, with no `webglcontextlost` delivered
 
@@ -106,11 +355,16 @@ Fit: produces the identical silent outcome; cheap to close regardless.
 
 Against, at `99df25d` on this page:
 
-- MapillaryJS 4.1.2 creates its render canvas once per `Viewer` and does
+- ~~MapillaryJS 4.1.2 creates its render canvas once per `Viewer` and does
   not replace it across `moveTo` calls (verify against the pinned bundle —
   §7 checklist). One viewer lived the whole session, so the canvas at
   t0+1.5s was almost certainly *the* canvas — her round-1 image was already
-  painted at t0+2s, so the canvas existed inside the attach window.
+  painted at t0+2s, so the canvas existed inside the attach window.~~
+  **CORRECTED 2026-08-28 (Verdict §A/§B):** one-canvas-never-replaced is
+  verified (F2), but the canvas is created *detached* and enters the DOM
+  only after the **first `moveTo` settles** (F1–F4) — round 1 settled at
+  ~t0+1.9s, *outside* the 1.5s attach window. "Painted at t0+2s" proved
+  the opposite of what this bullet claimed. The listener was never bound.
 - If the listener was correctly bound and the event fired, we would have
   the issue: she had consent, a fresh exception budget, and
   `webgl_context_lost` is not deduped.
@@ -549,6 +803,10 @@ and grepped). The design's load-bearing facts hold:**
   The probe/rebind should use `iv.viewer.getCanvas()` as the PRIMARY canvas
   source (querySelector("canvas") demoted to fallback), eliminating the
   first-canvas-in-DOM-order risk this checklist worried about. Build note.
+  **2026-08-28 addendum (Verdict F5):** the underlying getter is
+  `this._canvas.parentNode ? this._canvas : null` — it returns **`null`
+  until the first `moveTo` settles**. Callers must treat `null` as
+  "not present yet", never as an error (D1).
 - **V4** — `viewer.remove()` runs a dispose chain (customRenderer →
   customCameraControls → observer → componentController → navigator →
   container). Throw-wrapping stands; no leak evidence either way.
