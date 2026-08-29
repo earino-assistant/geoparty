@@ -70,7 +70,9 @@ const OUTAGE_THRESHOLD = 0.30;   // > this fraction 5xx → outage, abort the ru
 
 // The exact field set MapillaryJS 4.1.2 requests when it hydrates an image, so
 // the probe asks the SDK's full-field question rather than the thumbnail's.
-const SDK_FIELDS = [
+// Exported so the daily fast lane (tools/pool_watch.mjs) verifies with the
+// EXACT same SDK-faithful request instead of a divergent copy.
+export const SDK_FIELDS = [
   "id", "computed_geometry", "geometry", "sequence", "altitude",
   "atomic_scale", "camera_parameters", "camera_type", "captured_at",
   "compass_angle", "computed_altitude", "computed_compass_angle",
@@ -201,7 +203,9 @@ export function isOutage(fiveXX, checked) {
 
 /* ---------------- the network part ---------------- */
 
-async function fetchGraph(id, token) {
+// Exported so tools/pool_watch.mjs (the daily fast lane) verifies a candidate
+// with the identical full-field Graph request — one probe, one place to fix.
+export async function fetchGraph(id, token) {
   const url = "https://graph.mapillary.com/images?image_ids=" +
     `${encodeURIComponent(id)}&fields=${encodeURIComponent(SDK_FIELDS.join(","))}`;
   const ac = new AbortController();

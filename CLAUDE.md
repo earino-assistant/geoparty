@@ -104,8 +104,12 @@ Before finishing any change: `npm test` (all green) and `npm run check`
 - No build step, no npm dependencies, no server-side code. Everything must
   work served as static files (and degrade gracefully offline / file://).
 - Don't touch `tools/` or `data/location_pool.json` unless the task is
-  specifically about the location pool. `data/pool_quarantine.json` is
-  written only by the weekly pool-health PR, which is never auto-merged.
+  specifically about the location pool. `data/pool_quarantine.json` has two
+  writers, both append-only (see docs/field-observability-plan.md §13): the
+  weekly `tools/pool_health.mjs` PR (never auto-merged) and the daily
+  `tools/pool_watch.mjs` fast lane (bounded auto-quarantine + push — ≥3 field
+  failures / 0 successes / double-verified SDK-faithful probe / outage-guarded /
+  announce-on-action, owner decision 2026-08-29).
 - Third-party scripts are pinned with SRI where the asset is versioned
   (PostHog's `array.js` is unversioned and consent-gated instead).
 - Public embeddable keys (Mapillary, Firebase, PostHog) live in client code

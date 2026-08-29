@@ -821,10 +821,54 @@ data without a false-positive-dominated inbox, tuning as needed.
 
 ---
 
-## 13. Pool health check (GitHub Actions)
+## 13. Pool health checks (two lanes)
 
-**Goal:** stop paying the dead-entry tax (skips) permanently — recheck
-field-reported entries and a rotating sample, and *propose* quarantine.
+**Goal:** stop paying the dead-entry tax (skips) permanently — take a genuinely
+dead pool entry out of rotation before players keep dead-ending on it.
+
+There are **two lanes**, and they differ in exactly one dimension — how fast
+they react vs. how much human judgement gates the write:
+
+| | **Weekly lane** — `tools/pool_health.mjs` | **Daily fast lane** — `tools/pool_watch.mjs` |
+|---|---|---|
+| Trigger | GitHub Actions cron (Mon 04:13 UTC) | external scheduler on the CTO's host (owner decision 2026-08-29) |
+| Signal | rotating sample + curated suspects, probed cold | live field failures (`imagery_load`) in the trailing 6 h |
+| Confidence bar | dead on **≥ 2 consecutive weekly runs** | **≥ 3 field failures / 0 successes** in-window, then **double-verified** on the SDK-faithful probe within the one run |
+| Write | opens a **PR** to `data/pool_quarantine.json` | **appends + commits + pushes** `data/pool_quarantine.json` directly |
+| Human gate | **PR is never auto-merged** — owner reviews | **auto-quarantine, no human in the loop** — the bounds below ARE the gate |
+| Noise | logs a run summary | **silence on healthy** — reports only on action / outage / failure |
+
+The daily fast lane is the **explicit, bounded exception** to the otherwise
+firm rule that a quarantine change is human-reviewed. It writes to `main`
+without a PR **only** when every one of these holds (each test-enforced in
+`tests/pool-watch.test.js`):
+
+- **≥ 3** `imagery_load` failures for the entry **and 0** successes in the 6 h
+  window (a live entry always lets *someone* through, so zero-successes is the
+  tell);
+- **not** during a Mapillary-wide outage — a > 40 % failure share (with real
+  volume) trips the **outage guard**: report, quarantine nothing, exit 0;
+- **double-verified dead** against the *same* SDK-faithful full-field Graph
+  request `pool_health.mjs` uses (its exported `fetchGraph` +
+  `classifyGraphResponse`) — two attempts 3 s apart, dead only when **both**
+  fail and neither says alive; a 429 / 401 / network error, or a 5xx the Graph
+  API does not flag `is_transient`, is **never** evidence;
+- the entry is **not already quarantined**;
+- **announce-on-action** — a healthy run is completely silent, so any output at
+  all from the scheduler means something happened and a human should look.
+
+The reverse `poolDiagId → raw image id` mapping is built **locally** from
+`data/location_pool.json` (the forward `poolDiagId` of every pool id, looked
+up — the hash is one-way and is never inverted), exactly as
+`tools/diag_lookup.mjs` does. That mapping never leaves the machine running the
+watcher; PostHog only ever held the pseudonym (§8).
+
+`data/pool_quarantine.json` therefore has **two writers**: the weekly
+PR (never auto-merged) and the daily watch (bounded auto-quarantine, above).
+Both only ever *append* — `filterQuarantined` refuses to empty the pool, so a
+bad entry in the file can never brick the game.
+
+### 13a. Weekly lane — `tools/pool_health.mjs`
 
 - `.github/workflows/pool-health.yml`: weekly cron (Mon 04:13 UTC — odd
   minute, politeness) + `workflow_dispatch`. Timeout 30 min.
