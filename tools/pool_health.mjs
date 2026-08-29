@@ -8,8 +8,19 @@
 //      from dashboard panel 5 into tools/pool-suspects.json) plus 150
 //      rotating-sample entries seeded by ISO week, so the whole pool is
 //      swept over roughly a year.
-//   3. Asks the Mapillary Graph API whether each id still resolves, at ONE
-//      request per ~1.2 s + jitter (≈ 5 minutes of traffic a week).
+//   3. Asks the Mapillary Graph API the SAME question MapillaryJS asks when it
+//      hydrates an image — a full-field GET on graph.mapillary.com/images (the
+//      exact SDK_FIELDS set below), NOT a thumbnail/"does the id resolve" ping.
+//      An id can serve thumbs fine yet 500 with is_transient:true on this
+//      request and dead-end a live round (incident 2026-08-29: image
+//      144692807618687 / poolDiagId crcrtne4, Daily round 5). One request per
+//      ~1.2 s + jitter (≈ 5 minutes of traffic a week).
+//        - An is_transient 5xx can also be a genuine Mapillary blip, so the id
+//          is re-probed ONCE after a 3 s cooloff and only counted dead when
+//          BOTH attempts fail identically (a reproducible 5xx).
+//        - And if more than 30% of a run's ids come back 5xx, that is a
+//          Mapillary outage, not pool rot: the run ABORTS cleanly (exit 0),
+//          writes nothing, and says so.
 //   4. Updates consecutive-failure counts in tools/pool-health-state.json.
 //      The WORKFLOW persists that file between runs via the Actions cache
 //      (never a commit to main), which is what makes the two-strike rule
@@ -54,6 +65,19 @@ const JITTER_MS = 400;
 const RATE_LIMIT_ABORT = 3;      // third 429 → stop the run entirely
 const QUARANTINE_AFTER = 2;      // consecutive dead runs before proposing
 const REQUEST_TIMEOUT_MS = 15000;
+const TRANSIENT_RETRY_MS = 3000; // is_transient 5xx → re-probe the same id once
+const OUTAGE_THRESHOLD = 0.30;   // > this fraction 5xx → outage, abort the run
+
+// The exact field set MapillaryJS 4.1.2 requests when it hydrates an image, so
+// the probe asks the SDK's full-field question rather than the thumbnail's.
+const SDK_FIELDS = [
+  "id", "computed_geometry", "geometry", "sequence", "altitude",
+  "atomic_scale", "camera_parameters", "camera_type", "captured_at",
+  "compass_angle", "computed_altitude", "computed_compass_angle",
+  "computed_rotation", "creator", "exif_orientation", "height", "merge_cc",
+  "mesh", "organization", "quality_score", "sfm_cluster", "thumb_1024_url",
+  "thumb_2048_url", "width",
+];
 
 /* ---------------- tiny helpers ---------------- */
 
@@ -141,10 +165,45 @@ export function proposeQuarantine(entries, existing) {
   return [...out].sort();
 }
 
+/* ---------------- classification (pure) ---------------- */
+
+// Classify ONE Graph response into the run's vocabulary. Pure — the retry
+// orchestration (an is_transient 5xx earns a second chance) lives in checkId.
+//   alive          200 with ≥ 1 image object in `data`
+//   dead           404, or 200 with an empty `data` array (id no longer indexed)
+//   transient_5xx  500/503 with is_transient:true — MAYBE dead, needs a re-probe
+//   rate_limited   429 — inconclusive, but it drives the back-off counter
+//   error          anything else (non-transient 5xx, 400, unparseable body,
+//                  network failure) — inconclusive, never a strike
+export function classifyGraphResponse(status, body) {
+  if (status === 429) return "rate_limited";
+  if (status === 404) return "dead";
+  if (status === 500 || status === 503) {
+    return body && body.error && body.error.is_transient === true
+      ? "transient_5xx"
+      : "error";                     // a non-transient 5xx is inconclusive
+  }
+  if (status >= 200 && status < 300) {
+    const data = body && Array.isArray(body.data) ? body.data : null;
+    if (data === null) return "error";           // 200 but unparseable
+    return data.length >= 1 ? "alive" : "dead";  // empty data → id is gone
+  }
+  return "error";                    // auth / 400 / anything else — inconclusive
+}
+
+// A run-wide guard: an is_transient 5xx storm across many ids is a Mapillary
+// outage, not pool rot. When more than OUTAGE_THRESHOLD of the checked ids come
+// back 5xx we abort and write nothing rather than propose quarantines we would
+// regret next week.
+export function isOutage(fiveXX, checked) {
+  return checked > 0 && fiveXX / checked > OUTAGE_THRESHOLD;
+}
+
 /* ---------------- the network part ---------------- */
 
-async function checkId(id, token) {
-  const url = `https://graph.mapillary.com/${encodeURIComponent(id)}?fields=id`;
+async function fetchGraph(id, token) {
+  const url = "https://graph.mapillary.com/images?image_ids=" +
+    `${encodeURIComponent(id)}&fields=${encodeURIComponent(SDK_FIELDS.join(","))}`;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -155,16 +214,38 @@ async function checkId(id, token) {
       },
       signal: ac.signal,
     });
-    if (res.status === 429) return "rate_limited";
-    if (res.status === 404 || res.status === 400) return "dead";
-    if (!res.ok) return "error";     // 5xx / auth — inconclusive, never dead
     const body = await res.json().catch(() => null);
-    return body && body.id ? "alive" : "dead";
+    return { status: res.status, body };
   } catch {
-    return "error";                  // timeout / DNS — inconclusive
+    return { status: 0, body: null };  // timeout / DNS — inconclusive
   } finally {
     clearTimeout(timer);
   }
+}
+
+// One id, SDK-faithful: the full-field Graph fetch MapillaryJS actually sends.
+// A lone is_transient 5xx can be a Mapillary blip, so on 500/503 we re-probe the
+// SAME id once after a cooloff and only strike when BOTH attempts fail
+// identically. Returns { status, saw5xx }; saw5xx feeds the run-wide outage
+// guard (a 5xx on EITHER attempt counts, recovered or not).
+async function checkId(id, token) {
+  const first = await fetchGraph(id, token);
+  const firstLabel = classifyGraphResponse(first.status, first.body);
+  const first5xx = first.status === 500 || first.status === 503;
+
+  if (firstLabel !== "transient_5xx") {
+    return { status: firstLabel, saw5xx: first5xx };
+  }
+
+  // Reproduce before striking: a genuine outage tends to recover on the retry.
+  await sleep(TRANSIENT_RETRY_MS);
+  const second = await fetchGraph(id, token);
+  const secondLabel = classifyGraphResponse(second.status, second.body);
+  if (secondLabel === "transient_5xx") {
+    return { status: "dead", saw5xx: true };   // reproducible → a real strike
+  }
+  // The retry told a different story — trust it, never strike on the 5xx alone.
+  return { status: secondLabel, saw5xx: true };
 }
 
 /* ---------------- main ---------------- */
@@ -199,11 +280,13 @@ async function main(argv) {
 
   const results = [];
   let rateLimited = 0;
+  let fiveXX = 0;
   let aborted = false;
 
   for (let i = 0; i < checkSet.length; i++) {
     const id = checkSet[i];
-    const status = await checkId(id, token);
+    const { status, saw5xx } = await checkId(id, token);
+    if (saw5xx) fiveXX++;
     results.push({ id, status, checked_at: new Date().toISOString() });
 
     if (status === "rate_limited") {
@@ -228,9 +311,19 @@ async function main(argv) {
   const dead = results.filter((r) => r.status === "dead");
   const errors = results.filter((r) => r.status === "error");
   console.log(`pool_health: ${results.length} checked, ${dead.length} dead, ` +
-    `${errors.length} inconclusive`);
+    `${errors.length} inconclusive, ${fiveXX} saw 5xx`);
 
   if (aborted) return 0;
+
+  // A 5xx storm is a Mapillary outage, not pool rot. Back off: write nothing,
+  // propose nothing — next week's run judges the pool once the API is healthy.
+  if (isOutage(fiveXX, results.length)) {
+    const pct = Math.round((fiveXX / results.length) * 100);
+    console.log(`::notice::${fiveXX}/${results.length} ids (${pct}%) returned ` +
+      "5xx — treating as a Mapillary outage, not pool rot; aborting cleanly, " +
+      "no state written, no PR proposed");
+    return 0;
+  }
 
   const entries = foldState(state, results);
   const existing = readJson(QUARANTINE_FILE, []);
@@ -240,6 +333,7 @@ async function main(argv) {
 
   if (dryRun) {
     console.log("pool_health: --dry-run, writing nothing");
+    for (const r of results) console.log(`  ${r.id} → ${r.status}`);
     console.log(`would quarantine ${added.length}: ${added.join(", ") || "(none)"}`);
     return 0;
   }

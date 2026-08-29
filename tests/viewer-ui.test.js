@@ -14,7 +14,7 @@
 //   E offline mid-round    → network_offline
 //   F no neighbours        → no_neighbors + nav_available:false
 //   G handled skip         → one imagery_load{skips:n}, one deduped issue
-import { test, before, beforeEach } from "node:test";
+import { test, before, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { NAV_HINT_MAX_MS } from "../js/imagery.js";
@@ -490,12 +490,31 @@ test("A: a rejected moveTo classifies, reports, and RETHROWS to the caller", asy
  * ================================================================ */
 
 test("B: a moveTo that never settles times out as network_timeout", async () => {
+  // Deterministic timing: the timeout budget is a real setTimeout and the
+  // reported duration is real elapsed (performance.now). On a slow/virtualised
+  // runner the timer clock can fire slightly EARLY relative to performance.now,
+  // so a wall-clock `duration_ms >= 5` flaked (Math.round(4.4) === 4). Drive
+  // both seams by hand instead: fake setTimeout (fire the budget on demand)
+  // and stub performance.now (the repo's existing clock seam, see the nav-hint
+  // timeout test) so elapsed is exactly the budget, every runner.
   window.__gpChaos.timeoutMs = 5;                 // §15 dev-host knob
   window.__gpChaos.moveTo = () => new Promise(() => {});   // never settles
   const iv = makeHostViewer();
 
-  await assert.rejects(() => iv.moveTo("123456789012345", "anchor"),
-    /timed out/, "the caller sees a rejection instead of hanging forever");
+  const realNow = performance.now;
+  let t = 0;
+  performance.now = () => t;
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const moved = iv.moveTo("123456789012345", "anchor");   // t0 = 0, timer armed
+    t = 5;                                                   // budget elapses
+    mock.timers.tick(5);                                     // fire the timeout
+    await assert.rejects(() => moved,
+      /timed out/, "the caller sees a rejection instead of hanging forever");
+  } finally {
+    mock.timers.reset();
+    performance.now = realNow;
+  }
 
   const ev = lastEvent("imagery_load");
   assert.equal(ev.props.ok, false);

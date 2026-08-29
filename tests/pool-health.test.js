@@ -11,6 +11,8 @@ import {
   buildCheckSet,
   foldState,
   proposeQuarantine,
+  classifyGraphResponse,
+  isOutage,
 } from "../tools/pool_health.mjs";
 
 const ids = (n, prefix = "id") =>
@@ -76,6 +78,57 @@ test("buildCheckSet: at most 100 suspects, however many are curated", () => {
   // suspect-sourced prefix, which is what the first 100 entries are.
   assert.ok(set.slice(0, 100).every((id) => ids(400).includes(id)));
   assert.ok(fromSuspects.length <= 250);
+});
+
+/* ================================================================
+ * SDK-faithful probe classification (incident 2026-08-29). The probe now asks
+ * the SDK's full-field question; a thumb-serving image that 500s with
+ * is_transient:true on that request is what dead-ended a Daily round. These pin
+ * the pure mapping from a Graph response to the run's vocabulary; checkId's
+ * retry orchestration around a transient 5xx is exercised in the sanity run.
+ * ================================================================ */
+
+test("classifyGraphResponse: 200 with ≥1 image object is alive", () => {
+  assert.equal(classifyGraphResponse(200, { data: [{ id: "1" }] }), "alive");
+  assert.equal(
+    classifyGraphResponse(200, { data: [{ id: "1" }, { id: "2" }] }), "alive");
+});
+
+test("classifyGraphResponse: 404 and an empty data array are both dead", () => {
+  assert.equal(classifyGraphResponse(404, null), "dead");
+  assert.equal(classifyGraphResponse(200, { data: [] }), "dead",
+    "the id resolved but is no longer indexed");
+});
+
+test("classifyGraphResponse: an is_transient 5xx is transient_5xx (re-probe)", () => {
+  // The incident shape: HTTP 500 with a Graph error object flagged transient.
+  const body = { error: { message: "…", type: "…", is_transient: true } };
+  assert.equal(classifyGraphResponse(500, body), "transient_5xx");
+  assert.equal(classifyGraphResponse(503, body), "transient_5xx");
+});
+
+test("classifyGraphResponse: a NON-transient 5xx is inconclusive, never dead", () => {
+  assert.equal(
+    classifyGraphResponse(500, { error: { is_transient: false } }), "error");
+  assert.equal(classifyGraphResponse(503, null), "error",
+    "a 5xx we cannot confirm transient is never evidence of pool rot");
+});
+
+test("classifyGraphResponse: 429 is rate_limited, other statuses inconclusive", () => {
+  assert.equal(classifyGraphResponse(429, null), "rate_limited");
+  assert.equal(classifyGraphResponse(400, null), "error",
+    "a 400 is our bug, not a dead image");
+  assert.equal(classifyGraphResponse(401, null), "error");
+  assert.equal(classifyGraphResponse(0, null), "error", "network failure");
+  assert.equal(classifyGraphResponse(200, null), "error", "unparseable body");
+});
+
+test("isOutage: fires only above 30% of the checked ids, and never on zero", () => {
+  assert.equal(isOutage(0, 0), false, "no checks → no outage");
+  assert.equal(isOutage(3, 10), false, "exactly 30% is not > 30%");
+  assert.equal(isOutage(4, 10), true, "40% is an outage");
+  assert.equal(isOutage(1, 100), false, "one blip is not an outage");
+  assert.equal(isOutage(51, 100), true);
 });
 
 test("foldState: consecutive deaths accumulate, a live check resets", () => {
