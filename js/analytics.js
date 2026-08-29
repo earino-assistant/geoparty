@@ -383,13 +383,26 @@ export const EVENT_SCHEMA = Object.freeze({
   // Daily mid-run persistence (docs/daily-persistence-spec.md §10). Fired at
   // the moment of choice on a device that had saved mid-run state:
   // action ∈ "resume" (continued at round rounds_done+1, incl. the 5-round
-  // finalize rescue) | "restart" ("Start over" chosen) | "discarded" (state
-  // was invalid/drifted and a fresh run started). rounds_done is how many
-  // rounds the save held (0 when unparseable). No coordinate, pin, image id,
-  // or payload byte rides — aggregates only.
+  // finalize rescue) | "discarded" (the save was invalid/drifted and a fresh
+  // run started — the one forced-fresh path). "restart" is RETIRED: the
+  // player-facing "Start over" was removed 2026-08-29 (owner directive — once
+  // you've started you may only continue), so it has no live call site, though
+  // the string still appears on historical events and the field stays free.
+  // rounds_done is how many rounds the save held (0 when unparseable). No
+  // coordinate, pin, image id, or payload byte rides — aggregates only.
   daily_resumed: {
     day_number: "int", rounds_done: "int", hard: "bool", action: "string",
   },
+  // Poisoned-anchor skip (owner hotfix 2026-08-29, daily.js §poisoned-anchor).
+  // Fired when a Daily round's anchor failed to load on a transient-but-
+  // persistent class (e.g. HTTP 500 is_transient) even after DAILY_ANCHOR_RETRY_MAX
+  // same-anchor retries, so the seeded sampler skipped past it to the next
+  // entry (skip-with-replacement — the run never dead-ends). pool_entry is the
+  // opaque poolDiagId of the SKIPPED entry (never the raw Mapillary id, never a
+  // coordinate); attempts is how many load attempts were burned on it before
+  // the skip (retries + 1). KPI: daily anchor-skip rate = daily_anchor_skipped
+  // ÷ daily_challenge_started — a spike names a freshly-rotted pool entry.
+  daily_anchor_skipped: { pool_entry: "string", attempts: "int" },
   // Party game-over "Where were the places" recap (docs/party-recap-spec.md).
   // Fired at most ONCE per game-over render, when the recap is actually
   // engaged — a carousel card scrolled. surface: "host" | "player" (the TV

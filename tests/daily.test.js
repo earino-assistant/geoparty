@@ -16,6 +16,10 @@ import {
   daysBetweenKeys,
   dailyRoundSeconds,
   dailyMoveAllowed,
+  DAILY_ANCHOR_RETRY_MAX,
+  DAILY_ANCHOR_RETRY_BACKOFF_MS,
+  decideAnchorFailure,
+  anchorRetryDelayMs,
   dailyResultKey,
   newDailyRun,
   recordDailyRound,
@@ -490,6 +494,82 @@ test("placesFromCursors: a cursor beyond the order returns null", () => {
     { name: "B", lat: 2, lng: 2 },
   ];
   assert.equal(placesFromCursors(order, [1, 3]), null);   // 3 → order[2] absent
+});
+
+/* ---------------- poisoned-anchor skip (owner hotfix 2026-08-29) ---------- */
+
+test("decideAnchorFailure: a viewer stub is a device failure, never a skip", () => {
+  // iv.ok === false — the SDK is blocked / WebGL off / offline. Skipping past
+  // the entry would grind the whole pool, so the caller keeps the retry surface.
+  assert.equal(decideAnchorFailure({ viewerStub: true, retriesDone: 0 }), "stub");
+  assert.equal(decideAnchorFailure({ viewerStub: true, retriesDone: 5 }), "stub");
+});
+
+test("decideAnchorFailure: a live-entry transient failure retries, then skips", () => {
+  // The first two failures (0 and 1 retries done) retry the SAME anchor; once
+  // DAILY_ANCHOR_RETRY_MAX retries are spent, the poisoned entry is skipped.
+  assert.equal(decideAnchorFailure({ viewerStub: false, retriesDone: 0 }), "retry");
+  assert.equal(decideAnchorFailure({ viewerStub: false, retriesDone: 1 }), "retry");
+  assert.equal(decideAnchorFailure({ viewerStub: false, retriesDone: 2 }), "skip");
+  assert.equal(decideAnchorFailure({ viewerStub: false, retriesDone: 3 }), "skip");
+});
+
+test("decideAnchorFailure: junk/absent inputs degrade to a safe retry", () => {
+  assert.equal(decideAnchorFailure(), "retry");
+  assert.equal(decideAnchorFailure({}), "retry");
+  assert.equal(decideAnchorFailure({ viewerStub: false, retriesDone: -1 }), "retry");
+  assert.equal(decideAnchorFailure({ viewerStub: false, retriesDone: NaN }), "retry");
+});
+
+test("anchor retry constants: the bound IS the design — guards the forever-retry regression", () => {
+  // A larger DAILY_ANCHOR_RETRY_MAX re-introduces the terminal-Retry dead-end
+  // this hotfix removes; a fractional/huge one would spin. Pin it small.
+  assert.equal(DAILY_ANCHOR_RETRY_MAX, 2, "the constant this hotfix depends on");
+  assert.ok(Number.isInteger(DAILY_ANCHOR_RETRY_MAX) &&
+    DAILY_ANCHOR_RETRY_MAX >= 1 && DAILY_ANCHOR_RETRY_MAX <= 3);
+  assert.ok(Number.isFinite(DAILY_ANCHOR_RETRY_BACKOFF_MS) &&
+    DAILY_ANCHOR_RETRY_BACKOFF_MS >= 0);
+});
+
+test("anchorRetryDelayMs: fast linear backoff, bounded, junk-safe", () => {
+  assert.equal(anchorRetryDelayMs(1), DAILY_ANCHOR_RETRY_BACKOFF_MS);
+  assert.equal(anchorRetryDelayMs(2), 2 * DAILY_ANCHOR_RETRY_BACKOFF_MS);
+  // Non-positive / non-finite collapses to a single base delay, never 0-spin.
+  assert.equal(anchorRetryDelayMs(0), DAILY_ANCHOR_RETRY_BACKOFF_MS);
+  assert.equal(anchorRetryDelayMs(-3), DAILY_ANCHOR_RETRY_BACKOFF_MS);
+  assert.equal(anchorRetryDelayMs(NaN), DAILY_ANCHOR_RETRY_BACKOFF_MS);
+});
+
+test("poisoned-anchor skip: the skipped slot never distorts 5-round accounting", () => {
+  // A run where round 2's anchor was poisoned and skipped (cursor gap 2→4).
+  // The board still shows FIVE played places and the cursors round-trip: the
+  // skipped entry (order[2]) is simply never referenced.
+  const order = [
+    { name: "A", lat: 1, lng: 1, image_id: "a" },   // round 1  (cursor 1)
+    { name: "B", lat: 2, lng: 2, image_id: "b" },   // round 2  (cursor 2)
+    { name: "P", lat: 9, lng: 9, image_id: "p" },   // POISONED — skipped, unplayed
+    { name: "C", lat: 3, lng: 3, image_id: "c" },   // round 3  (cursor 4)
+    { name: "D", lat: 4, lng: 4, image_id: "d" },   // round 4  (cursor 5)
+    { name: "E", lat: 5, lng: 5, image_id: "e" },   // round 5  (cursor 6)
+  ];
+  const cursors = [1, 2, 4, 5, 6];   // strictly increasing across the poison gap
+  const places = placesFromCursors(order, cursors);
+  assert.equal(places.length, DAILY_ROUNDS);
+  assert.deepEqual(places.map((p) => p.name), ["A", "B", "C", "D", "E"]);
+  // The poisoned entry's coords never appear in the reconstructed board.
+  assert.ok(!places.some((p) => p.lat === 9 && p.lng === 9));
+  // A save carrying that gapped cursor sequence still parses (the strictly-
+  // increasing invariant tolerates the skip — that is why cursors, not round
+  // indices, are persisted).
+  let run = newDailyRun("20260819");
+  for (let i = 0; i < DAILY_ROUNDS; i++) {
+    run = recordDailyRound(run, { distanceKm: 10, elapsedMs: 3000, lat: 0, lng: 0 });
+  }
+  const s = memStorage();
+  saveInflight(s, buildInflight(run, cursors, 4242));
+  const parsed = parseInflight(s.getItem(DAILY_INFLIGHT_KEY), "20260819");
+  assert.ok(parsed, "a 5-round save with a poison-skip cursor gap parses");
+  assert.deepEqual(parsed.cursors, cursors);
 });
 
 test("saveInflight/clearInflight: storage errors are swallowed", () => {

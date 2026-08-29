@@ -66,10 +66,10 @@
     </div>
     <div class="action-bar">
       <a id="dIntroBack" class="daily-back-link" href="index.html">← Home</a>
-      <!-- Mid-run persistence (docs/daily-persistence-spec.md §7): the ghost
-           secondary "Start over" appears only on a resume intro; hidden
-           otherwise. Destructive-as-ghost per ui-ux-design-review §4.1. -->
-      <button id="btnDStartOver" class="btn-ghost hidden">Start over</button>
+      <!-- Mid-run persistence (docs/daily-persistence-spec.md §7): the resume
+           intro relabels this single primary button as the "Resume — round N"
+           affordance. Owner directive 2026-08-29: once you've started you may
+           only continue, so there is no "Start over" secondary. -->
       <button id="btnDailyStart" class="btn-primary">Play today's Daily</button>
     </div>
   </section>

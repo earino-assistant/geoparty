@@ -152,8 +152,10 @@ one.
 - Daily resume intro (mid-run persistence, `docs/daily-persistence-spec.md`
   §7): **nothing to mask, no selector change**. The resume affordance is only
   a round index (`#btnDailyStart` relabelled "Resume — round N of 5") and a
-  score (`#dIntroRecords`, already unmasked above); `#btnDStartOver` is static
-  copy. No team name, room code, place name, or map renders on this surface
+  score (`#dIntroRecords`, already unmasked above). The resume surface offers a
+  single "continue" action — the "Start over" button (`#btnDStartOver`) was
+  removed 2026-08-29 (owner directive). No team name, room code, place name, or
+  map renders on this surface
 
 ### Cross-page
 - `.leaflet-tooltip` — Leaflet pin labels carry team names on reveal maps

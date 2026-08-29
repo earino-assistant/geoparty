@@ -361,6 +361,22 @@ test("sanitizeEvent: daily_resumed passes the sanitizer with aggregate propertie
   assert.equal(finalize.props.rounds_done, 6);   // int coercion
 });
 
+test("sanitizeEvent: daily_anchor_skipped — opaque pool id + count, nothing derived from a place", () => {
+  const out = sanitizeEvent("daily_anchor_skipped", {
+    pool_entry: "crcrtne4", attempts: 3,
+    // A skip is triggered by a specific pool entry, but NOTHING that reverses to
+    // it may ride: no raw Mapillary id, no coordinate, no place name.
+    image_id: "144692807618687", lat: 35.01, lng: 135.77,
+    place_name: "Kyoto, Japan", coordinates: [35, 135],
+  });
+  assert.deepEqual(out.props, { pool_entry: "crcrtne4", attempts: 3 });
+  // attempts is a strict int (retries + 1).
+  const coerced = sanitizeEvent("daily_anchor_skipped", {
+    pool_entry: "k3x9q0ar", attempts: 3.7,
+  });
+  assert.equal(coerced.props.attempts, 4);
+});
+
 test("sanitizeEvent: party_recap_engaged — aggregates only, no place/coordinate/team", () => {
   const out = sanitizeEvent("party_recap_engaged", {
     room: "ABCDEF", mode: "h2h", surface: "player", rounds_shown: 5, source: "swipe",

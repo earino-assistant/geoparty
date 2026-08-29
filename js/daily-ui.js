@@ -28,6 +28,8 @@ import {
   dailyKeyFromNumber,
   dailyRoundSeconds,
   dailyMoveAllowed,
+  decideAnchorFailure,
+  anchorRetryDelayMs,
   DAILY_RESULT_KEY,
   DAILY_RESULT_HARD_KEY,
   newDailyRun,
@@ -73,7 +75,7 @@ import {
   initSound, playSound, buzz, stampFlash, prefersReducedMotion, spawnConfetti,
 } from "./fx-ui.js";
 import { loadPool, PoolSampler } from "./pool.js";
-import { scrubErrorMessage } from "./imagery.js";
+import { scrubErrorMessage, poolDiagId } from "./imagery.js";
 import { track } from "./consent.js";
 import { setActiveScreen } from "./chrome-ui.js";
 import { createViewer, loadRoundImage } from "./viewer-ui.js";
@@ -265,8 +267,8 @@ function resolveSavedRun(saved) {
 async function startChallenge() {
   // Mid-run persistence (§7): the calm intro's primary button carries the
   // resume affordance when a valid mid-run save exists — dispatch to it here
-  // so the button wiring stays single. "Start over" clears resumeState first,
-  // so it falls through to the fresh path below.
+  // so the button wiring stays single. Owner directive 2026-08-29: once you've
+  // started, you may only continue — there is no player-facing "Start over".
   if (resumeState) { await resumeChallenge(); return; }
   // R1: re-check the replay lock BEFORE anything async. A completed board for
   // this day+mode must never replay — not even when this tap raced the boot's
@@ -373,16 +375,9 @@ async function startRound() {
   // failure recovers instead of stranding the controls.
   if (iv && iv.setMoveAllowed) iv.setMoveAllowed(dailyMoveAllowed(mode === "hard"));
   iv.beginRound(run.rounds.length + 1);
-  const { entry, skips, degraded } = await loadRoundImage(sampler, iv, "anchor");
-  if (!entry) {
-    if (degraded) {
-      if (iv && iv.ok === false) destroyViewer();
-      showImageryDegraded();
-      return;
-    }
-    finishRun();
-    return;
-  }
+  const loaded = await loadAnchorHealed();
+  if (!loaded) return;   // routed to a terminal surface (stub retry / finishRun)
+  const { entry, skips } = loaded;
   noticeDegradedImagery(skips);
   sampler.advance();
   current = entry;
@@ -392,6 +387,60 @@ async function startRound() {
   const tag = mode === "hard" ? " ⚡" : "";
   $("dHudRound").textContent = `Round ${run.rounds.length + 1}/${DAILY_ROUNDS}${tag}`;
   startTick();
+}
+
+// Load this round's anchor, healing past a poisoned entry (daily.js
+// "poisoned-anchor skip", owner hotfix 2026-08-29). A transient anchor failure
+// retries the SAME entry up to DAILY_ANCHOR_RETRY_MAX times (fast backoff) and
+// then SKIPS it — advancing the seeded sampler and loading the next entry — so
+// a persistently 500ing anchor can never strand the run at a terminal Retry
+// screen mid-play. A viewer STUB (iv.ok === false) is a whole-device failure,
+// not a per-entry one, so it still surfaces the retryable degraded screen (a
+// skip there would grind the whole pool). Returns { entry, skips } on success,
+// or null when it routed to a terminal surface (stub degraded screen, or
+// finishRun on a genuinely exhausted pool) and the caller must return.
+async function loadAnchorHealed() {
+  let skips = 0;
+  let retriesDone = 0;
+  for (;;) {
+    // eslint-disable-next-line no-await-in-loop
+    const r = await loadRoundImage(sampler, iv, "anchor");
+    skips += r.skips;
+    if (r.entry) return { entry: r.entry, skips };
+    if (!r.degraded) { finishRun(); return null; }   // pool exhausted
+    const decision = decideAnchorFailure({
+      viewerStub: !!(iv && iv.ok === false), retriesDone,
+    });
+    if (decision === "stub") {
+      if (iv && iv.ok === false) destroyViewer();
+      showImageryDegraded();
+      return null;
+    }
+    if (decision === "retry") {
+      retriesDone += 1;
+      // eslint-disable-next-line no-await-in-loop
+      await anchorRetryBackoff(retriesDone);
+      continue;   // same anchor — the sampler was NOT advanced
+    }
+    // "skip": heal past the poisoned location. It is NOT a played round — no
+    // run.rounds entry and no cursor is pushed for it, so score / 5-round
+    // accounting and the inflight cursors stay truthful (the next lock-in's
+    // post-advance cursor already points past the skipped slot).
+    const poisoned = sampler.peek();
+    track("daily_anchor_skipped", {
+      pool_entry: poisoned ? poolDiagId(poisoned.image_id) : "",
+      attempts: retriesDone + 1,
+    });
+    sampler.advance();
+    skips += 1;
+    retriesDone = 0;
+  }
+}
+
+// Fast-backoff sleep between same-anchor retries; the delay itself is the pure
+// anchorRetryDelayMs(retryNumber) (daily.js).
+function anchorRetryBackoff(retryNumber) {
+  return new Promise((resolve) => setTimeout(resolve, anchorRetryDelayMs(retryNumber)));
 }
 
 // G6: hard mode reads the single frame (no movement). The viewer's navigation
@@ -1072,7 +1121,6 @@ function startHardMode() {
 // stays 1 started : 1 completed).
 async function resumeChallenge() {
   $("btnDailyStart").disabled = true;
-  $("btnDStartOver").classList.add("hidden");
   $("dIntroErr").textContent = "";
   const held = resumeState;
   try {
@@ -1095,9 +1143,10 @@ async function resumeChallenge() {
       // then-current mode; a HARD-run drift discard reaches startChallenge's
       // fresh path with `mode === "hard"` but a stale normal-flagged `run`
       // (hard:false), so re-mint it for the effective mode BEFORE the fresh
-      // path uses it — mirroring startOver. Otherwise the fresh run runs the
-      // 30s-vs-60s clock wrong, re-persists hard:false, and clobbers the
-      // NORMAL result slot at save time.
+      // path uses it. Otherwise the fresh run runs the 30s-vs-60s clock wrong,
+      // re-persists hard:false, and clobbers the NORMAL result slot at save
+      // time. This is the ONE forced-fresh path left (an invalid/drifted save),
+      // and it is silent — not a player-facing restart (owner directive).
       run = newDailyRun(runKey, mode === "hard");
       toast("Couldn't restore your earlier rounds — starting today's five fresh.");
       await startChallenge();   // resumeState is null now → the fresh path
@@ -1122,11 +1171,12 @@ async function resumeChallenge() {
     await startRound();
   } catch (e) {
     console.error(scrubErrorMessage(e));
-    // Any unexpected throw degrades to today's ordinary behavior (§8).
+    // Any unexpected throw degrades to today's ordinary behavior (§8): the
+    // resume affordance stays live so the player can retry continuing (the
+    // only action offered — owner directive, no "Start over").
     resumeState = held;
     $("dIntroErr").textContent = "Couldn't load today's places — try again.";
     $("btnDailyStart").disabled = false;
-    $("btnDStartOver").classList.remove("hidden");
   }
 }
 
@@ -1189,25 +1239,11 @@ async function finalizeInflight() {
   }
 }
 
-// "Start over" (§7): drop the mid-run save and play today's five fresh. This
-// is a real second start — the fresh path re-fires daily_challenge_started,
-// honest in the funnel.
-function startOver() {
-  const roundsDone = resumeState ? resumeState.run.rounds.length : 0;
-  const wasHard = resumeState ? !!resumeState.run.hard : (mode === "hard");
-  clearInflight(localStorage);
-  track("daily_resumed", {
-    day_number: runDayNum, rounds_done: roundsDone,
-    hard: wasHard, action: "restart",
-  });
-  resumeState = null;
-  $("btnDStartOver").classList.add("hidden");
-  // Reset to a fresh run for the resumed board and play it.
-  run = newDailyRun(runKey, mode === "hard");
-  cursors = [];
-  inflightPoolCheck = null;
-  startChallenge();
-}
+// Owner directive 2026-08-29: "if you started you should only be allowed to
+// continue." The player-facing "Start over" (a daily_resumed action=restart)
+// has been REMOVED from the resume surface — the only forced-fresh path left is
+// the silent invalid/drifted-save discard in resumeChallenge above
+// (action=discarded), which is not a player-initiated restart.
 
 /* ================================================================
  * Intro / boot
@@ -1237,16 +1273,15 @@ function renderIntro() {
   }
 
   // Mid-run persistence (§7): a resume intro relabels the primary button as
-  // the resume affordance (the label IS the indicator) and reveals the ghost
-  // "Start over". The round number comes from the save, not the (still empty)
-  // run object. Never on a duel (resumeState is null for duel/exhibition).
+  // the resume affordance (the label IS the indicator). The round number comes
+  // from the save, not the (still empty) run object. Never on a duel
+  // (resumeState is null for duel/exhibition). Owner directive 2026-08-29: the
+  // resume surface offers exactly ONE action (continue) — there is no
+  // "Start over" secondary any more.
   if (resumeState) {
     const roundsDone = resumeState.run.rounds.length;
     $("btnDailyStart").textContent =
       `Resume — round ${roundsDone + 1} of ${DAILY_ROUNDS}`;
-    $("btnDStartOver").classList.remove("hidden");
-  } else {
-    $("btnDStartOver").classList.add("hidden");
   }
 
   // Records line (G1/G8) — streak + PB, normal board on a normal intro.
@@ -1294,7 +1329,6 @@ $("btnDLockIn").addEventListener("click", () => lockIn(false));
 $("btnDNext").addEventListener("click", nextOrFinish);
 $("btnDHardStart").addEventListener("click", startHardMode);
 $("btnDHardDone").addEventListener("click", startHardMode);
-$("btnDStartOver").addEventListener("click", startOver);
 // §6: the done-screen "How to play" link.
 $("dHowto").addEventListener("click", () =>
   track("howto_opened", { source: "gameover" }));
@@ -1392,6 +1426,7 @@ if (bootRoute === "instant-verdict") {
   finalizeInflight();
 } else {
   // "resume" and "play" both land on the intro; the resume affordance is the
-  // relabeled primary button + "Start over" (rendered by renderIntro above).
+  // relabeled primary button — the single "continue" action (rendered by
+  // renderIntro above).
   showScreen("d-intro");
 }

@@ -34,6 +34,60 @@ export function dailyMoveAllowed(hard) {
   return hard ? HARD_MOVE_ALLOWED : DAILY_MOVE_ALLOWED;
 }
 
+/* ================================================================
+ * Poisoned-anchor skip (owner hotfix 2026-08-29). A Daily round's anchor can
+ * fail ok:false on a TRANSIENT-but-persistent class — HTTP 500 `is_transient`
+ * from the graph API for the SDK's full-field request while the thumb serves
+ * fine (pool image 144692807618687, poolDiagId crcrtne4). loadRoundImage
+ * (viewer-ui.js) classifies that as a live entry and hands back a retryable
+ * `degraded` state, so the old daily path re-attempted the SAME dead anchor
+ * behind a terminal "Retry" screen forever — the owner hit it at round 5.
+ *
+ * The heal: retry the same anchor a BOUNDED number of times, then SKIP the
+ * poisoned location — advance the seeded sampler to the next drafter entry and
+ * play that instead — so a persistently 500ing anchor can never dead-end the
+ * run mid-play. The skipped slot is never a played round (no run.rounds entry,
+ * no cursor pushed for it), so score / 5-round accounting and the inflight
+ * cursors stay truthful; the day's board simply replaces the dead slot with
+ * the next entry and the recap still shows five played places.
+ *
+ * A viewer STUB (iv.ok === false: SDK blocked / WebGL off / offline / the
+ * constructor threw) is a whole-DEVICE failure, not a per-entry one — skipping
+ * past it would grind the entire pool for nothing (the exact case the stub
+ * short-circuit in loadRoundImage exists to prevent), so it is NEVER skipped:
+ * the caller keeps the retryable degraded surface for that.
+ * ================================================================ */
+
+// Retry the SAME failing anchor at most this many times before skipping it.
+// The bound IS the design — a mutation-guard test pins it; a larger value
+// re-introduces the forever-retry dead-end this hotfix removes.
+export const DAILY_ANCHOR_RETRY_MAX = 2;
+// Fast-backoff base between same-anchor retries (the glue sleeps this long).
+export const DAILY_ANCHOR_RETRY_BACKOFF_MS = 400;
+
+// Linear fast backoff for retry N (1-based): 400 ms, then 800 ms. Pure,
+// bounded, total — junk collapses to one base delay, never a hot loop.
+export function anchorRetryDelayMs(retryNumber) {
+  const n = Number.isFinite(retryNumber) && retryNumber > 0
+    ? Math.floor(retryNumber) : 1;
+  return DAILY_ANCHOR_RETRY_BACKOFF_MS * n;
+}
+
+// The decision after a Daily anchor load returned `degraded` (retryable). Pure,
+// total, first-match-wins.
+//   viewerStub:  iv.ok === false — a whole-device failure (keep the retry surface)
+//   retriesDone: how many same-anchor retries already happened (0 on the first
+//                failure of this anchor)
+// → "stub"  — a device-level failure; surface the retryable degraded screen
+//   "retry" — try the SAME anchor again after a backoff (sampler NOT advanced)
+//   "skip"  — retries exhausted; advance past the poisoned entry, load the next
+export function decideAnchorFailure({ viewerStub, retriesDone } = {}) {
+  if (viewerStub) return "stub";
+  const done = Number.isFinite(retriesDone) && retriesDone > 0
+    ? retriesDone : 0;
+  return done < DAILY_ANCHOR_RETRY_MAX ? "retry" : "skip";
+}
+
 // Daily #1. The number is a day counter, not a date — "Daily #37" is what
 // the share card brags, exactly like Wordle's puzzle number.
 export const DAILY_EPOCH_KEY = "20260819";
