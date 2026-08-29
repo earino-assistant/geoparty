@@ -10,11 +10,22 @@ Two mechanisms, both configured in `js/analytics.js`:
 
 - `maskTextSelector: "[data-ph-mask], .leaflet-tooltip"` — text inside a
   matching element (and its descendants) is replaced with asterisks.
-- `blockSelector: ".leaflet-container, [data-ph-block]"` — the element is
-  not recorded at all, just a placeholder box.
+- `blockSelector: "[data-ph-block]"` — the element is not recorded at all,
+  just a placeholder box. **No element carries this attribute today.**
 
-Plus `maskAllInputs: true`, which covers every `<input>` unconditionally,
-and `captureCanvas: false`, which covers the WebGL panorama.
+Plus `maskAllInputs: true`, which covers every `<input>` unconditionally, and
+`captureCanvas: { recordCanvas: true, ... }`, which now RECORDS the WebGL
+panorama rather than leaving it a blank box (§3).
+
+> **Owner decision, 2026-08-28 — gameplay is no longer masked.**
+> `docs/decisions/2026-08-28-replay-privacy.md` (GeoParty only;
+> Flag Party is unchanged). A guess, and where a player navigated, are
+> gameplay — not personal information — and blanking them made imagery bugs
+> undebuggable. So the guess map, the reveal map and the street-view pano are
+> deliberately **visible** in recordings now. This checklist is therefore
+> about **identity**: team names, room codes and place names. Everything in
+> §1, §2 and the `.leaflet-tooltip` rule below is unchanged and still a
+> ship-blocker. See §3 for what changed and what did not.
 
 ## 1. Inputs (covered by `maskAllInputs`, listed for completeness)
 
@@ -57,8 +68,9 @@ into it, so a future scoreboard row cannot slip through unmasked.
 - `#hRecap` — the party game-over "Where were the places" recap: masked
   wholesale, because the per-round carousel captions carry place names
   (`partyrecap.partyRecapCaption`). The carousel card maps inside it (built
-  in `js/recap-ui.js`) are `.leaflet-container`, already blocked by
-  `blockSelector` — see §3
+  in `js/recap-ui.js`) are `.leaflet-container` and are now VISIBLE in
+  recordings — see §3. The wholesale mask here still covers the captions,
+  which is where the place names are
 - `#hChampion`, `#hNightTally`, `#hNightHook` — G3 Crown Night champion /
   tally / "Game N?" hook carry team names
 - `#hostShowdownResults` — injected at runtime; masked in `host-ui.js`
@@ -85,8 +97,9 @@ one.
 - `#pRecap` — the party game-over "Where were the places" recap: masked
   wholesale, because the per-round carousel captions carry place names
   (`partyrecap.partyRecapCaption`). The carousel card maps inside it (built
-  in `js/recap-ui.js`) are `.leaflet-container`, already blocked by
-  `blockSelector` — see §3
+  in `js/recap-ui.js`) are `.leaflet-container` and are now VISIBLE in
+  recordings — see §3. The wholesale mask here still covers the captions,
+  which is where the place names are
 - `#pChampion`, `#pNightTally`, `#pNightHook` — G3 Crown Night champion /
   tally / "Game N?" hook carry team names
 - `#pGameOverTitle` — the win celebration's headline: a non-champion win
@@ -118,7 +131,8 @@ one.
 - `#tvRecap` — the party game-over "Where were the places" recap: masked
   wholesale, because the auto-cycling card's caption carries a place name
   (`partyrecap.partyRecapCaption`). Its card map `#tvRecapMap` is a
-  `.leaflet-container`, already blocked by `blockSelector` — see §3
+  `.leaflet-container` and is now VISIBLE in recordings — see §3. The
+  wholesale mask here still covers the caption, which carries the place name
 - `#tvPlace`, `#h2hPlace` — the round's answer
 - `#tvShowdown`, the guess-screen team caption — injected at runtime;
   masked in `screen-ui.js`
@@ -136,7 +150,8 @@ one.
 - `#dDoneRecap` — the "Your five places" recap: masked wholesale, because the
   per-round carousel captions carry city names (`recap.recapCaption`). The
   carousel card maps inside it (built in `daily-ui.js#renderRecap`) are
-  `.leaflet-container`, already blocked by `blockSelector` — see §3
+  `.leaflet-container` and are now VISIBLE in recordings — see §3. The
+  wholesale mask here still covers the captions, which carry the city names
 - `#dChallengeEyebrow` — unmasked: it shows the public Daily number only. The
   ghost payload is stripped from the URL (`history.replaceState`) before any
   capture and never renders (G5)
@@ -166,65 +181,85 @@ one.
   §5.3, amended A2 §2.5): its title + line come from `modifier.calloutSpec` —
   static, hardcoded tease copy ("Are you SUPER SURE?" / "Feeling sneaky?" / the
   co-equal both-tease "Raise the stakes?"), no team name, room code, place name
-  or coordinate. Audited no-mask; the guess map beneath it is
-  already blocked by `blockSelector`. No mask needed.
+  or coordinate. Audited no-mask. (The guess map beneath it is no longer
+  blocked — see §3 — which changes nothing here: the callout itself carries
+  no identity.) No mask needed.
 - **Render-death probe (§18, `docs/ios-blackout-review.md`) — no maskable
   surface added.** The probe's two GPU/2D scratch canvases — the `drawImage`
   sample canvas and the persistent 1×1 GPU canary — are created detached and
   **never enter the DOM** (`document.createElement` with no append), so there
   is nothing for `maskTextSelector`/`blockSelector` to match and nothing rrweb
-  can record. `captureCanvas: false` stays regardless, so even the SDK's own
-  on-page WebGL canvas is not captured. The probe reads only our own viewer's
+  can record. The SDK's own on-page WebGL canvas IS captured now
+  (`captureCanvas`, §3) — that is the point of the §18 work — but these two
+  scratch canvases are not in the DOM, so they are not. The probe reads only
+  our own viewer's
   context state (`gl.isContextLost()`) and a uniform-vs-content classification;
   no pixel, image id, coordinate, or user input is captured, logged, or sent —
   only the aggregate `render_probe`/`render_recovery` events (§5 of the spec).
   Audited no-mask. No mask needed.
 
-## 3. Blocked outright (`blockSelector`)
+## 3. Maps and pano: visible gameplay (was "blocked outright")
 
-Every Leaflet map (`.leaflet-container`): `#guessMap`, `#hostRevealMap`,
-`#playerGuessMap`, `#pRevealMap`, `#dailyGuessMap`, the daily reveal map,
-`#guessLiveMap`, `#revealMap`, `#h2hRevealMap`, and the h2h TV panel maps.
+**Changed 2026-08-28 by owner decision.** `.leaflet-container` was removed
+from `blockSelector`, so every Leaflet map now records normally: `#guessMap`,
+`#hostRevealMap`, `#playerGuessMap`, `#pRevealMap`, `#dailyGuessMap`, the
+daily reveal map, `#guessLiveMap`, `#revealMap`, `#h2hRevealMap`, the h2h TV
+panel maps, the Daily "Your five places" carousel card maps
+(`daily-ui.js#renderRecap`), and the party game-over recap maps (the phone
+carousel cards built in `js/recap-ui.js` and the TV's `#tvRecapMap`). None of
+them needs a per-id entry any more, in either direction.
 
-More daily-done map surfaces come from the "Your five places" recap
-(`daily-ui.js#renderRecap`): each **carousel card** map (built in JS, no id).
-They are rendered by `js/revealmap-ui.js` and are `.leaflet-container`, so they
-fall under `blockSelector` with no per-id entry — a tile there is still a
-coordinate. The recap's city-name captions sit *outside* the maps and are
-covered by the wholesale `#dDoneRecap` mask (§2).
+**The old rationale, and why it was overridden.** Leaflet renders OSM tiles as
+`<img src="…/{z}/{x}/{y}.png">`, so a tile path is literally a coordinate, and
+this document previously argued that blocking was the only correct treatment.
+The owner has ruled that a player's guess and the round's location are
+*gameplay content*, not personal information, and that being able to watch
+what the player actually saw outweighs keeping tile paths out of a recording.
+That ruling is scoped to GeoParty and to session replay only.
 
-The party game-over recap (`docs/party-recap-spec.md`) adds the same kind of
-map surfaces, and they mask identically with no per-id entry: the **phone
-carousel card** maps (host + player, built in `js/recap-ui.js` — the shared
-carousel builder Daily also uses now) and the TV's single auto-cycling
-`#tvRecapMap` are all `.leaflet-container` under `blockSelector`. Their
-place-name captions sit outside the maps and are covered by the wholesale
-`#hRecap` / `#pRecap` / `#tvRecap` masks (§2).
+**The pano (`captureCanvas`).** The Mapillary WebGL canvas is recorded too,
+at `{ recordCanvas: true, canvasFps: 2, canvasQuality: "0.5" }`. Two things
+about that config are load-bearing and were measured on 2026-08-28, not
+assumed:
 
-The reveal maps changed size (36 vh → 52 vh) and gained a `touch-action`
-rule in the de-clutter pass, neither of which affects `blockSelector`: the
-selector matches `.leaflet-container`, which every one of them still is.
+- **The object form is required.** posthog-js reads
+  `session_recording.captureCanvas.recordCanvas`; a bare `captureCanvas: true`
+  has no `.recordCanvas`, falls through to the project-side dial (off), and
+  silently records nothing. A spike with the boolean form produced zero canvas
+  frames while DOM mutations recorded normally.
+- **posthog-js must initialise before the viewer is constructed.** WebGL
+  canvases only read back if their context was created with
+  `preserveDrawingBuffer: true`; posthog-js patches `getContext` to force that,
+  but only for contexts created after `posthog.init`. A viewer built before
+  opt-in keeps a non-preserving context and contributes no frames until it is
+  rebuilt. This is why `js/viewer-ui.js` needs no change — and why a mid-game
+  consent accept will not retroactively make the pano visible.
 
-The four reveal maps (`#dRevealMap`, `#pRevealMap`, `#revealMap`,
-`#h2hRevealMap`) are now rendered by a single shared module,
-`js/revealmap-ui.js` (from the `js/revealmap.js` scene), instead of four
-per-surface copies. This changes nothing about masking — the containers are
-still `.leaflet-container` and still fall under `blockSelector`, and the
-module adds no DOM outside them. But it means **any new reveal label** (a new
-pin tooltip, chip, or badge) must be added as a scene op in `js/revealmap.js`,
-and any such addition still renders inside `.leaflet-container` (blocked). Any
-new reveal *container* would need its own `blockSelector`/mask entry here.
-Re-run the §5 verify-on-a-real-recording step after any reveal-scene change.
+2 fps at quality 0.5 is the debuggability/bandwidth trade: enough to see "the
+pano never painted", roughly 40 KB per frame at desktop canvas size.
 
-**Why blocked and not masked:** Leaflet renders OSM tiles as
-`<img src="…/{z}/{x}/{y}.png">`. A tile path *is* a coordinate. Masking the
-text would leave the tile URLs — and therefore the round's answer and the
-player's aim — sitting in the recording. Blocking is the only correct
-treatment, and it matches `captureCanvas: false` for the panorama.
+**What did NOT change, and is still a ship-blocker:**
 
-Map tile hosts are also **absent from `NETWORK_HOST_ALLOWLIST`**, so tile
-requests are dropped from the replay network waterfall entirely
-(`tests/analytics.test.js` asserts this).
+- `.leaflet-tooltip` stays in `maskTextSelector` (§2, Cross-page). Pin labels
+  on the reveal maps carry **team names** — those are identity, and they are
+  masked *inside* the now-visible map.
+- Place-name captions outside the maps stay under their wholesale
+  `#dDoneRecap` / `#hRecap` / `#pRecap` / `#tvRecap` masks (§2).
+- **Any new reveal label** must still be added as a scene op in
+  `js/revealmap.js` (the four reveal maps share `js/revealmap-ui.js`), and if
+  such a label can ever render a team name or room code it needs a mask entry
+  here — the map being visible is exactly why that now matters more, not less.
+- Map tile hosts remain **absent from `NETWORK_HOST_ALLOWLIST`**, so tile
+  requests are still dropped from the replay network waterfall
+  (`tests/analytics.test.js` asserts this). Only the rendered pixels became
+  visible; the network log did not.
+- The analytics **event schema is unchanged**: no coordinate, no guess and no
+  raw image id may ever become an event property. This decision touched replay
+  masking only.
+
+`[data-ph-block]` remains available for anything that must genuinely not be
+recorded. Nothing in the app uses it today; adding it is the deliberate way to
+opt a future surface out.
 
 ## 4. Console output
 
@@ -297,8 +332,10 @@ recording in PostHog and confirm:
 - [ ] The reveal place name (now the big accent headline) is asterisks.
 - [ ] The merged reveal board's team names are asterisks; the result line
       beneath the place name shows numbers only.
-- [ ] The panorama area is a blank/black box, not street imagery.
-- [ ] The guess map and reveal map are placeholder boxes, not tiles.
+- [ ] The panorama area shows street imagery (owner decision 2026-08-28:
+      gameplay is recorded), and it is NOT a blank/black box.
+- [ ] The guess map and reveal map render real tiles and the player's pin;
+      the pin tooltips (team names) are asterisks.
 - [ ] The network tab shows `graph.mapillary.com/<id>`-shaped entries with
       **no** `?access_token=…`, and **no** `tile.openstreetmap.org` rows.
 - [ ] No request/response headers or bodies are present.

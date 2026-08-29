@@ -186,8 +186,9 @@ the 🍪 control on every page. The event schema is a hard allowlist in
 
 The same gate covers **field observability** (imagery/viewer diagnostics, error
 tracking and session replay): nothing is loaded or recorded before an explicit
-accept, the panorama canvas and every map are excluded from recordings (a map
-tile URL is a coordinate), everything typed is masked, and locations travel only
+accept, the maps and the panorama canvas are **recorded** as gameplay (owner
+decision 2026-08-28: a guess and where a player navigated are not personal
+information), everything typed is masked, and locations travel only
 as an opaque 8-character pool code — never a coordinate or a Mapillary image id.
 A user who declined can still send **one** diagnostic report, after a second
 explicit ask, without their "no" ever changing.

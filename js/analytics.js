@@ -66,13 +66,34 @@ export const POSTHOG_INIT_OPTIONS = {
     // Team names + room codes in the UI, plus Leaflet's tooltips (which
     // carry team-name pin labels on the reveal maps).
     maskTextSelector: "[data-ph-mask], .leaflet-tooltip",
-    // Every map is BLOCKED, not just masked. Leaflet renders OSM tiles as
-    // <img src=".../{z}/{x}/{y}.png"> — a tile path IS a coordinate, and
-    // reveal/guess maps would otherwise put the round's truth and the
-    // player's aim into the recording. Blocked elements record as an opaque
-    // placeholder box, so layout still reads but no location does.
-    blockSelector: ".leaflet-container, [data-ph-block]",
-    captureCanvas: false,                 // the WebGL pano is a black box
+    // Owner decision 2026-08-28 (docs/decisions/2026-08-28-replay-privacy.md):
+    // a guess and where a player navigated are
+    // GAMEPLAY, not personal information, and blanking them made imagery bugs
+    // undebuggable. So `.leaflet-container` is no longer blocked — the guess
+    // map and the reveal map are visible in recordings, tiles and all. This
+    // supersedes the older "a tile URL is a coordinate, therefore block every
+    // map" rationale that used to live here.
+    // IDENTITY masking is untouched by that decision: maskAllInputs still
+    // covers everything typed, `[data-ph-mask]` still covers team names and
+    // room codes, and `.leaflet-tooltip` above still text-masks the pin
+    // labels rendered INSIDE these now-visible maps (they carry team names).
+    // `[data-ph-block]` stays as the escape hatch for any future element that
+    // must not be recorded at all.
+    blockSelector: "[data-ph-block]",
+    // Same decision, applied to the pano: the WebGL canvas is recorded too,
+    // so a black/frozen pano is visible in the replay instead of being an
+    // empty box. NOTE the shape — posthog-js reads
+    // `captureCanvas.recordCanvas`, so the bare `captureCanvas: true` is
+    // silently a no-op (it falls through to the project-side dial, which is
+    // off). Measured 2026-08-28: the object form below produces real pano
+    // pixels; the boolean form produced zero canvas frames.
+    // posthog-js forces `preserveDrawingBuffer: true` on every WebGL context
+    // created AFTER init, which is why the Mapillary viewer needs no change —
+    // but it also means a viewer built before opt-in keeps a non-preserving
+    // context and yields no frames until it is rebuilt.
+    // 2 fps at quality 0.5 is the debuggability/bandwidth trade: enough to
+    // see "the pano never painted", ~40 KB per frame at desktop size.
+    captureCanvas: { recordCanvas: true, canvasFps: 2, canvasQuality: "0.5" },
     recordHeaders: false,
     recordBody: false,
     // Timing/status/allowlisted-path only. Mapillary access tokens ride in

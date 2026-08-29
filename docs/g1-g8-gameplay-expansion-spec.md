@@ -616,8 +616,12 @@ replace/extend existing rows rather than stacking new elements (the §2.10
 de-clutter shape is preserved: map, place headline, one result line, one
 total row).
 
-Maps remain replay-blocked (`.leaflet-container` in `blockSelector`,
-`js/analytics.js:74`) — the ghost marker can never leak into a recording.
+Maps are replay-visible since the 2026-08-28 owner decision
+(`docs/decisions/2026-08-28-replay-privacy.md`) — the ghost
+marker is game content on the recipient's own screen, like any reveal.
+The Ghost Duel privacy boundary (CLAUDE.md) is unaffected: it governs the
+URL-fragment *payload* (no server/PostHog/replay transport of the payload
+itself), not pixels of a duel the recipient chose to play on their device.
 
 #### 3.5.4 Verdict, rematch, return challenge
 

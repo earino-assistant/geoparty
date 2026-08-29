@@ -45,8 +45,8 @@ event, no exception and no recording, ever.
 | `capture_performance.web_vitals` | on | a page-level baseline next to the viewer timings |
 | `session_recording.maskAllInputs` | true | nothing typed is ever recorded |
 | `session_recording.maskTextSelector` | `[data-ph-mask], .leaflet-tooltip` | team names, room codes, place names, map pin labels (checklist: `docs/replay-mask-checklist.md`) |
-| `session_recording.blockSelector` | `.leaflet-container, [data-ph-block]` | **a map tile URL is a coordinate** — maps are blocked, not merely masked |
-| `session_recording.captureCanvas` | false | the WebGL panorama (street imagery = a location proxy) is never recorded |
+| `session_recording.blockSelector` | `[data-ph-block]` | owner decision 2026-08-28: gameplay (guess + reveal maps) is visible in replay so imagery bugs are debuggable; identity stays masked, and `.leaflet-tooltip` above still masks the team-name pin labels inside them |
+| `session_recording.captureCanvas` | `{ recordCanvas: true, canvasFps: 2, canvasQuality: "0.5" }` | same owner decision: the WebGL panorama IS recorded, so a black or frozen pano shows up in the replay. Object form is required — posthog-js reads `captureCanvas.recordCanvas`, so a bare `true` is a silent no-op (measured 2026-08-28). Frames come from contexts created after `posthog.init`, so a viewer built before opt-in yields none |
 | `session_recording.recordHeaders` / `recordBody` | false | plus both are deleted defensively in `maskNetworkRequest` |
 | `maskCapturedNetworkRequestFn` | `maskNetworkRequest` | timing/status/path only, host-allowlisted, query strings stripped (Mapillary tokens ride in query params) |
 | `enable_recording_console_log` | true | the imagery story is in the console |
