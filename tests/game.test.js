@@ -18,6 +18,7 @@ import {
   resultRowText,
   formatDistance,
   formatCountdown,
+  formatElapsed,
   teamIds,
   starterIndex,
   isShowdownRound,
@@ -260,6 +261,15 @@ test("formatCountdown: m:ss, clamped at zero", () => {
   assert.equal(formatCountdown(1), "0:01");
   assert.equal(formatCountdown(0), "0:00");
   assert.equal(formatCountdown(-3_000), "0:00");
+});
+
+test("formatElapsed: m:ss count-up from zero, floored, clamped at zero", () => {
+  assert.equal(formatElapsed(0), "0:00");
+  assert.equal(formatElapsed(65_000), "1:05");
+  assert.equal(formatElapsed(59_999), "0:59"); // floor, an elapsed reading counts up
+  assert.equal(formatElapsed(60_000), "1:00");
+  assert.equal(formatElapsed(125_000), "2:05");
+  assert.equal(formatElapsed(-3_000), "0:00"); // clock skew never shows negative
 });
 
 test("resultRowText: forfeit, legacy, and speed-bonus row forms", () => {

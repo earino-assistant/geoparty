@@ -26,6 +26,7 @@ import {
   dailyRunComplete,
   guessedRounds,
   bestDailyDistance,
+  dailyExploreMs,
   loadDailyResult,
   saveDailyResult,
   DAILY_INFLIGHT_KEY,
@@ -161,6 +162,20 @@ test("guessedRounds / bestDailyDistance: forfeits excluded, all-forfeit -> null"
   const empty = recordDailyRound(newDailyRun("20260819"), null);
   assert.equal(guessedRounds(empty), 0);
   assert.equal(bestDailyDistance(empty), null);
+});
+
+test("dailyExploreMs: sums elapsed across rounds incl. forfeits, clamps skew", () => {
+  let run = newDailyRun("20260819");
+  run = recordDailyRound(run, { distanceKm: 420.5, elapsedMs: 9000 });
+  run = recordDailyRound(run, null);   // forfeit -> stored elapsedMs 0
+  run = recordDailyRound(run, { distanceKm: 3.2, elapsedMs: 4000 });
+  assert.equal(dailyExploreMs(run), 13000);
+  // All-forfeit run: no elapsed recorded -> 0.
+  assert.equal(dailyExploreMs(recordDailyRound(newDailyRun("20260819"), null)), 0);
+  // Negative clock skew never subtracts from the total.
+  const skew = recordDailyRound(newDailyRun("20260819"),
+    { distanceKm: 10, elapsedMs: -5000 });
+  assert.equal(dailyExploreMs(skew), 0);
 });
 
 /* ---------------- replay lock ---------------- */

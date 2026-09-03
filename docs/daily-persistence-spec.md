@@ -309,9 +309,13 @@ against docs/ui-ux-design-review.md §4 and loses on four points:
 
 - The intro is the Daily's designated calm state (§4.1 utility-corners
   row: "daily intro/done"); it is where a choice belongs. Auto-resume
-  drops the player into a *running 60-second round* the moment a possibly
-  slow reload finishes rendering — a timer starting while nobody is
-  looking is the opposite of calm.
+  drops the player into a *running round* the moment a possibly slow
+  reload finishes rendering — gameplay resuming while nobody is looking is
+  the opposite of calm. (Historical note: this originally read "running
+  60-second round." Per owner decision 2026-09-03 the normal Daily is no
+  longer timed — its timer is an informational count-up with no auto-lock;
+  the calm-state argument stands regardless. Hard mode keeps its 30s
+  countdown.)
 - The tap preserves the user-gesture the page's boot already leans on
   (sound unlock, viewer/WebGL creation are gesture-fed today via "Play
   Today's Daily"); auto-starting them from `load` is new iOS-Safari

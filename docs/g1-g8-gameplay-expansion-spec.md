@@ -692,6 +692,14 @@ element budget and leak hints pre-commitment).
 daily, under harder fixed rules: **no movement, 30 seconds**. One scored
 hard run per day, in its own slot. The grid gets the star: `Daily #37* ⚡`.
 
+> Note (owner decision 2026-09-03): the **normal** daily is no longer timed
+> — its former 60s round became an informational count-up with no auto-lock
+> (a hard timer punishes one-shot exploration; the decaying speed bonus stays
+> as the scoring lever). **Hard mode is unchanged**: its 30s countdown and
+> auto-lock at the buzzer are the timed challenge and are the whole point of
+> the mode. So "30 seconds" here is now what distinguishes hard from an
+> untimed normal, not a shortening of a timed one.
+
 - **Unlock:** hard mode appears on the intro/done screens only **after
   today's normal run is completed** — the ritual stays singular for
   casuals, and the star stays a chase ("finish normal, immediately want

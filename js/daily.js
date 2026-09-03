@@ -215,6 +215,19 @@ export function bestDailyDistance(run) {
   return ds.length ? Math.min(...ds) : null;
 }
 
+// Total ms the player spent exploring across the run's rounds — the
+// untimed-daily signal (owner decision 2026-09-03: the normal Daily lost its
+// timer wall, so exploration time is now unbounded and the product question is
+// "how long do players actually explore before locking in?"). An aggregate (a
+// duration), never a coordinate; feeds daily_challenge_completed.explore_ms.
+// A forfeit contributes 0 (recordDailyRound stores elapsedMs 0 for a no-pin
+// round — the buzzer time isn't captured), so an all-forfeit run returns 0.
+// Clamps clock skew and tolerates a legacy save with no elapsedMs (both 0).
+export function dailyExploreMs(run) {
+  return run.rounds.reduce(
+    (sum, r) => sum + Math.max(0, r.elapsedMs || 0), 0);
+}
+
 /* ================================================================
  * Replay lock: one scored run per day per device. A single slot —
  * yesterday's result is superseded, so nothing accumulates. (A mid-run

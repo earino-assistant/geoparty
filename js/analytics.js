@@ -377,11 +377,14 @@ export const EVENT_SCHEMA = Object.freeze({
   // rounds_played counts rounds with a pin (0–5; forfeits excluded);
   // best_distance_km is the run's closest guess (absent when all forfeit).
   // G1/G4/G5/G6/G8 extend it: hard, vs_ghost, streak (after), pb (a personal
-  // best was set), aces (this run's sub-1km pins).
+  // best was set), aces (this run's sub-1km pins). explore_ms (2026-09-03) is
+  // the total exploration time across the run's rounds — the signal for the
+  // untimed normal Daily (no more timer wall): how long players actually
+  // explore before locking in. A duration aggregate, never a coordinate.
   daily_challenge_completed: {
     day_number: "int", score: "int", rounds_played: "int",
     best_distance_km: "float1", hard: "bool", vs_ghost: "bool",
-    streak: "int", pb: "bool", aces: "int",
+    streak: "int", pb: "bool", aces: "int", explore_ms: "int",
   },
   // G5 Ghost Duels (§7.1). Fired on the RECIPIENT's device at the verdict.
   // margin is a score difference — the same class of aggregate as

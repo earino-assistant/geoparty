@@ -302,10 +302,12 @@ test("sanitizeEvent: daily events carry the G1/G5/G6 flags, aggregates only", ()
   const done = sanitizeEvent("daily_challenge_completed", {
     day_number: 37, score: 18420, rounds_played: 5, best_distance_km: 0.4,
     hard: false, vs_ghost: true, streak: 12, pb: true, aces: 2,
+    explore_ms: 143500, lat: 35, lng: 135, place_name: "Kyoto, Japan",
   });
   assert.deepEqual(done.props, {
     day_number: 37, score: 18420, rounds_played: 5, best_distance_km: 0.4,
     hard: false, vs_ghost: true, streak: 12, pb: true, aces: 2,
+    explore_ms: 143500,
   });
 });
 

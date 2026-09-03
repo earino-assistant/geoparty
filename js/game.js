@@ -192,6 +192,17 @@ export function formatCountdown(msLeft) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
+// Count-up companion to formatCountdown: elapsed time as m:ss from zero, for a
+// non-timed readout with no deadline (the normal Daily's informational timer —
+// no auto-lock, no urgency). Floors seconds (an elapsed reading counts up),
+// clamps clock skew to 0:00. Hard mode still uses formatCountdown.
+export function formatElapsed(msElapsed) {
+  const s = Math.max(0, Math.floor(msElapsed / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
 // Teams are stored as {t1: {...}, t2: {...}}; stable ordering by key.
 export function teamIds(teams) {
   return Object.keys(teams || {}).sort();

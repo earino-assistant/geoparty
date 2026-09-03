@@ -14,6 +14,7 @@
 import {
   haversineKm,
   formatCountdown,
+  formatElapsed,
   formatDistance,
   revealResultLine,
   scoreForDistance,
@@ -37,6 +38,7 @@ import {
   dailyRunComplete,
   guessedRounds,
   bestDailyDistance,
+  dailyExploreMs,
   loadDailyResult,
   saveDailyResult,
   buildInflight,
@@ -545,7 +547,14 @@ function updateLockButton() {
     false));
 }
 
-/* ---------------- Ticker: countdown + auto-lock ---------------- */
+/* ---------------- Ticker ----------------
+ * Two shapes, one interval. Hard mode is a timed challenge (owner decision
+ * 2026-09-03): a countdown with the low-time urgency class, the urgent tick
+ * sound, and auto-lock at the buzzer — unchanged. The normal Daily is NOT
+ * timed: a plain count-up elapsed readout, no urgency state, no tick sound,
+ * and no auto-lock — the player explores and locks in whenever they're ready.
+ * The decaying speed bonus (which floors at zero, never a penalty) still pays
+ * out at submit either way; it doesn't need a deadline. */
 
 function startTick() {
   stopTick();
@@ -560,18 +569,28 @@ function stopTick() {
 function tick() {
   if (locked) return;
   updateLockButton();
-  const left = endsAt - Date.now();
-  $("dHudTimer").textContent = formatCountdown(left);
-  $("dGuessTimer").textContent = formatCountdown(left);
-  const low = left > 0 && left <= 10_500;
-  $("dHudTimer").classList.toggle("low", low);
-  $("dGuessTimer").classList.toggle("low", low);
-  const t = countdownTick(lastTickSecond, left);
-  if (t) {
-    lastTickSecond = t.second;
-    playSound(t.urgent ? "tickUrgent" : "tick");
+  if (mode === "hard") {
+    const left = endsAt - Date.now();
+    $("dHudTimer").textContent = formatCountdown(left);
+    $("dGuessTimer").textContent = formatCountdown(left);
+    const low = left > 0 && left <= 10_500;
+    $("dHudTimer").classList.toggle("low", low);
+    $("dGuessTimer").classList.toggle("low", low);
+    const t = countdownTick(lastTickSecond, left);
+    if (t) {
+      lastTickSecond = t.second;
+      playSound(t.urgent ? "tickUrgent" : "tick");
+    }
+    if (left <= 0) lockIn(true);
+    return;
   }
-  if (left <= 0) lockIn(true);
+  // Normal Daily: informational count-up from round start. No deadline, no
+  // "time's up", no urgency state.
+  const elapsed = Math.max(0, Date.now() - roundStartedAt);
+  $("dHudTimer").textContent = formatElapsed(elapsed);
+  $("dGuessTimer").textContent = formatElapsed(elapsed);
+  $("dHudTimer").classList.remove("low");
+  $("dGuessTimer").classList.remove("low");
 }
 
 /* ---------------- Lock in -> reveal ---------------- */
@@ -790,6 +809,7 @@ async function finishRun() {
       streak: mode === "hard" ? records.streak.count : streakCount,
       pb,
       aces,
+      explore_ms: dailyExploreMs(run),
     });
   }
 
@@ -1211,6 +1231,7 @@ async function finalizeInflight() {
       streak: completedRun.hard ? records.streak.count : applied.streak,
       pb: applied.pb,
       aces,
+      explore_ms: dailyExploreMs(completedRun),
     });
     track("daily_resumed", {
       day_number: runDayNum, rounds_done: DAILY_ROUNDS,
