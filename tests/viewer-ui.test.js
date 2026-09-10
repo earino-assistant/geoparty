@@ -242,12 +242,33 @@ function installFakeMapillary() {
       // boundary autoplay bug): proves seq.stop() ran BEFORE the
       // sequence component was deactivated, not after.
       this.order = 0;
+      // Phase 5 (docs/issue-2-phase5-touchcancel-reset.md): the deactivate →
+      // activate → play → stop call order for the Sequence-mode reset.
+      this.seqCalls = [];
+      // Phase 5: internal SDK state modelled on the verified mapillary-js
+      // 4.1.2 SequenceDOMRenderer. A scrubber touchcancel latches
+      // changingPosition true in Sequence graph mode; ONLY
+      // deactivateComponent("sequence") hard-resets it (WITHOUT restoring the
+      // graph mode) — the play/stop nudge is what forces Spatial afterwards.
+      this.seqState = { changingPosition: false, graphMode: "sequence" };
       const self = this;
       this.seq = {
+        activated: true,            // Component.activated (public getter)
         playing: false,
         stops: 0,
-        play() { this.playing = true; },
-        stop() { this.stops++; this.playing = false; this.stoppedAtOrder = self.order++; },
+        plays: 0,
+        // PlayService.play()/stop() force Spatial but NEVER touch
+        // changingPosition (so a bare nudge leaves the latch stuck).
+        play() {
+          this.plays++; this.playing = true;
+          self.seqState.graphMode = "spatial";
+          self.seqCalls.push("play"); this.playedAtOrder = self.order++;
+        },
+        stop() {
+          this.stops++; this.playing = false;
+          self.seqState.graphMode = "spatial";
+          self.seqCalls.push("stop"); this.stoppedAtOrder = self.order++;
+        },
       };
       state.viewers.push(this);
     }
@@ -278,10 +299,27 @@ function installFakeMapillary() {
     activateComponent(name) {
       (this.activated = this.activated || []).push(name);
       (this.activatedAtOrder = this.activatedAtOrder || []).push(this.order++);
+      if (name === "sequence") {
+        // Component.activate rebuilds every subscription (fresh
+        // _changingSubscription) — the scrubber works normally again.
+        this.seq.activated = true;
+        this.seqCalls.push("activate");
+      }
     }
     deactivateComponent(name) {
       (this.deactivated = this.deactivated || []).push(name);
       (this.deactivatedAtOrder = this.deactivatedAtOrder || []).push(this.order++);
+      if (name === "sequence") {
+        // Component.deactivate → sequenceDOMRenderer.deactivate(): hard-resets
+        // _changingPosition=false directly (NOT via _setChangingPosition, so the
+        // graph mode is deliberately NOT restored here) and flips activated off.
+        this.seq.activated = false;
+        this.seqState.changingPosition = false;
+        this.seqCalls.push("deactivate");
+        // Phase 5 re-entrancy: the component's own DOM teardown can synthesize a
+        // second touchcancel — a test wires this hook to fire one mid-reset.
+        if (typeof this.__onSequenceDeactivate === "function") this.__onSequenceDeactivate();
+      }
     }
   }
   globalThis.mapillary = {
@@ -2191,3 +2229,240 @@ test("F2: host & player glue wire onRebuilt to a subscribeViewer that re-binds p
       assert.match(sub, /iv\.viewer\.on\("image"/, `${f} subscribeViewer re-binds image`);
     }
   });
+
+/* ================================================================
+ * §19 Sequence-mode stick prevention — targeted touchcancel reset
+ * (docs/issue-2-phase5-touchcancel-reset.md). The listener lives on the
+ * container (`el`), so a rebuild never orphans it and the component is
+ * re-fetched per event.
+ * ================================================================ */
+
+// A touchcancel target whose ancestor chain reaches the scrubber position
+// slider (the ONLY entry that latches the Sequence-mode stick).
+function sliderTouchTarget() {
+  return {
+    closest(sel) {
+      const wants = String(sel).split(",").map((s) => s.trim().replace(/^\./, ""));
+      return wants.includes("mapillary-sequence-position") ? {} : null;
+    },
+  };
+}
+const nonSliderTarget = () => ({ closest: () => null });
+const touchCancelEv = (target, remaining = 0) => ({ target, touches: { length: remaining } });
+
+function makeSeqViewer(cid) {
+  return viewerUi.createViewer({
+    surface: "daily", container: cid, moveAllowed: true,
+    component: { cover: false, direction: true, sequence: true, keyboard: true },
+  });
+}
+
+test("§19 reset heals: a slider touchcancel runs deactivate → activate → play → stop",
+  () => {
+    const iv = makeSeqViewer("seq-heal");
+    const raw = iv.viewer;
+    iv.beginRound(2);
+    raw.seqCalls.length = 0;                 // drop the beginRound stopPlay's stop
+    raw.seqState.changingPosition = true;    // the stuck latch
+    raw.seqState.graphMode = "sequence";
+    document.getElementById("seq-heal").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+    assert.deepEqual(raw.seqCalls, ["deactivate", "activate", "play", "stop"],
+      "exact order");
+    assert.equal(raw.seqState.changingPosition, false, "latch cleared");
+    assert.equal(raw.seqState.graphMode, "spatial", "graph mode forced to Spatial");
+    assert.equal(raw.seq.activated, true, "sequence component re-activated");
+    const ev = lastEvent("sequence_reset");
+    assert.equal(ev.props.result, "ok");
+    assert.equal(ev.props.round_number, 2);
+    assert.equal(ev.props.surface, "daily");
+    assert.ok(!("failed_step" in ev.props), "no failed_step on a clean reset");
+    iv.endRound();
+    assert.equal(lastEvent("pano_session").props.sequence_resets, 1,
+      "the fold carries one reset");
+    iv.destroy();
+  });
+
+test("§19 latch discriminator: play()+stop() alone leave the latch; the full reset clears it",
+  () => {
+    const iv = makeSeqViewer("seq-latch");
+    const raw = iv.viewer;
+    raw.seqState.changingPosition = true;
+    // The bare nudge a play/stop-only fix would do: Spatial is forced but the
+    // renderer's changingPosition stays latched.
+    raw.seq.play(); raw.seq.stop();
+    assert.equal(raw.seqState.changingPosition, true,
+      "play/stop never touch changingPosition — the nudge alone is insufficient");
+    assert.equal(raw.seqState.graphMode, "spatial");
+    // The full lifecycle reset (deactivate is what resets the field) clears it.
+    document.getElementById("seq-latch").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+    assert.equal(raw.seqState.changingPosition, false,
+      "only deactivateComponent hard-resets the latch");
+    iv.destroy();
+  });
+
+test("§19 non-slider touchcancel: nothing happens", () => {
+  const iv = makeSeqViewer("seq-nonslider");
+  const raw = iv.viewer;
+  raw.seqCalls.length = 0;
+  document.getElementById("seq-nonslider").dispatch("touchcancel", touchCancelEv(nonSliderTarget(), 0));
+  assert.deepEqual(raw.seqCalls, []);
+  assert.equal(events("sequence_reset").length, 0);
+  iv.destroy();
+});
+
+test("§19 inactive sequence component: touchcancel does nothing", () => {
+  const iv = makeSeqViewer("seq-inactive");
+  const raw = iv.viewer;
+  raw.seq.activated = false;
+  raw.seqCalls.length = 0;
+  document.getElementById("seq-inactive").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+  assert.deepEqual(raw.seqCalls, []);
+  assert.equal(events("sequence_reset").length, 0);
+  iv.destroy();
+});
+
+test("§19 Frozen/TV: touchcancel never resets and never re-activates the sequence", () => {
+  const iv = viewerUi.createViewer({
+    surface: "tv", container: "seq-frozen", moveAllowed: false,
+    component: { cover: true },
+  });
+  const raw = iv.viewer;
+  raw.seqCalls.length = 0;
+  document.getElementById("seq-frozen").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+  assert.deepEqual(raw.seqCalls, []);
+  assert.ok(!(raw.activated || []).includes("sequence"),
+    "activateComponent('sequence') is never called on a Frozen/TV round");
+  assert.equal(events("sequence_reset").length, 0);
+  iv.destroy();
+});
+
+test("§19 remaining touches: a cancel that leaves a finger down defers to the SDK", () => {
+  const iv = makeSeqViewer("seq-touches");
+  const raw = iv.viewer;
+  raw.seqCalls.length = 0;
+  document.getElementById("seq-touches").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 1));
+  assert.deepEqual(raw.seqCalls, []);
+  assert.equal(events("sequence_reset").length, 0);
+  iv.destroy();
+});
+
+test("§19 fault (deactivate throws): remaining steps run, applyMove re-drives, result error",
+  () => {
+    const iv = makeSeqViewer("seq-f-deact");
+    const raw = iv.viewer;
+    const real = raw.deactivateComponent.bind(raw);
+    raw.deactivateComponent = (name) => {
+      if (name === "sequence") { raw.seqCalls.push("deactivate"); throw new Error("not laid out"); }
+      return real(name);
+    };
+    raw.seqCalls.length = 0;
+    document.getElementById("seq-f-deact").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+    assert.ok(raw.seqCalls.includes("activate"), "activate still ran after the deactivate throw");
+    assert.equal(raw.seq.plays, 1, "play still ran");
+    assert.ok(raw.seq.stops >= 1, "stop still ran");
+    const ev = lastEvent("sequence_reset");
+    assert.equal(ev.props.result, "error");
+    assert.equal(ev.props.failed_step, "deactivate");
+    assert.ok((raw.deactivated || []).includes("keyboard"),
+      "applyMove re-drove the movement lever (only it touches keyboard)");
+    iv.destroy();
+  });
+
+test("§19 fault (activate throws): remaining steps run, applyMove re-drives, result error",
+  () => {
+    const iv = makeSeqViewer("seq-f-act");
+    const raw = iv.viewer;
+    const real = raw.activateComponent.bind(raw);
+    raw.activateComponent = (name) => {
+      if (name === "sequence") { raw.seqCalls.push("activate"); throw new Error("not laid out"); }
+      return real(name);
+    };
+    raw.seqCalls.length = 0;
+    document.getElementById("seq-f-act").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+    assert.ok(raw.seqCalls.includes("deactivate"), "deactivate ran");
+    assert.equal(raw.seq.plays, 1, "play still ran after the activate throw");
+    assert.ok(raw.seq.stops >= 1, "stop still ran");
+    const ev = lastEvent("sequence_reset");
+    assert.equal(ev.props.result, "error");
+    assert.equal(ev.props.failed_step, "activate");
+    assert.ok((raw.deactivated || []).includes("keyboard"),
+      "applyMove re-drove the movement lever after the activate throw");
+    iv.destroy();
+  });
+
+test("§19 fault (play throws): stop still runs; applyMove is NOT re-driven (only a nudge failed)",
+  () => {
+    const iv = makeSeqViewer("seq-f-play");
+    const raw = iv.viewer;
+    raw.seq.play = () => { raw.seqCalls.push("play"); throw new Error("play fail"); };
+    raw.seqCalls.length = 0;
+    document.getElementById("seq-f-play").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+    assert.deepEqual(raw.seqCalls, ["deactivate", "activate", "play", "stop"],
+      "stop runs even though play threw");
+    const ev = lastEvent("sequence_reset");
+    assert.equal(ev.props.result, "error");
+    assert.equal(ev.props.failed_step, "play");
+    assert.ok(!(raw.deactivated || []).includes("keyboard"),
+      "a play/stop (nudge) failure never triggers the applyMove fallback");
+    iv.destroy();
+  });
+
+test("§19 fault (stop throws): result error, failed_step stop, nothing propagates", () => {
+  const iv = makeSeqViewer("seq-f-stop");
+  const raw = iv.viewer;
+  raw.seq.stop = () => { raw.seqCalls.push("stop"); throw new Error("stop fail"); };
+  raw.seqCalls.length = 0;
+  assert.doesNotThrow(() =>
+    document.getElementById("seq-f-stop").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0)));
+  assert.deepEqual(raw.seqCalls, ["deactivate", "activate", "play", "stop"]);
+  assert.equal(raw.seq.plays, 1, "play ran before the stop throw");
+  const ev = lastEvent("sequence_reset");
+  assert.equal(ev.props.result, "error");
+  assert.equal(ev.props.failed_step, "stop");
+  assert.ok(!(raw.deactivated || []).includes("keyboard"), "a nudge failure never re-drives applyMove");
+  iv.destroy();
+});
+
+test("§19 re-entrancy: a second touchcancel synthesized mid-reset is a guarded no-op", () => {
+  const iv = makeSeqViewer("seq-reentry");
+  const raw = iv.viewer;
+  const container = document.getElementById("seq-reentry");
+  raw.seqCalls.length = 0;
+  raw.__onSequenceDeactivate = () => {
+    container.dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+  };
+  container.dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+  assert.deepEqual(raw.seqCalls, ["deactivate", "activate", "play", "stop"],
+    "exactly one reset sequence despite the re-entrant cancel");
+  assert.equal(events("sequence_reset").length, 1, "one event");
+  iv.destroy();
+});
+
+test("§19 destroy removes the listener: a later touchcancel does nothing", () => {
+  const iv = makeSeqViewer("seq-destroy");
+  const raw = iv.viewer;
+  iv.destroy();
+  raw.seqCalls.length = 0;
+  document.getElementById("seq-destroy").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+  assert.deepEqual(raw.seqCalls, []);
+  assert.equal(events("sequence_reset").length, 0);
+});
+
+test("§19 rebuild: the reset runs against the NEW viewer after a §18 rebuild", async () => {
+  const iv = makeDailyViewer();
+  const raw = iv.viewer;
+  const canvas = makeCanvas({ ctxLost: false });
+  await healthyAnchor(iv, raw, canvas, "anchor-1");
+  canvas._gl = makeFakeGl({ lost: true });     // the context dies
+  iv.__renderProbeTickForTests();              // dead → rebuild
+  await flushMicro();
+  const fresh = iv.viewer;
+  assert.notEqual(fresh, raw, "the raw viewer was swapped");
+  raw.seqCalls.length = 0;
+  fresh.seqCalls.length = 0;
+  document.getElementById("dailyViewer").dispatch("touchcancel", touchCancelEv(sliderTouchTarget(), 0));
+  assert.deepEqual(fresh.seqCalls, ["deactivate", "activate", "play", "stop"],
+    "the container listener survived the rebuild; the reset ran on the new viewer");
+  assert.deepEqual(raw.seqCalls, [], "the dead viewer received no reset calls");
+  iv.destroy();
+});

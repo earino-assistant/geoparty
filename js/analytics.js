@@ -526,6 +526,12 @@ export const EVENT_SCHEMA = Object.freeze({
     // (0..EDGE_RECOVERY_MAX_ATTEMPTS). Absent when recovery never ran (the
     // healthy majority) — pairs with the edge_recovery event below.
     edge_recoveries: "int",
+    // Issue #2 Phase 5 (docs/issue-2-phase5-touchcancel-reset.md): count of
+    // targeted Sequence-mode lifecycle resets this round (a scrubber
+    // `touchcancel` that would otherwise latch the stick). Absent when none
+    // ran — the healthy majority — same convention as edge_recoveries; pairs
+    // with the sequence_reset event below.
+    sequence_resets: "int",
     // §18 (docs/ios-blackout-review.md): a render-death probe condemned this
     // round's canvas (black pano behind a live HUD). Absent-when-false, the
     // edge_recoveries convention — present only on a genuine death, for funnel
@@ -555,6 +561,24 @@ export const EVENT_SCHEMA = Object.freeze({
     spatial_after: "int",
     sequence_after: "int",
     duration_ms: "int",      // setFilter call → outcome classified
+    net_type: "string",
+    online: "bool",
+  },
+
+  // Issue #2 Phase 5 (docs/issue-2-phase5-touchcancel-reset.md): one per
+  // targeted Sequence-mode lifecycle reset — a scrubber `touchcancel` on
+  // Android that would otherwise latch the SequenceDOMRenderer's
+  // `_changingPosition` true (arrows dead + full-sequence prefetch lag). The
+  // reset runs deactivate → activate → play → stop on the sequence component;
+  // failed_step names the first step that threw, present only on result
+  // "error". Aggregates/enums only — no DOM target, no image id, no
+  // coordinate, no touch count.
+  sequence_reset: {
+    surface: "string",       // host|player|daily (moveEnabled surfaces only)
+    round_number: "int",
+    result: "string",        // "ok" | "error"
+    failed_step: "string",   // "deactivate"|"activate"|"play"|"stop" (error only)
+    duration_ms: "int",      // handler entry → all steps done (sync, ~0)
     net_type: "string",
     online: "bool",
   },

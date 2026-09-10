@@ -74,6 +74,9 @@ import {
   renderRecoveryRoundReset,
   decideRenderRecovery,
   classifyRenderOutcome,
+  SEQUENCE_POSITION_SELECTOR,
+  touchTargetIsPositionSlider,
+  decideSequenceReset,
 } from "../js/imagery.js";
 
 /* ================================================================
@@ -1338,4 +1341,135 @@ test("foldPanoEvent: render_dead latches a per-round flag; panoSessionProps emit
   assert.equal(panoSessionProps(dead).render_dead, true);
   // Idempotent — one death per round is the signal, latch stays true.
   assert.equal(foldPanoEvent(dead, { type: "render_dead", at: 200 }).render_dead, true);
+});
+
+/* ================================================================
+ * §19 Sequence-mode stick prevention — targeted touchcancel reset
+ * (docs/issue-2-phase5-touchcancel-reset.md)
+ * ================================================================ */
+
+test("SEQUENCE_POSITION_SELECTOR: contains all three verified class names", () => {
+  for (const cls of [
+    "mapillary-sequence-position",
+    "mapillary-sequence-position-container",
+    "mapillary-sequence-position-container-inactive",
+  ]) {
+    assert.ok(SEQUENCE_POSITION_SELECTOR.includes(`.${cls}`),
+      `selector must include .${cls}`);
+  }
+  // Guards a future "simplification" to a single class — the -inactive variant
+  // is exactly the playing case that most needs healing.
+  assert.equal(SEQUENCE_POSITION_SELECTOR.split(",").length, 3);
+});
+
+// A stub implementing just enough of Element.closest's comma-selector
+// semantics to unit-test touchTargetIsPositionSlider without a real DOM.
+function stubTarget(classNames) {
+  const names = classNames || [];
+  return {
+    closest(sel) {
+      const wants = String(sel).split(",").map((s) => s.trim().replace(/^\./, ""));
+      return names.some((c) => wants.includes(c)) ? {} : null;
+    },
+  };
+}
+
+test("touchTargetIsPositionSlider: true for each of the three slider classes", () => {
+  for (const cls of [
+    "mapillary-sequence-position",
+    "mapillary-sequence-position-container",
+    "mapillary-sequence-position-container-inactive",
+  ]) {
+    assert.equal(touchTargetIsPositionSlider(stubTarget([cls])), true, cls);
+  }
+});
+
+test("touchTargetIsPositionSlider: false for a non-slider target", () => {
+  assert.equal(touchTargetIsPositionSlider(stubTarget(["mapillary-viewer"])), false);
+  assert.equal(touchTargetIsPositionSlider(stubTarget([])), false);
+});
+
+test("touchTargetIsPositionSlider: defensive against null/undefined/no-closest/throwing", () => {
+  assert.equal(touchTargetIsPositionSlider(null), false);
+  assert.equal(touchTargetIsPositionSlider(undefined), false);
+  assert.equal(touchTargetIsPositionSlider({}), false);
+  assert.equal(touchTargetIsPositionSlider({ closest: 42 }), false);
+  assert.equal(
+    touchTargetIsPositionSlider({ closest() { throw new Error("dom mid-teardown"); } }),
+    false,
+  );
+});
+
+function baseSeqResetCtx(over) {
+  return {
+    onPositionSlider: true,
+    resetting: false,
+    viewerOk: true,
+    canReset: true,
+    moveEnabled: true,
+    sequenceActive: true,
+    remainingTouches: 0,
+    ...(over || {}),
+  };
+}
+
+test("decideSequenceReset: a perfect context resets", () => {
+  assert.deepEqual(decideSequenceReset(baseSeqResetCtx()), { act: "reset" });
+});
+
+test("decideSequenceReset: not_slider is first — beats every other condition", () => {
+  // Even with a perfect-otherwise context, a non-slider cancel is ignored; and
+  // not_slider wins even when other reasons ALSO apply (first-match-wins).
+  assert.deepEqual(
+    decideSequenceReset(baseSeqResetCtx({ onPositionSlider: false })),
+    { act: "ignore", reason: "not_slider" });
+  assert.equal(
+    decideSequenceReset({
+      onPositionSlider: false, resetting: true, viewerOk: false,
+      canReset: false, moveEnabled: false, sequenceActive: false,
+      remainingTouches: 3,
+    }).reason,
+    "not_slider");
+});
+
+test("decideSequenceReset: in_progress beats the stub/frozen/active/touches checks", () => {
+  const d = decideSequenceReset(baseSeqResetCtx({
+    resetting: true, viewerOk: false, canReset: false, moveEnabled: false,
+    sequenceActive: false, remainingTouches: 2,
+  }));
+  assert.deepEqual(d, { act: "ignore", reason: "in_progress" });
+});
+
+test("decideSequenceReset: viewer_stub — not ok, or nothing to reset with", () => {
+  assert.equal(
+    decideSequenceReset(baseSeqResetCtx({ viewerOk: false })).reason, "viewer_stub");
+  assert.equal(
+    decideSequenceReset(baseSeqResetCtx({ canReset: false })).reason, "viewer_stub");
+});
+
+test("decideSequenceReset: frozen wins BEFORE the sequence_inactive check", () => {
+  // A Frozen/TV round (moveEnabled:false) is ignored as 'frozen' even though
+  // the sequence is still active — the reset must never re-enable movement.
+  const d = decideSequenceReset(baseSeqResetCtx({ moveEnabled: false, sequenceActive: true }));
+  assert.deepEqual(d, { act: "ignore", reason: "frozen" });
+});
+
+test("decideSequenceReset: sequence_inactive when the component is already off", () => {
+  assert.deepEqual(
+    decideSequenceReset(baseSeqResetCtx({ sequenceActive: false })),
+    { act: "ignore", reason: "sequence_inactive" });
+});
+
+test("decideSequenceReset: a surviving touch defers to the SDK's own touchend restore", () => {
+  assert.deepEqual(
+    decideSequenceReset(baseSeqResetCtx({ remainingTouches: 1 })),
+    { act: "ignore", reason: "touches_remain" });
+  // Only a cancel that ends the gesture entirely (0 remaining) resets.
+  assert.deepEqual(decideSequenceReset(baseSeqResetCtx({ remainingTouches: 0 })), { act: "reset" });
+});
+
+test("decideSequenceReset: pure/total on junk input", () => {
+  assert.deepEqual(decideSequenceReset(), { act: "ignore", reason: "not_slider" });
+  assert.deepEqual(decideSequenceReset(null), { act: "ignore", reason: "not_slider" });
+  assert.deepEqual(decideSequenceReset({}), { act: "ignore", reason: "not_slider" });
 });

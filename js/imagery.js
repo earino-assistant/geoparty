@@ -443,6 +443,9 @@ export function createPanoSession(opts) {
     // Issue #2 Phase 2: count of setFilter() recovery attempts this round
     // (0..EDGE_RECOVERY_MAX_ATTEMPTS). Reported only when > 0 (§ below).
     edge_recoveries: 0,
+    // Issue #2 Phase 5: count of targeted Sequence-mode lifecycle resets this
+    // round (scrubber touchcancel). Reported only when > 0 (§ below).
+    sequence_resets: 0,
     // §18 render-death probe (docs/ios-blackout-review.md): latched true once a
     // probe returned "dead" this round — a black-canvas-behind-a-live-page death
     // for funnel joins. Reported only when true (absent-when-false, § below).
@@ -482,6 +485,8 @@ export function foldPanoEvent(state, ev) {
     case "navigable": next.nav_available = ev.value === true; break;
     // Issue #2 Phase 2: one per setFilter() recovery attempt this round.
     case "edge_recovery_attempt": next.edge_recoveries += 1; break;
+    // Issue #2 Phase 5: one per targeted Sequence-mode lifecycle reset.
+    case "sequence_reset": next.sequence_resets += 1; break;
     // §18: a render-death probe condemned this round's canvas (context lost or
     // the GPU layer is down). Latch once — one death per round is the signal.
     case "render_dead": next.render_dead = true; break;
@@ -539,6 +544,9 @@ export function panoSessionProps(state) {
   // Issue #2 Phase 2: only reported when recovery actually ran this round —
   // absent (not 0) on the healthy majority, same convention as first_move_ms.
   if (state.edge_recoveries > 0) props.edge_recoveries = state.edge_recoveries;
+  // Issue #2 Phase 5: absent on the healthy majority — present only when a
+  // scrubber-cancel reset actually ran this round.
+  if (state.sequence_resets > 0) props.sequence_resets = state.sequence_resets;
   // §18: absent unless a probe actually condemned the round's canvas.
   if (state.render_dead === true) props.render_dead = true;
   return props;
@@ -939,4 +947,78 @@ export function classifyRenderOutcome(ctx) {
   if (c.rebuilt === false || c.resumeOk === false) return "rebuild_failed";
   if (c.followupVerdict === "dead") return "still_dead";
   return "recovered";
+}
+
+/* ================================================================
+ * §19 Sequence-mode stick prevention — targeted touchcancel reset
+ * ================================================================
+ * docs/issue-2-phase5-touchcancel-reset.md (Galaxy S22 Ultra field report:
+ * arrows dead + slow rounds). The verified MapillaryJS 4.1.2 mechanism: the
+ * scrubber's position input calls `_setChangingPosition(true)` on
+ * touchstart → `setGraphMode(Sequence)`; the ONLY restore path merges
+ * `documentMouseUp$` and a `touchEnd$` filtered on `touches.length === 0` —
+ * it never merges `touchCancel$`. So an Android gesture takeover (notification
+ * shade, second-finger interrupt) that ends the gesture with a `touchcancel`
+ * latches `_changingPosition` true for the life of the viewer: arrows die and
+ * every image change runs the full-sequence prefetch. This section is the
+ * PURE decision core (the DOM probe + the single-shot decision); the listener,
+ * the exact deactivate → activate → play → stop lifecycle reset, and the
+ * self-healing fallback all live behind the `iv` façade in js/viewer-ui.js.
+ */
+
+// The scrubber position input and its two container wrappers (the second is
+// the `-inactive` variant the SDK swaps to while the sequence is playing) —
+// bundle-verified against mapillary-js@4.1.2 SequenceDOMRenderer
+// ._createPositionInput. A touchcancel whose target chain reaches any of these
+// means a scrubber drag was in progress, which is the ONLY entry that latches
+// the stick. Three class names, deliberately explicit — never collapse to one
+// (the -inactive variant is exactly the "playing" case that most needs healing;
+// a mutation-guard test enforces all three stay listed).
+export const SEQUENCE_POSITION_SELECTOR =
+  ".mapillary-sequence-position," +
+  ".mapillary-sequence-position-container," +
+  ".mapillary-sequence-position-container-inactive";
+
+// Defensive DOM probe (the navigationArrowsVisible pattern): a null/undefined/
+// malformed target, or a missing/throwing `closest`, reads as `false` so the
+// touchcancel handler can never crash. Takes the passed-in element — no ambient
+// DOM — so it's unit-testable with a stub.
+export function touchTargetIsPositionSlider(target) {
+  if (!target || typeof target.closest !== "function") return false;
+  try {
+    return Boolean(target.closest(SEQUENCE_POSITION_SELECTOR));
+  } catch {
+    return false;
+  }
+}
+
+// The single-shot decision. Pure, total, never throws, first match wins (the
+// decideEdgeRecovery style).
+//   ctx: {
+//     onPositionSlider: bool,   // touchTargetIsPositionSlider(ev.target)
+//     resetting:        bool,   // a reset is already running (re-entrancy)
+//     viewerOk:         bool,   // iv.ok === true (not a stub)
+//     canReset:         bool,   // (de)activateComponent fns AND a sequence
+//                               // component with play/stop are present
+//     moveEnabled:      bool,   // iv.moveEnabled — Frozen/TV ⇒ false
+//     sequenceActive:   bool,   // seq.activated === true
+//     remainingTouches: int,    // ev.touches.length at the cancel
+//   }
+// → { act: "reset" } | { act: "ignore", reason: string }
+//
+// Evaluation order below is exact — first match wins (docs §2.1 table).
+export function decideSequenceReset(ctx) {
+  const c = ctx || {};
+  if (!c.onPositionSlider) return { act: "ignore", reason: "not_slider" };
+  if (c.resetting) return { act: "ignore", reason: "in_progress" };
+  if (!c.viewerOk || !c.canReset) return { act: "ignore", reason: "viewer_stub" };
+  // Never re-activate the sequence component on a Frozen/TV round — movement is
+  // off there and the reset must never turn it back on.
+  if (!c.moveEnabled) return { act: "ignore", reason: "frozen" };
+  if (!c.sequenceActive) return { act: "ignore", reason: "sequence_inactive" };
+  // A surviving touch still reaches the SDK's own touchend restore
+  // (touches.length === 0) — it heals itself, and a mid-gesture reset would
+  // yank a live drag. Only a cancel that ends the gesture entirely needs us.
+  if (c.remainingTouches > 0) return { act: "ignore", reason: "touches_remain" };
+  return { act: "reset" };
 }

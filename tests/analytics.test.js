@@ -1040,6 +1040,37 @@ test("sanitizeEvent: edge_recovery drops unknown/malformed props, keeps a real 0
   assert.ok(!("spatial_after" in junk.props));
 });
 
+/* ---- Issue #2 Phase 5 sequence reset (docs/issue-2-phase5-touchcancel-reset.md) ---- */
+
+test("sanitizeEvent: sequence_reset round-trips its full aggregate shape", () => {
+  const out = sanitizeEvent("sequence_reset", {
+    surface: "daily", round_number: 2, result: "error", failed_step: "activate",
+    duration_ms: 1, net_type: "4g", online: true,
+    // identity/coordinate/id junk must never survive.
+    team_name: "The Wanderers", image_id: "1263588815098567", lat: 48.85,
+    touches: 2,
+  });
+  assert.deepEqual(out.props, {
+    surface: "daily", round_number: 2, result: "error", failed_step: "activate",
+    duration_ms: 1, net_type: "4g", online: true,
+  });
+});
+
+test("sequenceReset: pano_session.sequence_resets round-trips (absent when 0)", () => {
+  const withReset = sanitizeEvent("pano_session", {
+    surface: "daily", round_number: 2, sequence_resets: 1,
+  });
+  assert.equal(withReset.props.sequence_resets, 1);
+  // A healthy round never emits the key — it folds to 0 and panoSessionProps
+  // drops it; even if a 0 reached the sanitizer it is a real int and kept, so
+  // the absent-not-zero convention is enforced at the fold, not here. A real 0
+  // still survives the schema (a defensive round-trip).
+  const zero = sanitizeEvent("pano_session", {
+    surface: "daily", round_number: 2, sequence_resets: 0,
+  });
+  assert.equal(zero.props.sequence_resets, 0);
+});
+
 /* ---- §18 render-death probe (docs/ios-blackout-review.md) ---- */
 
 test("sanitizeEvent: pano_session.render_dead / .partial are strict bools, absent-when-false", () => {

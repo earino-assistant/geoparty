@@ -43,6 +43,8 @@ import {
   EDGE_RECOVERY_RECHECK_MS,
   EDGE_RECOVERY_BACKOFF_MS,
   navigationArrowsVisible,
+  touchTargetIsPositionSlider,
+  decideSequenceReset,
   decideNavHint,
   navHintBaselineCleared,
   NAV_HINT_MAX_MS,
@@ -591,6 +593,111 @@ function instrument({ surface, container, component, viewer: rawViewer, onRecove
   };
   if (el && el.addEventListener) {
     el.addEventListener("pointerdown", onPointerDown, true);
+  }
+
+  /* Issue #2 Phase 5 (docs/issue-2-phase5-touchcancel-reset.md): prevent the
+   * MapillaryJS 4.1.2 Sequence-mode stick at its entry point. A scrubber drag
+   * interrupted by a `touchcancel` (Android gesture takeover, notification
+   * shade) never reaches the SDK's own restore subscription (it merges only
+   * touchend/mouseup, never touchcancel), so `_changingPosition` latches true
+   * for the life of the viewer — arrows die and every image change runs the
+   * full-sequence prefetch. Capture phase on the CONTAINER (`el`): the slider
+   * input's stopPropagation is bubble-phase and cannot hide it, and the
+   * container survives the §18 rebuild (only the SDK's children are replaced),
+   * so no rebind hook is needed — the handler re-fetches the component per
+   * event. `sequenceResetting` guards a second cancel synthesized by the
+   * component's own DOM teardown during the reset. Fully synchronous (all four
+   * SDK calls are sync). Independent of edge recovery / nav hint / render
+   * probe / the cover — no shared state; no inFlight guard on purpose (this is
+   * a one-shot handler, and Phase 4's escalation is the entry-agnostic net). */
+  let sequenceResetting = false;
+
+  function sequenceComponent() {
+    try {
+      return typeof viewer.getComponent === "function"
+        ? viewer.getComponent("sequence") : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function onTouchCancel(ev) {
+    const seq = sequenceComponent();
+    const canReset =
+      typeof viewer.activateComponent === "function" &&
+      typeof viewer.deactivateComponent === "function" &&
+      Boolean(seq) && typeof seq.play === "function" &&
+      typeof seq.stop === "function";
+    const remainingTouches = ev && ev.touches && Number.isFinite(ev.touches.length)
+      ? ev.touches.length : 0;
+    const decision = decideSequenceReset({
+      onPositionSlider: touchTargetIsPositionSlider(ev && ev.target),
+      resetting: sequenceResetting,
+      viewerOk: iv.ok === true,
+      canReset,
+      moveEnabled: iv.moveEnabled === true,
+      sequenceActive: Boolean(seq) && seq.activated === true,
+      remainingTouches,
+    });
+    if (decision.act !== "reset") return;
+    runSequenceReset();
+  }
+
+  // Fully synchronous, exact order: deactivate → activate → play → stop. Each
+  // step in its OWN try/catch, recording the FIRST failed step; a throw never
+  // aborts the remaining steps (Phase 4's "stop always runs" rule, extended to
+  // all four). If deactivate/activate failed, applyMove() is the established
+  // self-healing fallback so a transient activation failure can never strand
+  // the sequence component (and its arrows) for the round.
+  function runSequenceReset() {
+    sequenceResetting = true;
+    const t0 = now();
+    let failedStep = null;
+    let lifecycleFailed = false;
+    try {
+      const seq = sequenceComponent();
+      try {
+        viewer.deactivateComponent("sequence");
+      } catch {
+        lifecycleFailed = true;
+        if (failedStep === null) failedStep = "deactivate";
+      }
+      try {
+        viewer.activateComponent("sequence");
+      } catch {
+        lifecycleFailed = true;
+        if (failedStep === null) failedStep = "activate";
+      }
+      try {
+        if (seq && typeof seq.play === "function") seq.play();
+      } catch {
+        if (failedStep === null) failedStep = "play";
+      }
+      try {
+        if (seq && typeof seq.stop === "function") seq.stop();
+      } catch {
+        if (failedStep === null) failedStep = "stop";
+      }
+      // A failed deactivate/activate could leave the sequence component (and
+      // with it prev/next arrows) torn down — applyMove's retry timer is the
+      // established path that re-drives the movement lever.
+      if (lifecycleFailed) applyMove();
+      const props = {
+        surface,
+        round_number: pano && Number.isFinite(pano.round_number) ? pano.round_number : 0,
+        result: failedStep === null ? "ok" : "error",
+        duration_ms: Math.round(now() - t0),
+        net_type: netType(), online: isOnline(),
+      };
+      if (failedStep !== null) props.failed_step = failedStep;
+      track("sequence_reset", props);
+      if (pano) pano = foldPanoEvent(pano, { type: "sequence_reset", at: now() });
+    } finally {
+      sequenceResetting = false;
+    }
+  }
+  if (el && el.addEventListener) {
+    el.addEventListener("touchcancel", onTouchCancel, true);
   }
 
   // §18: re-probe when the page returns to the foreground while a round is
@@ -1446,6 +1553,7 @@ function instrument({ surface, container, component, viewer: rawViewer, onRecove
       detachCanvas();
       if (el && el.removeEventListener) {
         el.removeEventListener("pointerdown", onPointerDown, true);
+        el.removeEventListener("touchcancel", onTouchCancel, true);
       }
       if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
         document.removeEventListener("visibilitychange", onVisibility);
