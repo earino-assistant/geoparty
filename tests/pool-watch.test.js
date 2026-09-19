@@ -9,11 +9,14 @@
 //     so no network call ever happens.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   selectCandidates,
   isTrafficOutage,
   buildReverseTable,
   classifyProbeAttempts,
+  queryHogql,
+  main,
   verifyDead,
   scrub,
 } from "../tools/pool_watch.mjs";
@@ -172,6 +175,86 @@ test("verifyDead: a non-transient 5xx is inconclusive, never dead", async () => 
     { status: 500, body: { error: { is_transient: false } } },
   ]);
   assert.equal(await verifyDead("x", "tok", { fetcher, delayMs: 0 }), "inconclusive");
+});
+
+/* ---------------- PostHog query retry ---------------- */
+
+const response = (status, results = []) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  json: async () => ({ results }),
+});
+
+test("queryHogql: retries a transient 504 and returns later rows", async () => {
+  const calls = [];
+  const fetcher = async (_url, init) => {
+    calls.push(init.signal);
+    return calls.length === 1 ? response(504) : response(200, [["pool", 3, 0, 2]]);
+  };
+  const rows = await queryHogql("SELECT 1", "key", { fetcher, delayMs: 0 });
+  assert.deepEqual(rows, [["pool", 3, 0, 2]]);
+  assert.equal(calls.length, 2);
+  assert.notEqual(calls[0], calls[1], "each attempt gets its own abort signal");
+});
+
+test("queryHogql: a timed-out attempt is aborted, then retried", async () => {
+  const signals = [];
+  const fetcher = (_url, { signal }) => {
+    signals.push(signal);
+    if (signals.length > 1) return Promise.resolve(response(200, [["ok"]]));
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        const error = new Error("timed out");
+        error.name = "AbortError";
+        reject(error);
+      }, { once: true });
+    });
+  };
+  assert.deepEqual(await queryHogql("SELECT 1", "key", {
+    fetcher, delayMs: 0, timeoutMs: 5,
+  }), [["ok"]]);
+  assert.equal(signals.length, 2);
+  assert.equal(signals[0].aborted, true, "the per-attempt timer aborts the slow request");
+  assert.equal(signals[1].aborted, false, "the next attempt has a fresh timeout budget");
+});
+
+test("queryHogql: a non-transient 4xx fails fast", async () => {
+  let calls = 0;
+  await assert.rejects(
+    queryHogql("bad query", "key", {
+      fetcher: async () => { calls++; return response(400); },
+      delayMs: 0,
+    }),
+    /PostHog query HTTP 400/,
+  );
+  assert.equal(calls, 1);
+});
+
+test("main: persistent transient PostHog failure skips with exit 0", async () => {
+  let calls = 0;
+  const lines = [];
+  const quarantineBefore = readFileSync(
+    new URL("../data/pool_quarantine.json", import.meta.url), "utf8");
+  const originalLog = console.log;
+  console.log = (line) => lines.push(String(line));
+  try {
+    const code = await main([], {
+      posthogKey: () => "test-key",
+      queryOptions: {
+        fetcher: async () => { calls++; return response(504); },
+        delayMs: 0,
+      },
+    });
+    assert.equal(code, 0);
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(calls, 3);
+  assert.equal(readFileSync(
+    new URL("../data/pool_quarantine.json", import.meta.url), "utf8"), quarantineBefore,
+  "a skipped run writes no quarantine data");
+  assert.match(lines.join("\n"),
+    /could not check this run \(PostHog unavailable after 3 attempts.*skipping, nothing quarantined/);
 });
 
 /* ---------------- secret scrub ---------------- */

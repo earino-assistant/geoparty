@@ -87,6 +87,8 @@ const OUTAGE_MIN_FAILS = 6; // …and only when there is real volume behind it
 const VERIFY_ATTEMPTS = 2;
 const VERIFY_DELAY_MS = 3000;
 const QUERY_TIMEOUT_MS = 60000;
+const QUERY_ATTEMPTS = 3;
+const QUERY_RETRY_MS = 2000;
 
 // The two labels from classifyGraphResponse that count as death evidence. A
 // "transient_5xx" is the incident shape (is_transient:true) and needs the
@@ -223,23 +225,46 @@ export function classifyProbeAttempts(labels, attempts = VERIFY_ATTEMPTS) {
 
 /* ---------------- network parts ---------------- */
 
-async function queryHogql(sql, key) {
+export async function queryHogql(sql, key, opts = {}) {
   const url = `${POSTHOG_HOST}/api/projects/${POSTHOG_PROJECT}/query/`;
   const body = JSON.stringify({ query: { kind: "HogQLQuery", query: sql } });
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), QUERY_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body,
-      signal: ac.signal,
-    });
-    if (!res.ok) throw new Error(`PostHog query HTTP ${res.status}`);
-    const data = await res.json();
-    return data.results || [];
-  } finally {
-    clearTimeout(timer);
+  const fetcher = opts.fetcher || fetch;
+  const attempts = opts.attempts ?? QUERY_ATTEMPTS;
+  const delayMs = opts.delayMs ?? QUERY_RETRY_MS;
+  const timeoutMs = opts.timeoutMs ?? QUERY_TIMEOUT_MS;
+  for (let i = 0; i < attempts; i++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    let transient = false;
+    let lastError;
+    try {
+      const res = await fetcher(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        body,
+        signal: ac.signal,
+      });
+      if (!res.ok) {
+        transient = res.status >= 500 && res.status < 600;
+        throw new Error(`PostHog query HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      return data.results || [];
+    } catch (e) {
+      transient ||= e && e.name === "AbortError";
+      lastError = e;
+      if (!transient) throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (i < attempts - 1) {
+      await sleep(delayMs * (i + 1));
+    } else {
+      const error = new Error(`PostHog unavailable after ${attempts} attempts ` +
+        `(last error: ${lastError.message})`);
+      error.posthogUnavailable = true;
+      throw error;
+    }
   }
 }
 
@@ -281,7 +306,7 @@ function windowQuery() {
 
 /* ---------------- main ---------------- */
 
-async function main(argv) {
+export async function main(argv, opts = {}) {
   const dryRun = argv.includes("--dry-run");
   const suspectsIdx = argv.indexOf("--suspects");
   const suspectsFile = suspectsIdx >= 0 ? argv[suspectsIdx + 1] : null;
@@ -320,7 +345,7 @@ async function main(argv) {
   } else {
     let key;
     try {
-      key = posthogKey();
+      key = opts.posthogKey ? opts.posthogKey() : posthogKey();
     } catch (e) {
       report.push(`pool_watch: ${e.message}`);
       flush();
@@ -330,8 +355,14 @@ async function main(argv) {
 
     let rows;
     try {
-      rows = await queryHogql(windowQuery(), key);
+      rows = await queryHogql(windowQuery(), key, opts.queryOptions);
     } catch (e) {
+      if (e.posthogUnavailable) {
+        report.push(`pool_watch: could not check this run (${e.message}) — ` +
+          "skipping, nothing quarantined");
+        flush();
+        return 0;
+      }
       report.push(`pool_watch: PostHog query FAILED: ${e.message}`);
       flush();
       return 1;
